@@ -157,7 +157,7 @@ a{color:var(--blue)}
   <div class="ctl in-only">
     <h3>Replay (Intel log)</h3>
     <div class="row"><button id="bResetIn">Restart replay</button></div>
-    <div class="hint">The full <b>bounded-memory stack</b> (<code>ssp_bounded.py</code>, shipped config): rigid anchor-frame segment vectors + d/d&theta; derivatives (query rotation = exact permutation + first-order correction), recency-windowed frontend (12 anchors / 8 m), pass-segregated loop constraints (gap 300 kf, radius 5 m), session-relative soft coherence response (target 0.55), drift-scaled innovation gate (&chi;&sup2;&gt;9), Cauchy IRLS + leave-one-out pruning, damped Gauss-Newton with analytic SE(2) Jacobian capped at ~30 evaluations — the early stop IS the regularizer (RESULTS.md, shipped block). Relaxations are amortized across frames ("relaxing graph…").</div>
+    <div class="hint"><b>NO ODOMETRY</b>: the matcher guess is constant-velocity prediction from previous <i>estimates</i> only (odometry integration comes later); gate-rejected frames coast on that prediction with inflated seq-edge sigma. Otherwise the full <b>bounded-memory stack</b> (<code>ssp_bounded.py</code>, shipped config at the dense 0.05 m/2.5&deg; stride): rigid anchor-frame segment vectors + d/d&theta; derivatives (query rotation = exact permutation + first-order correction), recency-windowed frontend (24 anchors / 8 m; rotation window widened 9&rarr;12&deg; for the odometry-free guess), pass-segregated loop constraints (gap 600 kf, radius 5 m), session-relative soft coherence response (target 0.55), drift-scaled innovation gate (&chi;&sup2;&gt;9), Cauchy IRLS + leave-one-out pruning, damped Gauss-Newton with analytic SE(2) Jacobian capped at ~30 evaluations — the early stop IS the regularizer. Relaxations are amortized across frames ("relaxing graph…").</div>
   </div>
   <div class="ctl">
     <h3>Range gating</h3>
@@ -220,7 +220,7 @@ a{color:var(--blue)}
       <li><b>The map is a handful of complex vectors</b> (D=96 features by default), not an occupancy grid. Each lidar sample point p contributes a phasor bundle &phi;(p)=exp(i&thinsp;W&thinsp;p); a map vector is the weighted sum of many of them. W is a deterministic <b>polar lattice</b>: wavelength rings (0.25/0.5/1/2 m octaves) &times; 24 equally spaced angles — the winning recipe of the encoder sweep in <code>RESULTS.md</code> (0.9 cm mean error at 1/21 the dimensions of random Fourier features).</li>
       <li><b>Translation is phase multiplication</b>: &phi;(p+d) = e<sup>iWd</sup>&middot;&phi;(p). Scan-to-map registration is the correlation Re&lt;M, e<sup>iWd</sup>S<sub>&theta;</sub>&gt; on a coarse-to-fine grid of (&theta;, d) around a motion-prior guess — the small heatmap is that surface, live, with parabolic sub-cell refinement.</li>
       <li><b>Rotation is an exact permutation</b> of the lattice's angle index (conjugate on the 180&deg; sector wrap), so coarse &theta; candidates cost two encodes total instead of one per angle — the trick shipped as the "perm matcher" in <code>ssp_bounded.py</code>.</li>
-      <li><b>Intel replay</b>: the classic Intel Research Lab log (13,631 SICK scans, 180 beams / 180&deg;) keyframed at 0.10 m / 5&deg;, run through the full <b>bounded-memory SLAM stack</b> (<code>ssp_bounded.py</code>): each keyframe folds immediately into a rigid anchor-frame <b>segment vector + d/d&theta; derivative vector</b> (5-kf segments; query-time anchor rotation = nearest-3&deg; lattice permutation + first-order derivative correction — HY4 matched-band semantics, D=240); the frontend matches recent segments only; old passes act through gated loop constraints; an anchor pose graph (sequential edges 0.03 m/0.3&deg;, 0.10/1.5 on odometry-fallback spans) is relaxed by damped Gauss-Newton with an analytic SE(2) Jacobian, Cauchy IRLS and leave-one-out pruning, capped at ~30 evaluations per solve — the truncation is the audited load-bearing regularizer. Gray = raw odometry dead reckoning, yellow = graph-corrected SSP estimate, green = RBPF-corrected reference, magenta = accepted closures. The "ate rmse" tile is Horn-aligned against the reference, matching the Python eval (<code>align_se2</code>); instantaneous "est err"/"odom err" are start-frame anchored.</li>
+      <li><b>Intel replay</b>: the classic Intel Research Lab log (13,631 SICK scans, 180 beams / 180&deg;) keyframed densely at 0.05 m / 2.5&deg; and run <b>without odometry</b> — the matcher guess is constant-velocity prediction from previous estimates, so the yellow trajectory is lidar-only — through the full <b>bounded-memory SLAM stack</b> (<code>ssp_bounded.py</code>): each keyframe folds immediately into a rigid anchor-frame <b>segment vector + d/d&theta; derivative vector</b> (5-kf segments; query-time anchor rotation = nearest-3&deg; lattice permutation + first-order derivative correction — HY4 matched-band semantics, D=240); the frontend matches recent segments only; old passes act through gated loop constraints; an anchor pose graph (sequential edges 0.03 m/0.3&deg;, 0.10/1.5 on coasted spans) is relaxed by damped Gauss-Newton with an analytic SE(2) Jacobian, Cauchy IRLS and leave-one-out pruning, capped at ~30 evaluations per solve — the truncation is the audited load-bearing regularizer. Gray = raw odometry (drift comparison only, never used), yellow = graph-corrected SSP estimate, green = RBPF-corrected reference, magenta = accepted closures. The "ate rmse" tile is Horn-aligned against the reference, matching the Python eval (<code>align_se2</code>); the green overlay and the instantaneous "est err"/"odom err" tiles use the same alignment (the export's first-pose anchoring carries a ~7&deg; heading error that would rotate the overlay misleadingly).</li>
       <li><b>Range gating</b>: at range r the beam spacing &Delta;&theta; under-samples wavelengths finer than &asymp;r&middot;&Delta;&theta;, so far samples only write the coarse rings (&lambda; &ge; &beta;r&Delta;&theta;) of the map. The disc panel shows each frame's write pattern — fine (outer) rings blank out for far geometry. Matching stays ungated (R2: gating the matched band costs accuracy).</li>
       <li><b>Occlusion filter</b>: consecutive-beam hits are bridged into wall segments unless the range jump exceeds 2&times; the tangential gap — near-radial "bridges" (red) are phantom walls across depth edges, not surfaces.</li>
       <li><b>Decode panel</b>: a map vector is decoded by correlating M with &phi;(x) on a grid — the map "emerging" is literally interference of the stored phasors.</li>
@@ -933,7 +933,14 @@ function hornAlign(ax, ay, bx, by, n){
     ox[i] = c*axi - s*ayi + cbx;
     oy[i] = s*axi + c*ayi + cby;
   }
-  return { x: ox, y: oy };
+  // transform params: aligned = R(th) (a - ca) + cb; inverse maps b -> a-frame
+  return { x: ox, y: oy, th, cax, cay, cbx, cby };
+}
+/* map a point from the b-frame into the a-frame of a hornAlign result */
+function hornInv(T, px, py){
+  const c = Math.cos(T.th), s = Math.sin(T.th);
+  const dx = px - T.cbx, dy = py - T.cby;
+  return [ c*dx + s*dy + T.cax, -s*dx + c*dy + T.cay ];
 }
 
 function makeBounded(L, opts){
@@ -1602,6 +1609,8 @@ if (typeof document === "undefined") return;   // headless harness stops here
 
 const $ = (id) => document.getElementById(id);
 const dpr = Math.min(window.devicePixelRatio || 1, 2);
+const jsErrors = [];
+window.addEventListener("error", ev => jsErrors.push(String(ev.message)));
 
 /* ------------------------------------------------------------- parameters */
 const SIM = { nBeams: 144, maxRange: 12, sigma: 0.02, dropout: 0.02,
@@ -1670,12 +1679,17 @@ function buildIntelLattice(){
 
 function resetIntel(){
   if (!IN.ready) return;
-  // fresh BoundedSLAM (ssp_bounded_carmen config: attempt 4, relax 25,
-  // gap 300 kf, recency 12 anchors)
-  IN.slam = makeBounded(LIN, {});
+  // fresh BoundedSLAM. NO ODOMETRY in the pipeline: constant-velocity guess
+  // from previous estimates only. Bands are the shipped ssp_bounded_carmen
+  // values scaled to the dense 0.05 m / 2.5 deg keyframe stride (spatially
+  // identical: gap 600 kf, recency 24 anchors, attempt 8, relax 50); the
+  // frontend rotation window is widened 9 -> 12 deg because without an
+  // odometry prior the guess must absorb per-keyframe rotation spikes.
+  IN.slam = makeBounded(LIN, { gapKf: 600, recentAids: 24, attemptEvery: 8,
+                               relaxEvery: 50, rotHalfDeg: 12, gateRotDeg: 13 });
   IN.k = 0; IN.playing = true; IN.seekTarget = null; IN.relaxIter = null;
   IN.lastErrE = NaN; IN.lastErrO = NaN; IN.lastSmp = null; IN.msE = 0;
-  IN.rmse = NaN;
+  IN.rmse = NaN; IN.horn = null;
   IN.poseVersion = -1; IN.poseUpto = 0;
   IN.cloudN.fill(0);
   IN.cctx.clearRect(0, 0, IN.cloud.width, IN.cloud.height);
@@ -1686,6 +1700,20 @@ function resetIntel(){
   $("pScrub").max = IN.N - 1;
   $("pScrub").value = 0;
   $("pPlay").textContent = "Pause";
+}
+
+/* NO ODOMETRY: constant-velocity prediction from previous ESTIMATES only
+   (ssp_slam.py style); k=0 anchors the world frame at the log's start pose.
+   Shared by the live UI path and the ?verify core-parity path. */
+function noOdomGuess(e, k){
+  const o = IN.odom;
+  if (k === 0) return [o[0], o[1], o[2]];
+  if (k === 1) return [e[0], e[1], e[2]];
+  let vx = e[3*k-3] - e[3*k-6], vy = e[3*k-2] - e[3*k-5];
+  const vn = Math.hypot(vx, vy);
+  if (vn > 0.13){ vx *= 0.13/vn; vy *= 0.13/vn; }   // clamp to keyframe stride
+  return [ e[3*k-3] + vx, e[3*k-2] + vy,
+           e[3*k-1] + wrapAng(e[3*k-1] - e[3*k-4]) ];
 }
 
 /* one keyframe through the full bounded pipeline (frontend + backend) */
@@ -1699,13 +1727,7 @@ function intelProcessKF(){
   const smp = scanToSamples(IN.rr, nB, cfg.occ, IN.beamAng);
   IN.lastSmp = smp;
   const o = IN.odom, e = IN.est;
-  let guess;
-  if (k === 0) guess = [o[0], o[1], o[2]];
-  else {
-    const d = se2Mul(se2Inv([o[3*k-3], o[3*k-2], o[3*k-1]]),
-                     [o[3*k], o[3*k+1], o[3*k+2]]);
-    guess = se2Mul([e[3*k-3], e[3*k-2], e[3*k-1]], d);
-  }
+  const guess = noOdomGuess(e, k);
   const t0 = performance.now();
   const est = IN.slam.addKeyframe(smp, guess);
   IN.msE = IN.msE * 0.9 + (performance.now() - t0) * 0.1;
@@ -1724,8 +1746,9 @@ function intelProcessKF(){
   IN.cloudN[k] = nc;
   drawCloudKf(k);          // incremental; full redraw after each relax
   if (IN.refOk[k]){
-    IN.lastErrE = Math.hypot(est[0]-IN.ref[2*k], est[1]-IN.ref[2*k+1]);
-    IN.lastErrO = Math.hypot(o[3*k]-IN.ref[2*k], o[3*k+1]-IN.ref[2*k+1]);
+    const [qx, qy] = refInEstFrame(k);   // Horn-consistent instantaneous errors
+    IN.lastErrE = Math.hypot(est[0]-qx, est[1]-qy);
+    IN.lastErrO = Math.hypot(o[3*k]-qx, o[3*k+1]-qy);
   }
   IN.k++;
   if (IN.slam.needRelax) IN.relaxIter = IN.slam.relaxGen();
@@ -1780,10 +1803,18 @@ function intelRmse(){
   if (ax.length < 8) return NaN;
   const al = hornAlign(Float64Array.from(ax), Float64Array.from(ay),
                        Float64Array.from(bx), Float64Array.from(by), ax.length);
+  // keep the transform: the reference overlay + err tiles draw the reference
+  // Horn-aligned into the ESTIMATE frame (the export's first-pose anchoring
+  // carries a ~7 deg heading error that would rotate the overlay misleadingly)
+  if (ax.length >= 50) IN.horn = al;
   let se = 0;
   for (let i = 0; i < ax.length; i++)
     se += (al.x[i]-bx[i])**2 + (al.y[i]-by[i])**2;
   return Math.sqrt(se / ax.length);
+}
+function refInEstFrame(k){
+  const px = IN.ref[2*k], py = IN.ref[2*k+1];
+  return IN.horn ? hornInv(IN.horn, px, py) : [px, py];
 }
 
 /* map cloud: anchor-frame points x live anchor poses */
@@ -2206,7 +2237,8 @@ function drawWorldIN(){
     wctx.stroke(); wctx.globalAlpha = 1;
   };
   poly(j => IN.odom[3*j], j => IN.odom[3*j+1], null, "#898781", 1.2, 0.8);
-  poly(j => IN.ref[2*j], j => IN.ref[2*j+1], j => IN.refOk[j], "#199e70", 1.2, 0.55);
+  poly(j => refInEstFrame(j)[0], j => refInEstFrame(j)[1],
+       j => IN.refOk[j], "#199e70", 1.2, 0.55);
   poly(j => IN.poses[3*j], j => IN.poses[3*j+1], null, "#c98500", 1.6, 1);
   // accepted loop-closure edges between live anchor poses (violet)
   {
@@ -2351,9 +2383,9 @@ const CAP_IN = `<b>Intel Research Lab</b> — map cloud from registered keyframe
    <span class="sw" style="background:#1c5cab"></span>coarse only);
   <span class="sw" style="background:#e66767"></span>rejected phantom bridges;
   <span class="sw" style="background:#e87ba4"></span>accepted loop closures;
-  <span class="sw" style="background:#898781"></span>raw odometry dead reckoning vs
-  <span class="sw" style="background:#c98500"></span>SSP estimate (graph-corrected) vs
-  <span class="sw" style="background:#199e70"></span>RBPF-corrected reference.
+  <span class="sw" style="background:#898781"></span>raw odometry — shown for drift comparison only, NOT used by the pipeline — vs
+  <span class="sw" style="background:#c98500"></span>SSP estimate (lidar-only, graph-corrected) vs
+  <span class="sw" style="background:#199e70"></span>RBPF-corrected reference (Horn-aligned into the estimate frame).
   Watch the map cloud SNAP when a closure relaxes the graph.`;
 const CAP_SB = `<b>Sandbox world</b> — rays colored by how many lattice rings the hit writes under
   range gating (<span class="sw" style="background:#cde2fb"></span>4 = all rings
@@ -2490,6 +2522,146 @@ if (!IN.ready){
   setMode("intel");
 }
 if (/[?&]test=1/.test(location.search)) browserTests();
+
+/* ---------------------------------------------------- headless soak/verify
+   ?soak=N        drive the replay through the IDENTICAL UI code path
+                  (intelAdvance) to keyframe N, then report Horn-aligned ATE
+                  (must match the jsc core soak).
+   ?soak=N&verify=1  additionally sample canvas pixels programmatically and
+                  dump a JSON verdict into #verifyOut + document.title.     */
+const soakM = location.search.match(/[?&]soak=(\d+)/);
+if (soakM && IN.ready){
+  IN.playing = false;
+  const target = Math.min(+soakM[1] || IN.N, IN.N);
+  const t0s = performance.now();
+  const drive = () => {
+    intelAdvance(50, 400);
+    if ((IN.k < target || IN.relaxIter) && IN.k <= IN.N){ setTimeout(drive, 0); return; }
+    refreshPoses();
+    IN.rmse = intelRmse();
+    const nLoop = IN.slam.edges.reduce((n, e) => n + (e.kind === "loop" ? 1 : 0), 0);
+    const res = {
+      kf: IN.k, ate: isFinite(IN.rmse) ? +IN.rmse.toFixed(3) : null,
+      closures: nLoop, pruned: IN.slam.nPruned,
+      fallbackPct: +(100*IN.slam.nFallback/Math.max(IN.k,1)).toFixed(1),
+      wallS: +((performance.now()-t0s)/1000).toFixed(1),
+    };
+    const finish = (r) => {
+      const msg = "SOAK " + JSON.stringify(r);
+      console.log(msg);
+      document.title = msg.slice(0, 900);
+      const d = document.createElement("pre");
+      d.id = "verifyOut"; d.className = "panel";
+      d.style.cssText = "grid-area:tst;display:block;white-space:pre-wrap;font-size:11px";
+      d.textContent = JSON.stringify(r, null, 1);
+      document.querySelector(".app").prepend(d);
+    };
+    if (!/[?&]verify=1/.test(location.search)){ finish(res); return; }
+    // let two frames render, then sample pixels
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const px = wctx.getImageData(0, 0, worldCv.width, worldCv.height);
+      const d8 = px.data, W = worldCv.width, H = worldCv.height;
+      const near = (i, c, tol) => Math.abs(d8[i]-c[0]) + Math.abs(d8[i+1]-c[1])
+                                + Math.abs(d8[i+2]-c[2]) < tol;
+      // color targets (est/closures alpha 1; ref alpha .55 over #0d0d0d)
+      const EST = [201, 133, 0], CLO = [232, 123, 164], REF = [20, 93, 66];
+      let nonBg = 0, estPix = 0, cloPix = 0, refPix = 0;
+      for (let i = 0; i < d8.length; i += 4){
+        if (d8[i] + d8[i+1] + d8[i+2] > 60) nonBg++;
+        if (near(i, EST, 100)) estPix++;
+        if (near(i, CLO, 100)) cloPix++;
+        if (near(i, REF, 70)) refPix++;
+      }
+      // geometric truth: est path must pass near the (Horn-aligned) reference
+      // polyline — a RENDERING check (transform/DPR/z-order), the accuracy
+      // gate is the ATE number itself, so tolerance = 2.5 m
+      const bw = IN.bbox[2]-IN.bbox[0], bh = IN.bbox[3]-IN.bbox[1];
+      const s = Math.min(W/bw, H/bh);
+      const ox = (W - bw*s)/2, oy = (H - bh*s)/2;
+      let refN = 0, refHit = 0;
+      for (let k = 0; k < IN.k; k += 7){
+        if (!IN.refOk[k]) continue;
+        refN++;
+        const [qx, qy] = refInEstFrame(k);
+        const cx = Math.round(ox + (qx-IN.bbox[0])*s);
+        const cy = Math.round(H - oy - (qy-IN.bbox[1])*s);
+        let hit = false;
+        const R = Math.max(6, Math.round(2.5*s));
+        for (let dy = -R; dy <= R && !hit; dy += 2)
+          for (let dx = -R; dx <= R && !hit; dx += 2){
+            const xx = cx+dx, yy = cy+dy;
+            if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+            if (near(4*(yy*W+xx), EST, 110)) hit = true;
+          }
+        if (hit) refHit++;
+      }
+      // UI-path vs core-path parity (SAME engine): rerun the whole pipeline
+      // with zero UI involvement and compare the Horn ATE exactly
+      let coreAte = null;
+      {
+        const slam2 = makeBounded(LIN, { gapKf: 600, recentAids: 24,
+          attemptEvery: 8, relaxEvery: 50, rotHalfDeg: 12, gateRotDeg: 13 });
+        const e2 = new Float64Array(3*IN.N);
+        const rr2 = new Float64Array(IN.nBeams);
+        for (let k = 0; k < IN.k; k++){
+          const b0 = k*IN.nBeams;
+          for (let b = 0; b < IN.nBeams; b++){
+            const r = IN.rangesCm[b0+b]/100;
+            rr2[b] = (r < 0.1 || r >= IN.validMax) ? Infinity : r;
+          }
+          const smp2 = scanToSamples(rr2, IN.nBeams, true, IN.beamAng);
+          let p = slam2.addKeyframe(smp2, noOdomGuess(e2, k));
+          if (slam2.needRelax){ slam2.relaxNow(); p = slam2.poseOf(k); }
+          e2[3*k] = p[0]; e2[3*k+1] = p[1]; e2[3*k+2] = p[2];
+        }
+        const ax=[], ay=[], bx2=[], by2=[];
+        for (let k = 0; k < IN.k; k++) if (IN.refOk[k]){
+          const p = slam2.poseOf(k);
+          ax.push(p[0]); ay.push(p[1]);
+          bx2.push(IN.ref[2*k]); by2.push(IN.ref[2*k+1]);
+        }
+        if (ax.length >= 8){
+          const al2 = hornAlign(Float64Array.from(ax), Float64Array.from(ay),
+                                Float64Array.from(bx2), Float64Array.from(by2), ax.length);
+          let se2 = 0;
+          for (let i = 0; i < ax.length; i++)
+            se2 += (al2.x[i]-bx2[i])**2 + (al2.y[i]-by2[i])**2;
+          coreAte = Math.sqrt(se2/ax.length);
+        }
+      }
+      // cloud density on the offscreen map canvas
+      const cd = IN.cctx.getImageData(0, 0, IN.cloud.width, IN.cloud.height).data;
+      let cloudLit = 0;
+      for (let i = 3; i < cd.length; i += 4) if (cd[i] > 0) cloudLit++;
+      const panelLit = (ctx2, cv2) => {
+        const q = ctx2.getImageData(0, 0, cv2.width, cv2.height).data;
+        let n = 0;
+        for (let i = 0; i < q.length; i += 4) if (q[i]+q[i+1]+q[i+2] > 60) n++;
+        return n;
+      };
+      Object.assign(res, {
+        jsErrors,
+        worldNonBgPct: +(100*nonBg/(W*H)).toFixed(1),
+        estPix, cloPix, refPix, cloudLit,
+        refCoverage: refN ? +(refHit/refN).toFixed(3) : null,
+        latLit: panelLit(lctx, latCv), corrLit: panelLit(cctx, corrCv),
+        decLit: panelLit(dctx, decCv),
+        uiAte: isFinite(IN.rmse) ? +IN.rmse.toFixed(6) : null,
+        coreAte: coreAte !== null ? +coreAte.toFixed(6) : null,
+        atePar: coreAte !== null && isFinite(IN.rmse)
+          ? Math.abs(coreAte - IN.rmse) < 1e-9 : null,
+      });
+      res.pass = jsErrors.length === 0 && res.ate !== null &&
+        res.worldNonBgPct > 2 && estPix > 300 &&
+        (res.closures === 0 || cloPix > 30) && refPix > 100 &&
+        cloudLit > 10000 && res.refCoverage >= 0.85 &&
+        res.latLit > 500 && res.corrLit > 200 && res.decLit > 500 &&
+        res.atePar === true;
+      finish(res);
+    }));
+  };
+  setTimeout(drive, 50);
+}
 requestAnimationFrame(tick);
 })();
 </script>

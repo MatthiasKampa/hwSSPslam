@@ -1073,3 +1073,165 @@ are optimistic); the 1.0 m i.i.d. drift proxy over-dephases relative to
 locally-rigid real drift; 8-12 trials/point (recall s.e. ~0.13), N*
 stated to ~2x; whitened alias-free range is a tested bound (+-100 m), not
 a proof.
+
+### R4 refinement (study recommendations in the drought relocalizer, 2026-07-07): whitening + NMS + sharded write-once store land cleanly (bench 4/4 at 5.0-6.1 cm, Intel/fr079 bit-identical, +4-15 KB); the seed-grid widening is REJECTED by the controlled bench; in-pipeline corridor recall moves 0.00 -> 0.04 — the study's 0.62-0.75 does NOT transfer; sharpened retrieval in the deep corridor produces a CONSISTENT wrong pair that only a search-breadth escalation stops; MIT 42.95 m vs the 38.03 R3 record and 45.29 baseline
+
+WHAT SHIPPED (HybridSLAM drought path, ssp_hier.py):
+
+1. PER-RING WHITENING (rec 1) in `_coarse_hyp` and both
+   `relocalize_global`s: each ring's correlation divided by that ring's
+   bundle energy (the study's exact formula). Raw surfaces are
+   red-dominated (74% energy in the 12.8 m ring; 13 m aliases, centroid
+   blob); whitened surfaces drive the shortlist.
+2. NMS SHORTLIST (rec 2): stage-1 takes the top-40 cells after greedy
+   non-max suppression at 2.5 m (per-cell best over headings), per
+   shard, instead of top-40 raw (cell, heading) pairs.
+3. SHARDED WRITE-ONCE COARSE STORE (rec 4): one 120-dim vector per
+   250 m of accumulated odometry travel, summed write-once (no decay —
+   the store must remember for the revisit horizon; capacity is handled
+   by the sharding, N/shard staying near the study's N*~400).
+   `_drought_offsets` groups candidate cells by the era shard(s) of the
+   old anchors that generated them; each group is scored against ITS
+   era's vector with per-shard surface statistics. The EMA gvec remains
+   only for the legacy `relocalize_global` recovery path. Memory: Intel
+   3 shards (+5.6 KB on 5.2 MB), fr079 2 (+3.8 KB), MIT 8 (+15.0 KB) —
+   at the study's predicted floor.
+4. MATCHED BAND OUT OF DROUGHT SCORING (rec 5): verified true by
+   construction and now ASSERTED (shard vectors and query projection are
+   2*NA coarse-band only; selftest checks WC == W[COARSE]).
+
+REC 3 (widen drought_seed to (3.0, 0.75)) IS REJECTED BY MEASUREMENT.
+The wide grid reaches the matched band's ~2 m scene aliases (study M1:
+joint C(2 m) = 0.83-0.88 along wall normals) and multi-meter corridor
+slides, which VERIFY (session-relative ratio 0.9-1.2) and poison the
+consistency pairing: bench seeds 1/4 went 5 cm -> 3.3-3.5 m. Every
+single-viewpoint arbiter tried FAILED under measurement: raw-score pick
+takes the alias where it wins (margin +0.3%); 4-ring and fine-ring
+coherence ranks each pick an alias on some seed (fine rings are
+drift-dephased noise for ranking); a hyp-distance tiebreak picks the
+alias when the whitened peak's own ~1 m displacement leans that way;
+rejecting near-ties starves self-similar corridors of ALL fires (0
+verifies, droughts never break). drought_seed stays (1.5, 0.75) — reach
+1.5 + 0.6 cmatcher capture = 2.1 m, deliberately below alias reach.
+
+WHAT THE BENCH FORCED INSTEAD (all measured, ssp_hier.py comments carry
+the numbers):
+
+- TWO-REGIME STAGE-1 PLACEMENT: whitening reweights the main lobe, not
+  just the aliases — the whitened peak sits ~1 m from the raw local
+  peak, and the entire R3-validated fine verification is calibrated to
+  RAW placement (seeding from whitened peaks re-aims it into aliases).
+  `_coarse_hyp` computes BOTH surfaces: raw and whitened winners in the
+  same basin (<= 1.2 m) -> R3-exact raw refined peak and raw z;
+  disagreement (the blob/alias-corrupted regime whitening provably
+  fixes — raw MIT revisit peaks are 26 m off, 0/25) -> whitened winner,
+  re-centered on its basin's raw local maximum (+-1 m).
+- VERIFICATION SUB-FLOOR TIEBREAK: convergent seed-grid poses are
+  clustered into basins (0.7 m); the raw MAIN-band score decides
+  outright above a 2% margin; within it the score is statistically
+  blind (measured margins: decided basins differ >= 2.5%, alias/truth
+  flips live at +-0.5%) and the coarse hypothesis picks the nearest
+  near-tied basin. Correct on all 8 measured truth/alias cases; a
+  plain nearest-to-hyp rule breaks seed 2 (its alias sits NEARER the
+  hyp at a 5.8% score deficit).
+- pair_tol_t 3.0 -> 1.2 m: BELOW the 2 m alias spacing. Genuine
+  verified pairs agree to centimeters (measured snaps: 0.19-0.72 m);
+  3.0 m let a truth fire pair with an alias fire (one 2 m-wrong edge at
+  strong sigma = 3.5 m bench runs).
+- DEEP-SEARCH ESCALATION (`deep_noff` = 6000): a consistent pair formed
+  while stage-1 swept > 6000 candidate cells is HELD and must be
+  re-confirmed by a third consecutive consistent fire. Measured need on
+  MIT: the deep-corridor drought produced a WRONG pair (kf 9236 + 9264)
+  agreeing to 0.54 m / 0.6 deg — TIGHTER than a genuine junction snap
+  (0.72 m / 2.6 deg), so no tolerance separates it; what separates it
+  is search breadth (10,672 cells over 4+ era shards vs 1948/2989 at
+  the two genuine snaps, <= 3300 on every bench fire — the study's own
+  extreme-value crowding law). Un-guarded, that snap cost 38 -> 54 m
+  (final-third closures 27 -> 9, tail segments worse than BASELINE);
+  held, the third confirmation never arrives and the run keeps R3's
+  measured-best deep-corridor behavior (no snap).
+
+BENCH (`python3 ssp_hier.py drought`, ship code; ATE rmse cm, paired
+seeds, baseline = mechanism disarmed):
+
+| seed | off | armed | snaps @ kf |
+|---|---|---|---|
+| 1 | 329.5 | 5.0 | 1176, 1575 |
+| 2 | 332.1 | 5.4 | 1176, 1575 |
+| 3 | 343.2 | 5.9 | 1176, 1575 |
+| 4 | 352.5 | 6.1 | 1176, 1575 |
+
+(R3: 5.0/5.4/5.9/4.8 with seed 4's second snap at 1581 — same events
+broken at the same attempts, all verified poses within 3 cm of truth.)
+
+REGRESSIONS (ship code, deterministic): Intel 2.440 / 1.553 / 6.420 m,
+80 loop edges, 6 pruned — bit-identical to shipped/R3; drought 43 tries
+-> 26 hyps -> 3 verified -> 0 snaps. fr079 5.523 / 3.533 / 14.617, 32
+edges, 2 pruned — bit-identical; 23 -> 10 -> 3 -> 0. The mechanism
+stays inert where droughts do not bind; whitening changes WHICH
+sub-gate peaks appear (hyp counts moved 23 -> 26 and 2 -> 10) but the
+verification + pairing chain refuses them all, exactly as designed.
+
+MIT (mit_hy4.py driver, 14,499 kf, deterministic single runs):
+
+| config | rmse m | median | final-third | loops (final third) | snaps |
+|---|---|---|---|---|---|
+| HY4 nodrought (baseline) | 45.29 | 36.71 | 54.25 | 61 (15) | 0 |
+| HY4 + R3 drought (record) | 38.03 | 33.51 | 41.66 | 98 (27) | 2 |
+| R4 without deep-search escalation | 54.28 | 39.28 | 69.51 | 65 (9) | 3 (1 WRONG) |
+| R4 ship | 42.95 | 39.12 | 47.59 | 60 (10) | 2 |
+
+(The literal five-recommendations-as-given configuration — wide seeds,
+pair_tol 3.0, no guards — scored 53.36 with its own wrong third snap;
+both un-guarded shapes land at ~54 via the deep-corridor pair.)
+
+RECALL PER ATTEMPT AT TRUE REVISITS (gfs range-identity pairing; true
+revisit = attempt kf within 5 m in REF frame of a >= 1500-kf-older kf;
+hit = z >= 3 hypothesis within 5 m of the old pass's mapped position;
+r4_recall.py in session scratchpad):
+
+| run | attempts | at true revisits | stage-1 hits | recall/attempt |
+|---|---|---|---|---|
+| R3 | 295 | 75 | 0 | 0.00 |
+| R4 ship | 331 | 106 | 4 | 0.04 |
+
+All 104 R4 failures at true revisits are WRONG-PEAK (confident z >= 3
+hypotheses elsewhere — overwhelmingly the junction hotspot at
+(-20, 64)); zero are sub-gate misses. The study's projected
+0.25 -> 0.75+ does NOT transfer to the pipeline: its own flagged
+caveats bite (heading known there vs 120-heading sweep here;
+independent unit-norm segment content vs real walls shared across
+segments; no est-frame/write-frame mismatch). Both R4 snaps fire at
+the SAME two distinctive junctions as R3 (kf 1340/2980 vs 1368/2868 —
+the first one ~30 kf EARLIER, the one measurable retrieval gain).
+
+CORRIDOR SELF-SIMILARITY VERDICT (the R4 question): whitening + NMS +
+shards do NOT move it — it is information-limited at lam 5.3/12.8, and
+R4 shows the limit is one level deeper than R3 could see. Retrieval
+can now be made to shortlist confidently in the deep corridor drought
+(z 5-6.9 fires at 25-kf cadence, 59-70 verified vs R3's 42), but the
+hypotheses land at the wrong corridor twin, the fine verifier confirms
+them (corridor content matches corridor content), and the two-fire
+consistency test is defeated because self-similar wrongness is
+SYSTEMATIC — the one wrong pair agreed tighter than the genuine snaps.
+Retrieval was never the MIT bottleneck; verification information is.
+Within this architecture the deep-corridor residual stands as a
+place-recognition information limit: more retrieval sharpness converts
+misses into consistent wrong snaps unless evidence requirements scale
+with search breadth (the escalation). rmse note: 42.95 vs the R3
+record 38.03 sits inside the measured MIT chaos band (a 0.26 mm relax
+perturbation moved this dataset 12.5 m / 16 loop edges, R3 caveat);
+per-segment analysis shows R4-ship better than baseline in the
+structural segments (0-2k: 38.2 vs 53.3 — the earlier first snap;
+10-14k tail better) with no segment systematically damaged, while the
+un-escalated run's tail was worse than BASELINE (its wrong snap is a
+real, non-chaotic 16 m harm — hence the guard).
+
+Runtime: MIT 21 ms/kf (R3 21, baseline 14); Intel 18. Reproduce:
+`python3 ssp_hier.py selftest | drought | hyintel data/intel.log`;
+MIT driver mit_hy4.py, recall r4_recall.py, seed-4 falsification trail
+r4_diag_seed4.py / r4_margin.py, all in the session scratchpad;
+trajectories mit_traj_hy4_r4ship.npz (+ r4v2 = unguarded). Selftest
+additionally covers whitened+NMS+sharded coarse-hyp identity, the
+junk-shard robustness case, per-era offset grouping, and the
+coarse-band-only assert.

@@ -584,18 +584,25 @@ class HybridSLAM(B.BoundedSLAM):
         # tolerance must sit BELOW the 2 m alias spacing.
         self.pair_tol_t = 1.2               # m: implied-correction agreement
         self.pair_tol_r = np.deg2rad(8.0)
-        # R4 WITNESS VETO: a pair may only snap if NO other verified fire
-        # in the pair window contradicts its implied rotation grossly
-        # (> 25 deg — far beyond drift-explainable dr wander over 200 kf;
-        # genuine fires share one rigid world correction wherever they
-        # are). Measured on MIT: the wrong deep-corridor pair (kf 9236 +
-        # 9264, a ~90 deg corridor misassignment that cost 16 m of run
-        # rmse) formed amid witnesses disagreeing by ~80 deg, while the
-        # good junction snap's five same-window witnesses all agreed in
-        # rotation (their conflicts were translation-marginal, the
-        # estimate drifting between fires).
-        self.wit_tol_r = np.deg2rad(25.0)
-        self._drought_wit = []              # (k, dr) of recent verified fires
+        # R4 DEEP-SEARCH ESCALATION. In-pipeline stage-1 recall at MIT's
+        # true corridor revisits is 0.00 (R3) -> 0.03 (whitened+NMS+
+        # sharded): corridor retrieval is information-limited in this
+        # pipeline (the study's 0.62-0.75 was measured under its own
+        # flagged caveats — heading known, independent segment content).
+        # Sharpened retrieval therefore does not find corridor revisits;
+        # it produces MORE confident wrong fires there, and one pair of
+        # them was CONSISTENT (0.54 m / 0.6 deg — tighter than a genuine
+        # junction snap's 0.72 m / 2.6 deg, so no tolerance separates it)
+        # and snapped an MIT run from 38 -> 54 m. What separates that
+        # pair is SEARCH BREADTH, the study's own crowding law (junk
+        # extreme values grow with searched area): it formed while
+        # sweeping 10672 cells over 4+ era shards, vs 1948/2989 at the
+        # two genuine junction snaps and <=3300 on every bench fire. When
+        # the sweep exceeded deep_noff cells, a consistent pair is HELD
+        # and must be re-confirmed by a third consecutive consistent fire
+        # before the graph accepts it; the fallback (no snap) is exactly
+        # R3's measured-best behavior in the deep corridor drought.
+        self.deep_noff = 6000
         self._drought_buf = []              # recent verified closures (dicts)
         self._last_reloc_k = -10 ** 9
         self._force_relax = False
@@ -1380,10 +1387,6 @@ class HybridSLAM(B.BoundedSLAM):
         entry = dict(k=k, my_aid=my_aid, c_aid=c_aid, Z=Z, sig_t=sig_t,
                      sig_r=sig_r, T=T, b_pos=self.anchors[my_aid][:2].copy(),
                      dr=S.wrap(T[2] - self.anchors[my_aid][2]))
-        self._drought_wit = [wt for wt in self._drought_wit
-                             if k - wt[0] <= self.pair_window]
-        wits = list(self._drought_wit)      # witnesses BEFORE this fire
-        self._drought_wit.append((k, entry["dr"]))
         log["phase"] = "pending"
         # Consistency: each fire implies a rigid world correction
         # new(x) = T + R(dr) (x - b_pos); compare the pending and the new
@@ -1396,21 +1399,23 @@ class HybridSLAM(B.BoundedSLAM):
         # buffered / bench-degrading triplet); the aggressive variants pair
         # faster but pair CORRELATED or ambiguous fires in self-similar
         # corridors, and a wrong pre-aligned snap is unrecoverable.
-        P = self._drought_buf[-1] if self._drought_buf else None
-        if P is not None and k - P["k"] <= self.pair_window \
-                and P["my_aid"] != my_aid:
+        buf = [e for e in self._drought_buf
+               if k - e["k"] <= self.pair_window]
+        P = buf[-1] if buf else None
+        if P is not None and P["my_aid"] != my_aid:
             y1 = P["T"][:2] + S._rot(P["dr"]) \
                 @ (self.anchors[my_aid][:2] - P["b_pos"])
+            log["pair_dt"] = float(np.linalg.norm(y1 - T[:2]))
+            log["pair_drh"] = float(np.rad2deg(
+                abs(S.wrap(P["dr"] - entry["dr"]))))
+            log["pair_gap"] = k - P["k"]
             if np.linalg.norm(y1 - T[:2]) < self.pair_tol_t \
                     and abs(S.wrap(P["dr"] - entry["dr"])) < self.pair_tol_r:
-                # witness veto (R4): any OTHER same-window verified fire
-                # whose implied rotation grossly contradicts this pair
-                # marks the region as self-similar-ambiguous — refuse
-                if any(wk != P["k"]
-                       and abs(S.wrap(wdr - entry["dr"])) > self.wit_tol_r
-                       for wk, wdr in wits):
-                    log["phase"] = "wit-veto"
-                    self._drought_buf = [entry]
+                if len(buf) == 1 and log.get("noff", 0) > self.deep_noff:
+                    # deep-search escalation: hold the pair, demand a
+                    # third consecutive consistent fire
+                    log["phase"] = "pair-held"
+                    self._drought_buf = [P, entry]
                     return
                 log["phase"] = "snap"
                 self._distribute_correction(my_aid, T)
@@ -1434,7 +1439,6 @@ class HybridSLAM(B.BoundedSLAM):
                 self._streak = 0
                 self._streak_xy = None
                 self._drought_buf = []
-                self._drought_wit = []      # corrections change frame
                 self.n_drought_snap += 1
                 return
             log["phase"] = "pair-conflict"

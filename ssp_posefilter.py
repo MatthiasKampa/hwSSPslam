@@ -82,8 +82,12 @@ class PoseFilterSLAM(B.BoundedSLAM):
                          relax_every=relax_every, gap_kf=gap_kf,
                          recent_aids=recent_aids)
         # --- filter parameters
-        self.H = 7
-        self.h_spacing = np.deg2rad(1.0)
+        # +-6 deg mixture span is load-bearing on real logs (Intel keyframes
+        # rotate up to 5 deg): the +-3 deg lattice clips genuine heading
+        # innovation and the accumulated bias kills early loop closures
+        # (prefix A/B: rmse 0.874/0 loops at +-3 vs 0.280/7 at +-6)
+        self.H = 9
+        self.h_spacing = np.deg2rad(1.5)
         self.offs_th = (np.arange(self.H) - (self.H - 1) / 2) * self.h_spacing
         self.meas_beta = 40.0          # likelihood tempering on s01
         self.q_floor = 0.04            # min normalized peak score to use a meas
@@ -366,6 +370,7 @@ class PoseFilterSLAM(B.BoundedSLAM):
 
         committed = (k == 0)
         est = guess.copy() if k == 0 else self.pf_mean.copy()
+        st = None
         if k > 0 and len(pts) >= 20:
             Bv = self.local_bundle(self.pf_mean[:2])[L.MAIN]
             if np.abs(Bv).sum() > 0:
@@ -413,13 +418,22 @@ class PoseFilterSLAM(B.BoundedSLAM):
         # spread is ABSOLUTE uncertainty; the 5-frame relative chain error
         # stays 2-3 cm because consecutive likelihood errors are shared).
         # Only suppressed frames — where the mean can slide within the span —
-        # inflate the edge, by their own posterior spread (info-honest
-        # replacement of the fixed 0.10 fallback sigma).
+        # inflate the edge, by their own posterior spread, AND ONLY IN THE
+        # AMBIGUOUS COMPONENT: heading-spread fires must not soften the
+        # translation chain (isotropic inflation measured on Intel: 35% of
+        # spans went soft on hstd flapping alone, relax jerk 0.60 -> 1.27 m
+        # and closures warped the early chain, rmse 2.44 -> 4.6).
         if suppress:
-            self._span_st = max(self._span_st, 0.10,
-                                min(self.pf_sig_dr, 0.30))
-            self._span_sr = max(self._span_sr, np.deg2rad(1.5),
-                                min(self.pf_hsig_dr, np.deg2rad(3.0)))
+            t_amb = st is None or st["ridge"] or st["n_modes"] >= 2 \
+                or st["sig_max"] >= self.commit_sig_cap \
+                or st["edge_mass"] >= self.edge_mass_max
+            h_amb = st is None or st["hstd"] >= self.commit_sig_r
+            if t_amb:
+                self._span_st = max(self._span_st, 0.10,
+                                    min(self.pf_sig_dr, 0.30))
+            if h_amb:
+                self._span_sr = max(self._span_sr, np.deg2rad(1.5),
+                                    min(self.pf_hsig_dr, np.deg2rad(3.0)))
 
         if k % ANCHOR == 0:
             self.anchors[aid] = est.copy()
