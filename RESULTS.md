@@ -1235,3 +1235,94 @@ trajectories mit_traj_hy4_r4ship.npz (+ r4v2 = unguarded). Selftest
 additionally covers whitened+NMS+sharded coarse-hyp identity, the
 junk-shard robustness case, per-era offset grouping, and the
 coarse-band-only assert.
+
+## Spatially-anchored per-scale submap arrays (ssp_scale_arrays.py, 2026-07-07): the O(area) memory win is real for the FRONTEND but loop closure structurally fails — persistent spatial accumulation smears old-pass content, biasing every loop Z; a map primitive used for CLOSURE must hold drift-consistent single-burst content, which only EPHEMERAL segments guarantee
+
+Motivation: HY4 segments are O(time) (2 vectors per 5-kf segment). The
+memory-efficient alternative is O(area): per matched-band ring (lam
+0.25/0.5/1/2) an array of graph-anchored cells (size c*lam, c=8 -> 2/4/8/16 m),
+HIT-KEYED (each occlusion-filtered sample writes to the cell containing the
+HIT, not the robot, per the range gate), each cell a small submap anchored to
+its first-writer's trajectory node (rides the graph rigidly; 60-angle block +
+d/dtheta derivative, HY4 semantics per cell). Content lives where the geometry
+is, so a wall is queryable from anywhere near the WALL — the content-location
+fix anchor-keyed segment gathering structurally cannot do. Writes are
+pass-disciplined (cross-pass gate: a later pass writes the base cell only if a
+verified closure just landed nearby, else opens a parallel per-pass cell);
+queries are LIBERAL (VSA superposition — the frontend sums every cell in
+radius, both staggered grids, all pass layers, no merge, no relevance logic;
+loop constraints keep evidence independence, matched against a SINGLE nearest
+old-pass cell set). Backend inherited verbatim from BoundedSLAM. Selftest
+covers write/query round trip, exact + first-order rigid ride, cross-pass gate,
+two-layer additive query, loop epoch segregation.
+
+Bench (room/sparse/corridor, seeds 1-4 paired vs G1 segments and HY4; ATE cm
+mean, f/e = GT-false/accepted loop edges, map KB):
+
+| config | room | f/e | sparse | f/e | corridor | mem note |
+|---|---|---|---|---|---|---|
+| G1 = BoundedSLAM | 6.4 | 7.2/142 | 12.1 | 9.0/120 | 379 | 841/852/1102 KB |
+| HY4 | 6.4 | 7.2/142 | 12.1 | 9.0/120 | 379 | 564/572/739 KB |
+| SA | 15.5 | 28/82 | 52.2 | 20/52 | 318 | 623/675/350 KB |
+| SA-nogate | 31.8 | 24/32 | 24.8 | 6/19 | - | 311/180 KB |
+| SA-recent | 33.4 | 51/81 | 49.2 | 21/64 | - | 572/667 KB |
+
+The pre-registered pooled-mean gate "PASSES" (SA 1.285 m vs min(G1,HY4)
+1.325 m, ratio 0.969) but is MISLEADING — the pool is swamped by the corridor
+world's 3.8 m absolute error; on the well-behaved worlds SA is 2.4x worse
+(room) and 4.3x worse (sparse) even at 750 frames. The smoking gun is the
+false-edge rate: **SA 34-38% vs G1/HY4 5-7%**. Ambiguous cell content ->
+the matcher lands on wrong poses. The hit-keyed content-location benefit is
+real but tiny: att_cell_only (candidates only hit-keying finds) = 0 on
+room/sparse, 18 on corridor; accepted-where-anchor-keying-misses = 4 across
+all corridor runs (40 on Intel) — nowhere near paying for the accuracy loss.
+SA is also not reliably smaller than HY4 on the bench (parallel cells inflate
+it: 159-272 of them).
+
+Intel (`ssp_scale_arrays.py carmen data/intel.log` + parametrized probes):
+
+| config | ATE m | map | note |
+|---|---|---|---|
+| HY4 (reference) | 2.44 | 5.24 MB | shipped |
+| SA default (cap 500, all) | 15.51 | 3.4 MB | saturation kills it |
+| SA cap=inf, c=8, all | 12.96 | 3.5 MB | saturation was ~2.5 m of it |
+| SA cap=inf, c=4, all | 14.39 | 10.8 MB | smaller cells WORSE + 3x mem |
+| SA cap=inf, c=8, recent frontend | 12.47 | 3.5 MB | recency barely helps |
+| SA cap=inf, recent, hard veto | 13.88 | 3.7 MB | strict gating no help |
+| SA cap=inf, recent, cohT=0.85 | 11.18 | 3.7 MB | strict gating no help |
+| **SA FRONTEND-ONLY (no closures)** | **4.34** | **4.5 MB** | the map is a GOOD target |
+
+THE REVERSAL AND THE MECHANISM. Frontend-only SA is 4.34 m — BETTER than any
+closure-enabled SA (11-15 m). Loop closures make it WORSE by ~8 m. So the
+O(area) cell map is a perfectly good FRONTEND matching target; the failure is
+entirely in loop closure. Why: the frontend matches recent, still-sharp cell
+content; loop constraints match the current scan against OLD-PASS cells
+(epoch-segregated, the most-accumulated and most drift-smeared). A cell
+persistently sums many observations made at different drift states at ONE
+frame, so its geometry is smeared into a broad, weak correlation peak; the
+cmatcher lands on a biased pose; the biased Z passes every gate (coherence
+cannot separate smear-bias from truth — a smeared match is broad but still
+correlated), so the graph believes it and is dragged off the good frontend
+trajectory. Stricter coherence vetoing (hard veto; cohT 0.55->0.85) removes
+edges roughly uniformly and never recovers toward 4.34 — the surviving
+closures are still net-negative. The SAME backend that lifts HY4's ~8 m
+frontend to 2.44 m corrupts SA's 4.34 m to 11-14 m, purely on Z quality.
+
+Graph-anchoring the cell fixes the FRAME's drift-riding (verified exact in
+selftest) but NOT the intra-cell WRITE-TIME smear — content written across
+accumulated drift cannot be un-smeared by moving its frame. This is the R1
+world-frame floor in a sharper form and it EXTENDS the law family: it is not
+enough for the loop/matched band to live in graph-consistent memory (R2) — the
+CONTENT of a primitive used for loop closure must come from a single
+drift-consistent burst. Ephemeral per-segment vectors guarantee this (5 kf =
+one consistent burst, then frozen); persistent per-area cells violate it by
+construction. Memory efficiency via spatial accumulation trades away exactly
+the closure sharpness that SLAM needs. A freeze-and-reopen fix (each cell one
+burst, any large gap opens a parallel) would restore sharpness but converges
+toward O(area x visits) ~ O(time) and reintroduces the parallel-cell memory
+inflation already seen on the bench — i.e. back to segments. HY4 stands as the
+memory-efficient matched-band representation; the next lever is precision /
+dimensionality on the segments themselves, not spatial reorganization.
+
+Reproduce: `python3 ssp_scale_arrays.py selftest | bench | carmen data/intel.log`;
+parametrized Intel probes in the session scratchpad (sa_intel.py).
