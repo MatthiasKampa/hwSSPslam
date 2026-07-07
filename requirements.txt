@@ -1,0 +1,5 @@
+numpy==2.5.0
+scipy==1.18.0
+matplotlib==3.11.0
+# scipy pin is LOAD-BEARING: max_nfev=30 truncation inside TRF is the
+# solver regularizer; a scipy upgrade could silently move every number.

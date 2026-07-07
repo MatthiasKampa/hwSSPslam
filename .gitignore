@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+# datasets are fetched, not committed (see data/README.md)
+data/*
+!data/README.md
+!data/fetch_datasets.sh
