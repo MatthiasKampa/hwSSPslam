@@ -3004,3 +3004,37 @@ refine when already in-basin and does not solve cross-session association. This
 motivates a HYBRID (next): detected+verified closures do the long-range topology
 (getting in-basin) that the flow can't, and the overlap flow does the dense
 deformation refinement between them (the region-by-region locking it CAN do).
+
+---
+
+## Hybrid: detected closure + overlap-flow refinement — single-session is neutral-to-negative
+
+The user's hybrid: run the shipped detect+gate+relax, then add continual
+overlap-flow REFINEMENT on top, with seq + detected-loop closures as stiff
+pose-pose anchors in one energy E = lam*||seq+loop||^2 - lam_ov*sum rho(cos)
+(`ssp_hybrid.py`, reuses ssp_flow.FlowField grad-L2-normalized force; no shipped
+edit). Init at the shipped-relaxed poses so lam_ov=0 is a fixed point (= shipped).
+lam_ov sweep, ATE rmse m:
+
+| lam_ov | fr101 | fr079 |
+|---|---|---|
+| shipped | 1.881 | 5.523 |
+| 0.0 (no overlap) | 1.881 | 5.521 |
+| 0.1 | 1.886 (+0.005) | 5.522 (-0.001) |
+| 0.3 | 1.889 (+0.008) | 5.526 (+0.003) |
+| 0.6 | 1.905 (+0.023) | 5.535 (+0.012) |
+| 1.0 | 1.909 (+0.028) | — |
+
+**On an already-well-optimized (detected-closure) map, anchored overlap-refinement
+is NET-NEGATIVE** — monotone degradation with lam_ov (fr101 hurts, fr079 neutral
+then hurts); lam_ov=0 (= shipped) is best. The overlap force is noise-dominated
+(genuine cosine 0.097 vs noise 0.29-0.63, per the flow study), so on a tight map
+it pulls toward spurious attractors rather than tightening. The anchoring does its
+job — it keeps the degradation BOUNDED (fr101 +0.028, fr079 +0.012 max, no
+drift-to-twins) — but bounded noise is not signal. The detected closures do all
+the useful work; there is nothing left for the dense overlap force to add on a
+map that is already solved, and to add value it would need to distinguish genuine
+overlaps from noise — the verification wall. (Multi-session, where the map is loose
+and there IS room, is the honest remaining test — the flow locked confident
+regions from a loose init there, so anchored refinement of a loose alignment is
+not a foregone negative.)
