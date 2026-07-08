@@ -33,9 +33,16 @@ In-repo baselines on identical parsing/keyframing/eval (`baseline_*.py`):
 ICP+graph 1.70 m (35 MB, retains all scans), correlative grids 3.27 m,
 RBPF/GMapping-lite **0.12 m** (56 MB peak, particle grids). The honest
 positioning: this project's contribution is the **representation** —
-bounded, history-free, algebraically transformable maps at usable accuracy —
-not state-of-the-art accuracy (ACES is a frank negative; MIT demonstrates
-the revisit-density limit at scale).
+**O(area)-bounded** (not O(time)), **history-free**, **algebraically
+transformable** maps at usable accuracy — not state-of-the-art accuracy, and
+not raw spatial compactness. Per m² the SSP map is actually *denser* than an
+occupancy grid (~3 KB/m² vs ~0.4 KB/m²); the memory win holds only against
+*history-storing* baselines (ICP's retained scans are O(time); RBPF is
+particles × grids). The defensible properties are the bound, the absence of
+history, and the algebra — verified: Intel plateaus at 698 segments (84 % of
+the cell-cap ceiling), MIT grows dead-linear at 1.26 seg/m as new corridor is
+exposed. ACES is a frank negative; MIT demonstrates the revisit-density limit
+at scale.
 
 ## How it works (one screen)
 

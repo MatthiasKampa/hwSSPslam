@@ -1427,7 +1427,11 @@ class HybridSLAM(B.BoundedSLAM):
         self._drought_cand = [e for e in self._drought_cand
                               if k - e["k"] <= self.cand_window]
         self._drought_cand.append(entry)
+        self._pcm_best = 1
+        self._pcm_deep = False
         clique = self._pcm_admit(self._drought_cand)
+        log["cand"] = len(self._drought_cand)
+        log["clique_max"] = int(self._pcm_best)
         if clique is None:
             return
         # winning-pair diagnostics (closest independent pair in the clique)
