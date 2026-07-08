@@ -61,10 +61,18 @@ class AnisoMixin:
     prior — is preserved bit-for-bit. Edges without a stored L default to the
     isotropic diag(wt), which reduces to the shipped scalar path EXACTLY."""
 
-    def _aniso_init(self, use_aniso=True, cond_floor=0.1):
+    def _aniso_init(self, use_aniso=True, cond_floor=0.1, aniso_gate=1.0):
         self.aniso_L = {}          # (a_id, b_id) -> 2x2 lower-tri L (body frame)
         self.use_aniso = use_aniso
         self.cond_floor = cond_floor   # clamp l_weak/l_strong to >= this
+        # PER-CLOSURE CONDITIONING GATE: only closures with l_weak/l_strong <
+        # aniso_gate get the anisotropic 2x2; WELL-conditioned closures (ratio
+        # >= gate) are inserted FULLY ISOTROPIC (== shipped, bit-identical), so
+        # clean logs whose closures are well-conditioned are provably untouched.
+        # gate=1.0 => anisotropize every closure (the un-gated behaviour).
+        self.aniso_gate = aniso_gate
+        self.n_aniso_trip = 0      # closures that tripped the gate (got aniso)
+        self.n_aniso_seen = 0      # closures a factor was computed for
         self._gn_resid = None      # exposed for the FD Jacobian selftest
         self._gn_jac = None
 
@@ -82,6 +90,10 @@ class AnisoMixin:
         if l_strong <= 1e-30:
             return None
         r = l_weak / l_strong
+        self.n_aniso_seen += 1
+        if r >= self.aniso_gate:
+            return None            # well-conditioned closure: fully isotropic
+        self.n_aniso_trip += 1
         r_f = min(1.0, max(r, self.cond_floor))
         if r_f >= 1.0:
             return None            # isotropic: scalar path is bit-exact
@@ -212,9 +224,11 @@ class AnisoMixin:
 # derived L on each accepted loop edge.
 # ---------------------------------------------------------------------------
 class AnisoBoundedSLAM(AnisoMixin, B.BoundedSLAM):
-    def __init__(self, use_aniso=True, cond_floor=0.1, iso_prune=False, **kw):
+    def __init__(self, use_aniso=True, cond_floor=0.1, iso_prune=False,
+                 aniso_gate=1.0, **kw):
         super().__init__(**kw)
-        self._aniso_init(use_aniso=use_aniso, cond_floor=cond_floor)
+        self._aniso_init(use_aniso=use_aniso, cond_floor=cond_floor,
+                         aniso_gate=aniso_gate)
         # iso_prune: rank LOO/chi2 PRUNING on the ISOTROPICALLY-whitened residual
         # (the true geometric-error magnitude), while the SOLVE keeps the
         # anisotropic whitening. The anisotropic residual that shipped LOO ranks
@@ -572,7 +586,7 @@ def selftest():
 # REAL-LOG HARNESS (CARMEN driver, same params as ssp_bounded_carmen.py)
 # ===========================================================================
 def run_log(path, use_aniso=True, cond_floor=0.1, iso_prune=False,
-            n_max=None, verbose=False):
+            aniso_gate=1.0, n_max=None, verbose=False):
     import ssp_slam_carmen as C
     scans = C.parse_flaser(path)
     keys = C.keyframes(scans)
@@ -584,7 +598,7 @@ def run_log(path, use_aniso=True, cond_floor=0.1, iso_prune=False,
     odom = np.stack([k[1] for k in keys])
     kts = np.array([t for _, _, t in keys])
     slam = AnisoBoundedSLAM(use_aniso=use_aniso, cond_floor=cond_floor,
-                            iso_prune=iso_prune,
+                            iso_prune=iso_prune, aniso_gate=aniso_gate,
                             robust=True, attempt_every=4, relax_every=25,
                             gap_kf=300, recent_aids=12)
     slam.store_dtype = np.complex64
@@ -612,6 +626,7 @@ def run_log(path, use_aniso=True, cond_floor=0.1, iso_prune=False,
     e = np.linalg.norm(al - rxy[good], axis=1)
     return dict(ate=float(np.sqrt((e ** 2).mean())), med=float(np.median(e)),
                 emax=float(e.max()), loops=n_loop, aniso=n_an,
+                trip=slam.n_aniso_trip, seen=slam.n_aniso_seen,
                 pruned=slam.n_pruned, secs=dt, n=n)
 
 
@@ -665,6 +680,28 @@ def prunefix_sweep(floors, which=("intel", "fr079", "aces", "fr101")):
           "(loops ~80) while fr079/fr101 keep their win.")
 
 
+def gated_sweep(gates, cond_floor=0.1, which=("intel", "fr079", "aces", "fr101")):
+    """Per-closure CONDITIONING GATE: only closures with l_weak/l_strong < gate
+    get the anisotropic 2x2; well-conditioned closures stay fully isotropic
+    (== shipped). Table vs shipped and vs the un-gated anisotropic (gate=1.0)."""
+    print(f"=== CONDITIONING-GATED anisotropy (cond_floor={cond_floor}) ===")
+    print(f"{'log':<8} {'shipped':>10}  {'ungated(g=1)':>13} | " +
+          "  ".join(f"gate={g}" for g in gates))
+    for name in which:
+        path = LOGS[name]
+        base = run_log(path, use_aniso=False)
+        ung = run_log(path, use_aniso=True, cond_floor=cond_floor, aniso_gate=1.0)
+        cells = []
+        for g in gates:
+            r = run_log(path, use_aniso=True, cond_floor=cond_floor, aniso_gate=g)
+            trp = f"{r['trip']}/{r['seen']}"
+            cells.append(f"{r['ate']:.3f}({r['loops']},trip {trp})")
+        print(f"{name:<8} {base['ate']:>7.3f}({base['loops']})  "
+              f"{ung['ate']:>7.3f}({ung['loops']}) | " + "  ".join(cells), flush=True)
+    print("\ncell = ATE(loops, tripped/seen closures); shipped/ungated show ATE(loops). "
+          "Target: gated Intel ~2.44 (few trips) while fr079/fr101 keep the win.")
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "selftest"
     if cmd == "selftest":
@@ -675,6 +712,9 @@ def main():
     elif cmd == "prunefix":
         floors = [float(x) for x in sys.argv[2:]] or [0.1, 0.2]
         prunefix_sweep(floors)
+    elif cmd == "gated":
+        gates = [float(x) for x in sys.argv[2:]] or [0.3, 0.4, 0.5]
+        gated_sweep(gates)
     elif cmd == "mit":
         import ssp_aniso_mit as M     # heavy oracle harness kept separate
         M.report(sys.argv[2] if len(sys.argv) > 2 else "data/mit.log")
