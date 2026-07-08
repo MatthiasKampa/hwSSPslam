@@ -224,6 +224,17 @@ class BoundedSLAM:
             v = v + delta * L.rot_permute(self.segder[aid], m)
         return L.ENC.shift(a[:2]) * v
 
+    def _frontend_accept(self, guess, cand, c01):
+        """Hook: the pose the frontend commits to, given the matched pose
+        `cand`, the odometry-propagated `guess`, and the accepted match's
+        fine-ring coherence `c01`. Default = the full match (identity, so
+        shipped behavior is bit-unchanged). Subclasses may shrink `cand`
+        toward `guess` on low-confidence matches — the frontend do-no-harm
+        guard for odometry-excellent logs (ACES/belgioioso), where the
+        scan-matcher measurably degrades already-good odometry. See RESULTS.md
+        "the frontend do-no-harm gap"."""
+        return cand
+
     def local_bundle(self, center, radius=8.0):
         """Frontend local map: RECENT segments only. Old passes must reach the
         pose only through gated loop edges, never through the frontend (else
@@ -271,6 +282,7 @@ class BoundedSLAM:
                            * np.linalg.norm(s01, axis=1) + 1e-12)))
                     self.coh_ref = c01 if self.coh_ref is None \
                         else 0.95 * self.coh_ref + 0.05 * c01
+                    est = self._frontend_accept(guess, cand, c01)
         self._span_fallback = getattr(self, "_span_fallback", False) or fell_back
         if k % ANCHOR == 0:
             self.anchors[aid] = est.copy()
