@@ -2512,3 +2512,62 @@ relative confirmation gate) — a verification fix, not a new retrieval method, 
 the diagnostic proves it would land (clean ties -> 2.49 m). This is the concrete,
 scoped next step; the naive session-relative gate must not be used for
 appearance-seeded cross-session admission.
+
+---
+
+## Cross-session verifier: the wall is irreducible (multi-session thread CLOSED)
+
+The final multi-session experiment (`ssp_multisession_verify.py`, imports the
+ring-key detector + joint-relax/superpose + `ssp_hier` PCM + `_gn`; anti-oracle
+inherited — the detector reproduces `detect_cross_ringkey` bit-exact 63/12/5, and
+the verifiers use Otsu-on-coherence-VALUES + REF-free SE(2) PCM, REF only labels
+and scores). Tests whether an ORACLE-FREE verifier can discriminate cross-session
+twins and land the 2.49 m diagnostic. Over 314 genuine cross-pass opportunities:
+
+| verifier | admitted | FP | genuine cross-pass | merged ATE | B ATE |
+|---|---|---|---|---|---|
+| session-relative (reproduction) | 63 | 81 % | 5 | 5.54 | 4.37 -> 6.32 (worse) |
+| absolute margin (Otsu tau=0.223) | 63 | 81 % | 5 | = (a) | = (a) |
+| PCM clique >= 2 | 22 | 50 % | 6 | **3.35** | 4.37 -> 4.65 |
+| PCM clique >= 3 | 5 | 100 % | 0 | 3.29 | 4.37 -> 4.36 |
+| absolute AND PCM | 4 | 0 % | 1 | 5.52 | 4.37 -> 4.36 |
+
+1. ABSOLUTE COHERENCE MARGIN — REFUTED oracle-free. Correct- and false-candidate
+   fine-ring coherence distributions are INDISTINGUISHABLE (medians 0.171 vs
+   0.172, a single 0.04-0.64 blob); Otsu lands exactly on the shipped 0.223 gate,
+   so (b) === (a). The earlier "correct tie ~0.88" was a SAME-REGION (near-
+   identical viewpoint) probe — viewpoint-CHANGED genuine cross-pass ties score
+   no higher than wrong-nearby places. Coherence cannot discriminate cross-session
+   twins on Intel.
+2. PCM GEOMETRIC CONSENSUS is the ONLY mechanism that helps: clique>=2 halves the
+   FP (81 % -> 50 %), RAISES genuine recovery 5 -> 6, and improves the merged
+   two-session ATE 5.54 -> 3.35 m ORACLE-FREE (A preserved 3.30 -> 3.28). A real,
+   honest gain over B-alone 4.37 m.
+3. BUT THE WALL DOES NOT CLOSE. clique>=3 admits only SYSTEMATIC TWINS (5 edges,
+   100 % FP — aliased wrong places form consistent triples while genuine ties are
+   too sparse to, the exact PCM failure the MIT corridor also showed); abs+PCM
+   gets 0 % FP but 4 clustered edges under-determine the rotation. And even a
+   PERFECT cross-pass verifier is bounded: 22 REF-clean cross-pass-only edges
+   reach only B 4.35 m — the 2.49 m diagnostic REQUIRED the dense same-lap
+   OVERLAP-region ties (near-identical viewpoint, easy), not genuine different-lap
+   revisits. So "one verifier from 2.49" was optimistic; the genuine cross-pass
+   ceiling on Intel is ~3.35 m (PCM clique>=2), not 2.49.
+
+**VERDICT — the multi-session thread is CLOSED, and its final decomposition is:**
+- COMPOSITION (VSA superposition) — WORKS (bit-exact, the positive capstone).
+- MERGE given correspondences (joint relax) — WORKS.
+- RETRIEVAL (ring-key appearance) — WORKS (drift-independent).
+- VERIFICATION (discriminating genuine cross-session ties from twins) — the
+  IRREDUCIBLE WALL: absolute coherence can't separate viewpoint-changed ties from
+  wrong-nearby places, and PCM consensus helps (3.35 m oracle-free) but cannot
+  close it because the aliased twins are themselves geometrically consistent.
+This MIRRORS THE MIT CORRIDOR CLOSE from the other side: on MIT the twins are
+self-similar corridors defeating retrieval+consensus; on Intel the twins are
+cross-session viewpoint changes defeating coherence+consensus. Both land on the
+same structural limit — appearance-only place VERIFICATION cannot separate a
+genuine revisit from a consistent alias without an independent cue. The VSA-native
+contributions (composition, algebraic merge) are demonstrated and sound; the
+recurring bottleneck across every thread this campaign is the SAME one:
+verification/discrimination, not retrieval. Best honest oracle-free multi-session
+result: merged two-session 3.35 m via PCM clique>=2 (better than the drifted
+single session, short of the same-lap ceiling).
