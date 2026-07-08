@@ -9,3 +9,10 @@ data/*
 
 # transient agent run logs
 scratch_*.log
+scratch_*.py
+
+# regenerable trajectory outputs (drivers/experiments write these; rpe.py
+# consumes them). The ~20 MB already tracked from earlier in the session is
+# left in place (git-ignore does not untrack); this only stops NEW ones from
+# accumulating as experiments run.
+*.npz
