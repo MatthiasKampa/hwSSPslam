@@ -2627,3 +2627,60 @@ correlated outliers that COMPETE with genuine data, but cannot verify a place
 that has no genuine competitor. This closes the small-correlated-alias open
 question (robust, via IRLS not the gate) while sharpening — not softening — the
 corridor verification finding: the two are orthogonal.
+
+---
+
+## Value of a perfect verification cue on the MIT corridor (GT-oracle diagnostic) — the wall is TWO-FOLD
+
+The symmetric completion of the synthesis: the multi-session diagnostic showed
+that GIVEN correct correspondences the VSA pieces close the loop (B 2.49 m). Does
+the same hold on the MIT corridor? `ssp_mit_gtverify.py` (subclasses the ring-key
+SLAM; imports only) replaces ONLY the drought VERIFICATION step with a GT oracle
+(admit a candidate iff its query & candidate REF positions are within TOL_REV=5 m
+— genuine revisit, reject twins), keeping ring-key retrieval, edge geometry
+(cmatcher), and the backend as the real shipped machinery. GT-leak boundary
+verified: the REF touches ONLY the admit/reject decision and the final ATE, never
+retrieval, seeding, edge geometry, or the relax.
+
+| run | MIT ATE | genuine snaps |
+|---|---|---|
+| raw odometry | 187.83 | — |
+| shipped drought (coherence + PCM) | 42.66 | 2 |
+| ORACLE B: GT place-verify + real geometry gate | **41.04** | 3 |
+| ORACLE A: GT place-verify ONLY (coherence off) | 73.47 (WORSE) | 4 |
+
+**Value of a perfect PLACE oracle: 42.66 -> 41.04 m (~+1.6 m, ~4 %) — it barely
+moves MIT.** And this is the result: the corridor and multi-session are NOT
+symmetric, and the asymmetry sharpens the whole synthesis.
+- MULTI-SESSION: place verification was the ONLY missing piece — genuine ties had
+  GOOD relative-pose geometry, so the oracle closed the loop (2.49 m).
+- MIT CORRIDOR: perfect place recognition is NECESSARY BUT NOT SUFFICIENT.
+  Corridor self-similarity ALSO corrupts the RELATIVE-POSE GEOMETRY — at a genuine
+  revisit the matcher SLIDES along the corridor and returns a mis-aligned edge
+  (coherence ~0.40). The wall is TWO-FOLD: place discrimination AND geometry.
+
+The two oracle variants isolate this because the shipped coherence gate does
+double duty (place discriminator + geometry-quality filter):
+- B keeps coherence purely as a GEOMETRY filter (GT owns place): it admits only
+  the genuine revisits the matcher can ALSO align well — just 3 over the whole
+  1.9 km log -> 41.04 m ~= shipped. The shipped conservative drought (2 snaps,
+  42.66) was already near the achievable frontier.
+- A drops the geometry gate (GT owns all verification): it admits 4 genuine
+  PLACES, but two are geometrically-bad along-corridor slides (coherence
+  0.40/0.44) that, inserted through _distribute_correction + relax, drive ATE
+  WORSE to 73.47 m. Place verification ALONE backfires; the geometry gate is what
+  prevents it.
+
+**Verdict (sharpens, does NOT reopen, the corridor limit).** This is a GT-oracle
+UPPER BOUND, not a system — no real appearance-only verifier reaches even B
+(SeqSLAM genuine-vs-twin 0.500 = chance; PCM twins; coherence indistinguishable).
+What it reveals: the missing EXTERNAL cue on the corridor would have to fix BOTH
+place discrimination AND relative-pose geometry, not place alone — because
+corridor self-similarity corrupts the along-corridor translation of even a
+correctly-recognized revisit. This is strictly DEEPER than the multi-session wall
+(place only), and it explains why the shipped conservative drought is near the
+frontier: on the MIT infinite corridor there are only ~3 genuine revisits whose
+geometry a lidar matcher can pin down at all, so even oracular place recognition
+buys ~4 %. The synthesis stands and is sharpened: retrieval and the VSA algebra
+are sound; the residual limit is verification — and on aperture-degenerate
+geometry, verification means place AND pose, both of which need an external cue.

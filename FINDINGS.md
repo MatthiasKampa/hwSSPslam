@@ -549,6 +549,21 @@ are each independently validated; a system that pairs them with an external
 verification cue (loop-closure ground truth, GPS, or a discriminative learned
 place model) inherits all three for free.
 
+Two GT-oracle diagnostics quantify that corollary — and reveal the corridor wall
+is DEEPER than multi-session. Multi-session, given correct correspondences: B
+→ 2.49 m (place verification was the *only* missing piece). MIT corridor, given a
+perfect PLACE oracle: 42.66 → only 41.04 m (~4 %). The asymmetry is the finding:
+on aperture-degenerate corridors, perfect place recognition is **necessary but
+not sufficient** — self-similarity also corrupts the relative-pose GEOMETRY (at a
+genuine revisit the matcher slides along the corridor, coherence ~0.40), so of
+1.9 km only ~3 genuine revisits have geometry a lidar matcher can pin down at all
+(dropping the geometry gate admits genuine-but-misaligned slides that make ATE
+*worse*, 73 m). So the external cue the corollary needs is **two-fold on
+corridors — place AND pose** — not place alone; on distinctive geometry
+(multi-session) place alone suffices. The residual limit is verification in the
+full sense (which place, and where exactly), and the shipped conservative drought
+is near the achievable frontier even against a place oracle.
+
 **Open questions.**
 
 1. **The small-correlated-alias case — now CLOSED (robust).** A controlled sweep
