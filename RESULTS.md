@@ -3090,3 +3090,43 @@ overlap refinement cannot add net value without first solving genuine-vs-twin
 discrimination -- the same verification wall, now shown to bound even the
 gradient-flow refinement layer. (Fenced GT-anchor diagnostic, not deployable;
 `ssp_hybrid.py run_multi`.)
+
+---
+
+## Viewpoint-tagged dual-channel submap: compose/dedup WIN, but not a genuine-vs-twin discriminator
+
+The user's submap-storage idea: alongside the content channel, store a second
+VIEWPOINT channel encoding the robot POSES a cell's points were sampled from
+(bind pose with a distinct symbol), so revisits can be told apart by where they
+were seen from (`ssp_viewpoint.py`, agent-built, no shipped module edited; channel
+rides the graph rigidly so a pose update shifts V exactly).
+
+- **Test 3 correctness (selftest) — PASS.** vp_score rigid-invariant under graph
+  correction (max |delta| 6.97e-11), V(anchor+d)==shift(d)*V(anchor) (1.6e-15),
+  channel-OFF == shipped BoundedSLAM bit-exact (0.0), channel-ON leaves the
+  content path bit-exact (0.0).
+- **Test 2 composition/dedup (two-session Intel split) — WIN.** Over 53 overlap
+  cells, viewpoint-overlap median 0.901; DEDUP (overlap>0.5 = redundant revisit)
+  flags 48/53 = 0.91 as revisits vs 5 as NEW coverage, where blind bundling
+  double-counts ALL 53. GT validates the signal: corr(vp-overlap, -true_viewpoint_
+  gap) = **+0.929**. So the viewpoint channel is genuinely useful for redundancy
+  detection in map COMPOSITION -- the original submap-storage use case.
+- **Test 1 discrimination (genuine revisit vs twin) — NOT a net discriminator.**
+  Intel (3866 genuine / 20765 twin candidates): content-coherence AUC 0.679;
+  viewpoint best (lam_view=8m) vp-alone AUC 0.896 and content x vp 0.863 (a real
+  +0.184 over content) -- BUT vp-alone 0.896 does NOT beat the SPATIAL-PROXIMITY
+  CONFOUND (AUC 0.909, delta -0.013), and FP@recall0.8 = 1.000. On low-drift Intel
+  the viewpoint channel is essentially re-encoding "are these anchors near each
+  other in the estimate," which the pose graph already gives for free. MIT (deep
+  corridor): EVERYTHING is weak -- content AUC 0.551, vp-alone 0.488 (BELOW chance),
+  confound 0.634, content x vp 0.551 (no gain); the corridor wall admits no
+  appearance discrimination at all.
+
+**Verdict:** viewpoint dual-channel is a correctness-clean WIN for composition/
+redundancy-dedup (corr +0.93) -- valuable for the bounded-map storage question --
+but it is NOT a solution to the verification wall: on Intel it is confounded by
+spatial proximity (adds nothing beyond the pose estimate), and on MIT it carries
+no signal (below chance). Consistent with every prior thread: genuine-vs-twin
+discrimination is the irreducible wall; where drift is low the pose already
+discriminates, and where drift is high (the case that needs it) appearance --
+content OR viewpoint -- cannot. (`ssp_viewpoint.py`; logs scratch_viewpoint_*.log.)
