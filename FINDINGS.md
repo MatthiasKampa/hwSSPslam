@@ -35,10 +35,12 @@ deterministic, reproduced bit-exact by an independent auditor.
 
 | log | ours | raw odometry | map memory | speed |
 |---|---|---|---|---|
-| Intel Research Lab (full) | **2.440 m** (med 1.553) | 24.2 m | 5–8 MB | 17 ms/kf |
+| Freiburg 101 (held-out, dense-revisit building) | **1.883 m** | 8.56 m | 1.9 MB | — |
+| Intel Research Lab (full) | 2.440 m (med 1.553) | 24.2 m | 5–8 MB | 17 ms/kf |
+| Belgioioso Castle (held-out, non-Manhattan) | 2.640 m (range-identity eval) | **1.72 m** | — | — |
 | Freiburg 079 (zero-shot) | 5.523 m | 14.35 m | 3.5 MB | 30 ms/kf |
 | ACES3 Austin (zero-shot) | 6.212 m | **5.41 m** | 5.3 MB | 13 ms/kf |
-| MIT Infinite Corridor, 1.9 km (held-out) | 38–58 m | 189.3 m | 27 MB | 12–21 ms/kf |
+| MIT Infinite Corridor, 1.9 km (held-out) | 42.66 m (38–58 band) | 189.3 m | 27 MB | 12–21 ms/kf |
 
 In-repo reference baselines (identical parsing / keyframing / eval,
 `baseline_*.py`; see "Reference baselines"): ICP + pose graph **1.70 m** (15–35
@@ -46,15 +48,33 @@ MB, retains all scans), correlative grids 3.27 m, RBPF/GMapping-lite **0.12 m**
 (39–56 MB peak, particle grids). The positioning is deliberate: RBPF is a ~20×
 accuracy gap on revisit-dense logs; ICP beats us everywhere at 2–4× our memory
 with full scan retention. We hold the smallest, boundedly-sized, history-free
-state. **ACES is a frank negative** (its odometry is already excellent and only
-17 closures fired on one large sparse loop). **MIT is the honest held-out test**
-— 4–6× longer than any tuning log, zero code/parameter changes, a 3.3× drift
-reduction that demonstrates the revisit-density limit at full scale.
+state. The stack pays off **in proportion to dead-reckoning drift**, and three
+held-out logs (fr101, belgioioso, MIT — zero code/parameter changes) now nail
+that down from both ends:
+
+- **fr101 is the best transfer result in the project (1.88 m).** A dense-revisit
+  loopy building — exactly the regime loop closure exists for — where everything
+  stacks: odometry 8.56 → frontend 3.16 → +loops 1.88 m on 53 accepted closures.
+- **belgioioso (2.64 m) is the honest non-Manhattan probe.** Castle stone-wall /
+  courtyard geometry, precisely the octave-ring matcher's one documented
+  environment fragility; it lands close but does not beat its own excellent
+  odometry (1.72 m).
+- **ACES (6.21) and belgioioso (2.64) are the two frank negatives, and they are
+  the SAME failure mode:** where dead-reckoning is already excellent, the
+  scan-matching frontend replaces good odometry deltas with slightly worse ones
+  (see "The frontend do-no-harm gap", §6). Not a loop-backend failure — on ACES
+  the closure backend is net-positive.
+- **MIT is the deep held-out test** — 4–6× longer than any tuning log, a 3.3×
+  drift reduction that demonstrates the revisit-density limit at full scale, and
+  the site of the now-closed corridor information-limit (§5).
 
 > **Transfer caveat (referee).** Intel/fr079/ACES are no longer held out: the
-> shipped config was selected by minimizing the worst-of-three ATE ratio. MIT
-> is the only genuinely unseen log. The drift-proportional-payoff pattern held
-> there in relative form exactly as the ledger predicted.
+> shipped config was selected by minimizing the worst-of-three ATE ratio.
+> fr101, belgioioso, and MIT are the genuinely unseen logs, all run zero-retune.
+> The drift-proportional-payoff pattern held on every one exactly as the ledger
+> predicted: fr101 (high drift, revisit-dense) is the best result; belgioioso and
+> ACES (low drift) are the honest ceilings; MIT (high drift, revisit-sparse) is
+> the graceful-degradation case.
 
 ---
 
@@ -136,8 +156,16 @@ split is the shipped map refinement.
   δ=0.5°, tapering to 1.1× at the 1.5° lattice edge, turning *harmful* beyond ~2°
   (accurate near the expansion point, wrong far from it). The operating range
   [0, 1.5°] sits entirely in its beneficial regime; removing it costs ~4× on the
-  bench. Nothing is ever re-encoded, so between relaxations the representation
-  cannot drift.
+  bench. The equal-storage question is now **settled** ("Derivative vs angular
+  resolution at equal storage"): the derivative doubles matched-band storage
+  (segvec 240 + segder 240), and spending that same budget on angles instead
+  (120 angles, no derivative, identical 480 components) loses decisively —
+  **Intel 2.44 vs 7.93 m, fr079 5.52 vs 14.8 m**, at 2× the matcher compute. The
+  derivative is load-bearing, not a wash: 60 angles + derivative dominates raw
+  angular density on both accuracy-per-component and accuracy-per-flop, because
+  angular resolution is not the bottleneck — rotational *fidelity* is, and the
+  analytic first-order term delivers it in half the dimensions. Nothing is ever
+  re-encoded, so between relaxations the representation cannot drift.
 
 - **Translation = phase, rotation = exact permutation.** Translation by d is
   elementwise ×exp(iWd); rotation by a grid step m·π/60 is an exact circular
@@ -227,77 +255,152 @@ must be graph-consistent (R1) AND viewpoint-neutral.
 
 ---
 
-## 5. The corridor information-limit (the centerpiece)
+## 5. The corridor information-limit (the centerpiece) — CLOSED
 
-Five independent lines of attack on the MIT corridor's residual error all
-converge on one conclusion: **place-recognition information is starved at the
-coarse relocalization wavelengths (λ 5.3/12.8 m), and no verification,
-consensus, belief, or multi-scale trick recovers it** — the corridor blur
-washes out door/alcove-scale detail, leaving retrieval that works only at
-distinctive junctions.
+The MIT infinite corridor's residual error (42.66 m; med-error band 38–58 m) is
+the deepest thread in the project, and it is now **closed**. The conclusion is
+sharper — and more general — than the earlier framing: the corridor is
+**fundamentally ambiguous from 2D-lidar appearance at every level available to a
+bounded, appearance-only SLAM** — per-frame, per-place-descriptor,
+per-geometric-consensus, and per-temporal-sequence. This is an information limit
+of the sensor–environment pair, triangulated from three *independent* directions,
+not a tuning or representation gap. (The earlier framing — "place-recognition
+information is starved at the coarse relocalization wavelengths" — was the
+correct *local* diagnosis but the wrong *root cause*; §5.3 below overturns it.)
 
-1. **Drought relocalization** ("R3 refinement"). A map-anchored coarse search
-   against the global relocalization vector, fired only after a genuine-closure
-   drought, breaks *engineered* droughts on the bench cleanly (329→5 cm, 4/4
-   seeds) and re-anchors the MIT run at two distinctive junctions (45.3→38.0 m,
-   final-third closures 15→27). But it never breaks the deep final-hour corridor
-   drought. The lesson: *aggressiveness is the enemy* — every harmful snap came
-   from faster pairing in self-similar corridor stretches, and a wrong
-   pre-aligned building-scale snap is unrecoverable. The 25-kf cadence is the
-   load-bearing independence guarantee.
+### 5.1 The first pincer (drought / R4 / R5 / cascade / belief)
 
-2. **The numeric capacity/aliasing study** ("Aliasing and capacity"). Diagnoses
-   *why*: under MIT drift the matched band is **dead** (peak attenuated to
-   0.03–0.09 of clean); only the relo band survives, and its corridor recall@40
-   plateaus at 1.00 at 125 m → 0.50 at 1 km → 0.25 at 1.9 km. MIT (2402 places)
-   sits ~6× over the single-vector 75% capacity. Sharding the coarse vector by
-   travel distance is the capacity fix; per-ring whitening + NMS remove the
-   red-dominance alias trap.
+Five refinements established that no verification, consensus, belief, or
+multi-scale trick recovers the corridor within the shipped coarse-band retrieval.
+**Drought relocalization** ("R3 refinement") breaks *engineered* droughts on the
+bench (329→5 cm, 4/4 seeds) and re-anchors MIT at two distinctive junctions
+(45.3→38.0 m) but never the deep corridor — *aggressiveness is the enemy*, a
+wrong pre-aligned building-scale snap is unrecoverable. **R4** (whitening + NMS +
+sharded store) sharpened retrieval but converted misses into *consistent wrong
+snaps* (the wrong twin agreed tighter — 0.54 m / 0.6° — than genuine junctions).
+**R5** replaced R4's heuristics with Mangelson et al.'s Pairwise-Consistent-
+Measurement-Set max-clique consensus, bit-identical, and returned the verdict
+"there is no consensus to find" — the deep-corridor wrong fires are mostly
+pairwise-inconsistent scatter. The **scale-cascade** is a better twin
+*discriminator* (AUC +0.11) but can only *reject*, not *recall*. The **belief
+frontend** showed the aperture worlds have the *tightest* frontend surfaces
+(corridor posterior p90 8.8 cm, 0.0% multimodal): the drift is not represented as
+frontend ambiguity, so carrying belief regresses everywhere it fires. The pincer
+localized the wall to retrieval at the coarse relo wavelengths (λ 5.3/12.8 m) —
+but could not say whether that was an *environment* limit or a *summary* artifact.
 
-3. **R4 (whitening + NMS + sharded store)** ("R4 refinement"). Lands the study's
-   recommendations cleanly (bench 4/4, Intel/fr079 bit-identical, +4–15 KB) — but
-   the study's projected recall 0.25→0.75 **does not transfer**: in-pipeline
-   corridor recall moves only 0.00→0.04. All 104 R4 failures at true revisits are
-   *wrong-peak* (confident z≥3 hypotheses at the wrong corridor twin), zero
-   sub-gate misses. Sharper retrieval converts misses into *consistent wrong
-   snaps* — the one wrong pair agreed **tighter** (0.54 m / 0.6°) than genuine
-   junction snaps (0.72 m / 2.6°). Only a search-breadth escalation (demand a
-   third fire when the sweep exceeded 6000 cells) stops it.
+### 5.2 Scan-Context control: the signal IS in the raw scan (representation, not environment)
 
-4. **R5 (PCM consensus admission)** ("R5 refinement"). Replaces R4's three
-   heuristics with Mangelson et al.'s Pairwise-Consistent-Measurement-Set
-   maximization (SE(2) cycle-consistency graph + max clique), reproducing every
-   shipped number bit-identically. Its verdict is the sharp one: **there is no
-   consensus to find**. Retrieval scores **0/106 stage-1 hits** at deep true
-   revisits, so no true clique can exist; and the deep-corridor wrong fires are
-   mostly *pairwise-inconsistent scatter* (clique_max=1 even with 3–6 co-located
-   candidates) with only sporadic 28-kf twin pairs the consensus-size rule holds.
-   The limit is **not** a correlated-alias family fooling the backend (the case
-   consensus clustering is built to catch) — it is upstream information
-   starvation no backend consensus can undo, true or false.
+The decisive control. A Scan-Context radial ring-key computed on the *raw* MIT
+scan retrieves true revisits at **recall@40 0.808** (deep/late-corridor third
+0.788) where the coarse SSP relo band scores **0.317** (deep 0.273) — and 0/106
+at the deepest revisits. **The coarse-band "starvation" was a
+representation/summary artifact, not an environment limit:** the radial-occupancy
+signal that distinguishes corridor places is present and retrievable; the
+λ 5.3/12.8 m summary throws it away. This overturns the §5.1 root-cause reading.
 
-5. **Scale-cascade** ("Iterative slow-to-fast scale-cascade") + **belief
-   frontend** ("Belief-carrying frontend") close the pincer. The cascade is a
-   materially better twin *discriminator* on labelled synthetic corridors (AUC
-   +0.11, false edges halved at equal recall) but inherits the coarse rings'
-   place-recognition limit: it can *reject* a twin the coarse ring locked onto
-   (precision) but cannot *recall* a closure the coarse ring missed. The belief
-   frontend shows the aperture worlds have the **tightest** frontend surfaces
-   (corridor posterior spread p90 8.8 cm, 0.0% multimodal — tighter than the
-   well-conditioned room): the drift that makes closures necessary is *not*
-   represented as frontend ambiguity (the frontend is confidently-and-
-   consistently slightly-wrong), so carrying belief regresses every log wherever
-   it fires.
+### 5.3 Ring-key shortlister: retrieval solved — and the wall moves to CONSENSUS
 
-**Synthesis:** retrieval was never the MIT bottleneck; verification *information*
-is, and it is absent at the coarse wavelengths. A finer relocalization band
-cannot be world-frame-summed (Law R1), so within this architecture the
-deep-corridor residual is a genuine **place-recognition information limit**, not
-a tuning gap.
+Wiring that ring-key retrieval into the drought path (`ssp_ringkey.py`, feeding
+the unchanged verify + PCM admission) recovers 84/104 true revisits vs the coarse
+band's 33/104 — retrieval is *solved in-pipeline*. Yet the ATE does **not**
+improve: verified drought fires jump **70 → 252** while admitted PCM cliques go
+**2 → 0**, and ATE nudges *worse*, **42.66 → 45.24 m**. The 252 fires include
+many corridor **twins** that each pass fine geometric verification (they align)
+but point to *different* wrong places, so PCM finds no pairwise-consistent
+clique — and the extra genuine revisits arrive diluted by even more twin scatter.
+**Better retrieval made geometric consensus HARDER, not easier.** The wall was
+never retrieval; it is twin disambiguation / consensus.
+
+### 5.4 SeqSLAM: the corridor is SEQUENCE-AMBIGUOUS (the last independent axis)
+
+PCM checks *geometric* pairwise consistency, not *temporal*. SeqSLAM (Milford &
+Wyeth 2012) is the SotA answer to geometric-consensus failure: a genuine revisit
+yields a temporally-consistent *run* of ring-key matches (a velocity-swept
+diagonal); a twin is an isolated coincidence. `ssp_seqslam.py` scores the diagonal
+at each drought candidate. It **also fails**: over 34 true-revisit attempts,
+sequence picks genuine over the best twin **17/34 = 0.500 (chance)**; at every
+gate threshold twins pass at ≥ the genuine rate. Consequently **seq-only snapped
+2 TWINS** (ATE **56.23 m**, max error 200 m — a catastrophic building-scale wrong
+snap); seq+PCM's clique requirement safely blocks the twins (0 snaps) but
+sequence gives PCM nothing new to consense on → 45.24 m, identical to
+drought-off. **Corridor twins produce diagonals as temporally consistent as
+genuine revisits — the geometry is identical over the whole sequence window.**
+
+### 5.5 Conclusion: an information limit, triangulated three ways
+
+| axis of place recognition | probe | verdict |
+|---|---|---|
+| retrieval (per-place descriptor) | Scan-Context / ring-key | signal IS recoverable (0.317 → 0.808) — **not** the bottleneck |
+| geometric consensus | PCM max-clique | twins verify geometrically and scatter; no clique isolates the genuine set |
+| temporal sequence | SeqSLAM diagonal | twin diagonals as consistent as genuine (0.500, chance) |
+
+The MIT infinite corridor is ambiguous from 2D-lidar appearance at *every* level
+a bounded appearance-only SLAM can reach — per-frame, place-descriptor,
+geometric-consensus, and temporal-sequence. Correct relocalization there requires
+an **independent absolute cue** (global positioning, surveyed landmarks, active
+perception, or a wider-aperture/3D sensor) that lidar appearance alone cannot
+supply. This is a property of the *sensor–environment pair*, established from
+three independent directions — not tuning, and not (per §5.2) representation.
+**The shipped conservative drought (2 genuine snaps, 42.66 m) is at the
+achievable frontier; more aggressive relocalization (seq-only) snaps twins and is
+strictly worse (56.23 m).** The right move under an irreducible ambiguity is to
+decline it, which is what ships.
 
 ---
 
-## 6. The negatives (honest table)
+## 6. The frontend do-no-harm gap (a second irreducible limit)
+
+The transfer suite exposed a second, symmetric information limit — this one in
+the scan-matching *frontend* rather than the loop backend. **The frontend helps
+iff odometry drifts, and hurts when odometry is already excellent:**
+
+| log | raw odo | frontend-only | +loops (shipped) | frontend verdict |
+|---|---|---|---|---|
+| Intel | 24.2 | (frontend essential) | 2.44 | hero (odo drifts) |
+| fr101 | 8.56 | 3.16 | 1.88 | hero (odo drifts) |
+| ACES | 5.41 | 6.38 | 6.21 | harmful (odo excellent) |
+| belgioioso | 1.72 | 2.45 | 2.64 | harmful (odo excellent) |
+
+On ACES and belgioioso the damage is **not** in loop-closure admission (the
+backend is net-positive on ACES; belgioioso has one revisit) — it is the frontend
+replacing already-good odometry deltas with slightly worse scan-matched ones. The
+obvious fix is a *do-no-harm guard* that shrinks the frontend correction toward
+the odometry guess when odometry is already self-consistent. It cannot be built
+from anything this sensor suite observes — a **triple negative**:
+
+1. **Per-frame coherence/magnitude** (`ssp_frontguard.py`). The session-relative
+   coherence-ratio distribution is *identical* across regimes (median ~1.0,
+   ~21–26% of frames below 0.85); magnitude *inverts* the naive expectation
+   (ACES's corrections are larger — med 0.036 — than Intel's 0.017). Every sweep
+   rule that helps ACES/belgioioso catastrophically regresses Intel/fr079
+   (+200–420%). A **coherence-blind control** (constant α=0.25) reproduces the
+   same frontier (ACES 3.11 but Intel +478%), proving the regression is intrinsic
+   to *damping*, not a gate artifact.
+2. **Windowed translation-systematicness** (`ssp_frontsys.py`). ρ = ‖Σδᵢ‖/Σ‖δᵢ‖
+   over trailing corrections — meant to separate "systematic drift-fix" from
+   "random map-noise." The regimes **interleave backwards**: fr101 (drift log,
+   frontend essential) has the *lowest* xy ρ of all five logs; scan-match jitter
+   dominates ρ everywhere.
+3. **Windowed heading-systematicness.** Heading corrections *do* median-order
+   correctly (drift 0.15–0.38 vs excellent 0.067–0.085), but the tails overlap;
+   the sweep regresses the drift logs +62–135% while only partially helping ACES.
+   No separable threshold.
+
+"Odometry is already accurate" is a property of the odometry *versus unavailable
+ground truth* — a large frontend correction is per-frame indistinguishable
+between "odometry drifted, trust the match" (Intel) and "odometry fine, match is
+map-noise" (ACES). A do-no-harm guard therefore requires an **independent
+odometry-quality estimate** (wheel-slip / IMU residual) that this 2D-lidar suite
+does not provide. The ACES/belgioioso regression is documented, understood, and
+irreducible; **shipped behavior stands** (declining a guard that cannot be built
+from the available signal). The soft-veto column concentrates its win on Intel;
+hard-veto edges it on the odo-excellent logs, exactly as the coh-target sweep
+predicted — a small, known cost.
+
+---
+
+## 7. The negatives (honest table)
 
 Each was designed, built, tested, and rejected. Fuller accounts under the cited
 RESULTS section.
@@ -313,10 +416,22 @@ RESULTS section.
 | Belief frontend | carried pose belief on the matcher's coarse surface | aperture surfaces are tightest; no ambiguity to catch, firing regresses every log ("Belief-carrying frontend") |
 | Heterodyne virtual rings | synthesize coarse rings vᵢ⊗conj(vⱼ) instead of storing | algebra exact but 1.5–3.6× noisier and never cheaper: free differences never reach the relo band; on-band pairs cost full price ("VSA binding experiments" #2) |
 | Nonlinear per-ring fusion | product/geomean/min of per-ring coherences | golden hazard is a *conjunctive* alias, not per-ring-separable; fusion rescues nothing and lets one weak ring veto the true peak ("VSA binding experiments" #1) |
+| Ring-key drought shortlister | Scan-Context kNN feeding drought verify+PCM | retrieval solved (recall 0.317→0.808) but verified fires 70→252 with **0** admitted cliques (baseline 2); better retrieval makes geometric consensus *harder* (twin scatter), MIT 42.66→45.24 (§5.3, "Ring-key shortlister") |
+| SeqSLAM sequence consistency | velocity-swept diagonal of ring-key matches | corridor twins produce diagonals as temporally consistent as genuine (genuine-vs-twin 0.500 = chance); seq-only snaps 2 twins (56.23 m, catastrophic), seq+PCM adds nothing (§5.4, "SeqSLAM sequence consistency") |
+| Frontend do-no-harm guard | shrink scan-match correction on low-confidence frames | triple negative — per-frame coherence/magnitude, windowed translation-ρ, and heading-ρ all fail; "odometry is already good" is not scan-match-observable (§6, "The frontend do-no-harm gap is CLOSED") |
+
+**Two of these negatives were saved from being false by a read-only audit before
+the result was trusted.** The ring-key run's deep-consensus escalation was
+silently disabled (`noff`=pool-size never reached the `deep_noff` threshold); the
+SeqSLAM run was a lifecycle no-op (the current descriptor was stored *after* the
+drought attempt, so the seq drought early-returned every time — a degenerate
+356/0/0/0 that would have read as "sequence cleanly avoids twins"). Both bugs
+would have inverted the conclusion. Proactive read-only audits ahead of trusting
+a number were consistently high-value across the ledger.
 
 ---
 
-## 7. Novelty & related work
+## 8. Novelty & related work
 
 Claims corrected after a deep literature scout (SotA/vsa_ssp_theory.md,
 SotA/spectral_registration.md; "Related work" in RESULTS).
@@ -328,8 +443,10 @@ SotA/spectral_registration.md; "Related work" in RESULTS).
 
 - **The d/dθ derivative vector — novel in mechanism.** They solve sub-grid
   rotation by bump-vector convolution; we use an analytic first-order Lie
-  correction. The ablation (§3) is the clean proof; a head-to-head against a
-  120-angle-no-derivative lattice at equal storage is the open comparison.
+  correction. The ablation (§3) is the clean proof, and the equal-storage
+  head-to-head is now settled: 60 angles + derivative beats 120 angles-no-
+  derivative decisively (Intel 2.44 vs 7.93 m, fr079 5.52 vs 14.8 m) at half the
+  matcher compute — angular density is not a substitute for rotational fidelity.
 
 - **The golden-ratio-ladder rule — apparently new to registration.** The
   phenomenon is known in grid-cell theory (Vago & Ujfalussy 2018) and its
@@ -352,7 +469,7 @@ SotA/spectral_registration.md; "Related work" in RESULTS).
 
 ---
 
-## 8. Limits, honest framing, and open questions
+## 9. Limits, honest framing, and open questions
 
 **What this is not.** Not SotA-accurate (RBPF is ~20× better on revisit-dense
 logs; ICP beats us everywhere). Not bytes/m²-compact — the SSP map is 3–12×
@@ -366,25 +483,25 @@ fix (merged, verified, opt-in via `windowed=True`).
 history, and the algebra — each verified: Intel plateaus at 698 segments (84% of
 the cell-cap ceiling); MIT grows dead-linear at 1.26 seg/m as new corridor is
 exposed; the map is transformed only by phase ops and permutations, never
-re-encoded. ACES is a frank negative; MIT demonstrates the revisit-density limit
-at scale rather than hiding it.
+re-encoded. ACES and belgioioso are frank negatives (odometry already excellent,
+frontend do-no-harm gap §6); fr101 is the best held-out transfer (1.88 m); MIT
+demonstrates the revisit-density limit at scale rather than hiding it.
+
+**Two former open questions are now closed.** *Derivative vs. angles* is settled
+— 60-angle+derivative beats 120-angle-no-derivative at equal storage on both real
+logs and half the compute (§3, §8). *A richer corridor descriptor* was the
+central open question under the old §5 framing; the ring-key / SeqSLAM
+triangulation (§5.2–5.5) answers it in the negative — a richer *appearance*
+descriptor does recover retrieval, but the corridor is ambiguous at consensus and
+sequence too, so no appearance-only descriptor closes the limit. The next lever
+is not a better descriptor but an **independent absolute cue** (IMU/wheel-slip
+for the frontend do-no-harm guard §6; global positioning / surveyed landmarks /
+3D or wider-aperture sensing for the corridor §5.5) — outside this bounded,
+appearance-only, 2D-lidar problem statement.
 
 **Open questions.**
 
-1. **Derivative vs. angles.** Does 60-angle+derivative or
-   120-angle-no-derivative match better at equal storage? They differ in compute
-   (120 angles doubles matcher cost; the derivative only adds storage), so it is
-   a tradeoff, not a free swap. Needs a lattice rebuild — flagged, not chased.
-
-2. **A richer descriptor for corridor place recognition.** The information limit
-   (§5) is at the coarse wavelengths; a finer relocalization band cannot be
-   world-frame-summed under Law R1. What kind of graph-consistent,
-   viewpoint-neutral, single-burst descriptor could carry enough
-   place-recognition information along corridors — without reintroducing the
-   O(time) growth that ephemeral segments were meant to avoid — is the central
-   open question.
-
-3. **The small-correlated-alias case.** Outlier robustness is proven against
+1. **The small-correlated-alias case.** Outlier robustness is proven against
    i.i.d. and large (1.05 m) correlated aliases; small repetitive-bay-scale
    correlated aliases (0.2–0.35 m) remain the unprobed hard case, and are exactly
    the regime the corridor information limit lives in.
