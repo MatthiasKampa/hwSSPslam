@@ -547,7 +547,15 @@ place model) inherits all three for free.
 
 **Open questions.**
 
-1. **The small-correlated-alias case.** Outlier robustness is proven against
-   i.i.d. and large (1.05 m) correlated aliases; small repetitive-bay-scale
-   correlated aliases (0.2–0.35 m) remain the unprobed hard case, and are exactly
-   the regime the corridor information limit lives in.
+1. **The small-correlated-alias case — now CLOSED (robust).** A controlled sweep
+   of a fixed correlated alias (0.15–1.0 m, 10 % injection, room/corridor/sparse)
+   shows the backend is robust at *every* magnitude — ATE lift ≤ +0.26 cm across
+   the whole range, including the 0.2–0.35 m regime. Two-layer defense: the
+   innovation gate rejects only large aliases (>~0.9 m ≈ 3× the drift cap), and
+   IRLS Cauchy downweighting neutralizes the small ones that pass the gate (they
+   survive as edges but carry negligible weight — a fixed alias disagrees with the
+   genuine closures it corrupts). Crucially this is a DISTINCT failure mode from
+   the corridor limit: outlier injection places the alias *alongside* a genuine
+   competitor (so IRLS can downweight it), whereas a corridor twin has *no*
+   genuine competitor to weigh against — so this result sharpens, not softens, the
+   corridor verification finding. The two are orthogonal.

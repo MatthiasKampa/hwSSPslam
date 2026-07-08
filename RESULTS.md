@@ -2571,3 +2571,50 @@ recurring bottleneck across every thread this campaign is the SAME one:
 verification/discrimination, not retrieval. Best honest oracle-free multi-session
 result: merged two-session 3.35 m via PCM clique>=2 (better than the drifted
 single session, short of the same-lap ceiling).
+
+---
+
+## Small-correlated-alias robustness floor (the last open question) — CLOSED
+
+Outlier robustness was proven against i.i.d. and LARGE (0.6-1.2 m) correlated
+aliases; the unprobed hard case was SMALL repetitive-bay-scale correlated aliases
+(0.2-0.35 m), the magnitude regime the corridor limit lives in. `scratch_small
+alias.py` sweeps a CONTROLLED correlated alias (one fixed wrong transform of
+magnitude m + 9 deg, injected on 10 % of genuine candidates via a FixedAliasSLAM
+subclass that pre-sets `_alias`) over m in [0.15, 1.0] m, paired seeds, on three
+worlds. ATE lift over the clean baseline (cm):
+
+| world | clean | lift @ all m (0.15-1.0) | surv @0.15 -> @1.0 |
+|---|---|---|---|
+| room     | 6.42  | -0.20 (flat)  | 13.5 -> 0.75 |
+| corridor | 379.1 | -0.05 (flat)  | 5.2 -> 5.0 |
+| sparse   | 12.08 | +0.26 (flat)  | 27.2 -> 0.0 |
+
+**The backend is robust to small correlated aliases at EVERY magnitude** — ATE
+lift is negligible (-0.20 to +0.26 cm) across the whole 0.15-1.0 m range,
+including the 0.2-0.35 m regime. Mechanism = a TWO-LAYER defense, cleanly split
+by magnitude:
+- The INNOVATION GATE rejects only LARGE aliases (> ~0.9 m ~= 3x the 0.30 m drift
+  allowance cap). `innov-rej` is CONSTANT across m (25 room / 25 sparse / 0.2
+  corridor) — those are genuine-drift rejections, not the alias; the gate never
+  sees the small aliases as anomalous because they sit within the drift ball.
+- IRLS CAUCHY DOWNWEIGHTING neutralizes the small aliases that pass the gate.
+  `surv` (edges corrupted past the genuine scale) RISES as m falls (sparse
+  27->0, room 13->0.75) — the small aliases ARE admitted as edges — but `pruned`
+  ~= 0.2 (LOO almost never fires) and ATE stays flat, so they are not removed,
+  they are LOW-WEIGHTED: a fixed alias disagrees with the genuine closures at the
+  same location, so the robust loss caps its pull. The gate handles the large
+  outliers; IRLS handles the small ones the gate is blind to.
+
+**Crucial distinction (why this does NOT contradict the corridor limit).** This
+injection model adds the alias to GENUINE candidates, so a genuine closure is
+always present for IRLS to disagree with — that is exactly why the small alias is
+downweighted. The corridor-twin failure (RESULTS §corridor) is a DIFFERENT mode:
+a drought relocalization to a self-similar twin where there is NO genuine
+competitor at all, so IRLS has nothing to weigh it against and consensus/sequence
+cannot discriminate. Outlier-injection robustness (this section) and the corridor
+verification limit are distinct failure modes: the backend rejects/downweights
+correlated outliers that COMPETE with genuine data, but cannot verify a place
+that has no genuine competitor. This closes the small-correlated-alias open
+question (robust, via IRLS not the gate) while sharpening — not softening — the
+corridor verification finding: the two are orthogonal.
