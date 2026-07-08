@@ -2811,3 +2811,63 @@ retrieval + a discriminating verifier. IMPLICATION for map handling: BUNDLED
 whole-map comparison is fundamentally aliasing/clutter-limited, which motivates
 PER-CLUSTER comparison (compare candidate patches individually, let consensus
 select) over a single bundled inner product.
+
+---
+
+## Per-cluster vs bundled map comparison — SPLIT: bundling is a real signal cost, but NOT the verification wall
+
+Direct test of the hypothesis the section above raises: does bundling M candidate
+patches into ONE inner product throw away the genuine-vs-twin discrimination that
+comparing patches individually preserves? Representation-level version of the
+recurring verification wall (`ssp_percluster.py`, subclasses BoundedSLAM; oracle-
+free — GT ever only LABELS genuine-vs-twin, never selects). Three measurements at
+both query paths. DISTINCTION from SeqSLAM (temporal per-frame sequence, 0.500 on
+MIT): this is SPATIAL per-patch comparison (query vs each map segment separately).
+
+- **CAPACITY / crosstalk (frontend local-map model, 120 sites).** Bundle M real
+  recent segments, match the scan against the sum vs each segment separately. The
+  genuine match's peak cosine decays with bundle size — Intel M=1..64:
+  0.886 -> 0.694 -> 0.518 -> 0.374 -> 0.222 (log-log slope **-0.35**; MIT slope
+  -0.34), between 1/sqrt(M) capacity and the local-J0 saturation the capacity
+  study already found. Per-cluster is **M-invariant** (0.886 at every M). And the
+  BUNDLED peak increasingly lands on the WRONG segment — it cannot tell which
+  patch fired: wrong-patch rate 6.7 % (M=2) -> 32 % (M=4) -> 50 % (M=16) ->
+  **72 %** (M=64) on Intel (31 % on the more self-similar MIT). So bundling DOES
+  throw away signal and provenance; per-cluster removes both, at exactly K-fold
+  compute (~12 matches/frame here). This half of the hypothesis is CONFIRMED.
+
+- **CLOSURE discrimination — genuine vs twin (140 dual-queries each, ring-key
+  top-15 retrieval, GT labels).** On INTEL (distinctive content) per-cluster
+  gives a real but modest edge: per-patch coherence AUC **0.557**, per-cluster
+  max-over-patches AUC **0.573** (median separation +0.055, positive on 61 % of
+  queries) vs BUNDLED chain coherence AUC **0.479** (separation -0.008, 49 %) —
+  bundled chain sits AT/below chance because the 2-3-segment sum mixes in
+  adjacent-place content. But on the MIT CORRIDOR — the actual wall — per-cluster
+  does NOT help: per-patch AUC **0.484** (chance), and max-over-patches AUC
+  **0.217** is WORSE than bundled 0.166, because taking the max over the ~12
+  twins/query amplifies the best-aliasing twin (separation -0.070). FP@90 %-recall
+  is ~0.90-1.0 in every configuration. Twins alias per-patch exactly as they alias
+  per-sequence (SeqSLAM 0.500) and per-coherence-median (0.171 vs 0.172): the
+  corridor wall is INTRINSIC to the appearance content, invariant to whether you
+  bundle, sequence, or compare per-patch.
+
+- **FRONTEND ATE (bundled shipped vs per-cluster localization).** Not a robust win
+  — bundling's summation also AVERAGES OUT per-patch aliasing (protective), and
+  per-cluster's greedy best-single-patch selection trades that robustness for
+  crosstalk-free signal: **fr101 1.881 -> 0.914 m** (-0.97; closures-OFF audit
+  3.158 -> 1.427, so the gain is genuinely frontend, not closure luck), but
+  **fr079 5.523 -> 9.283 m** (+3.76, a single confident aliasing patch wins), and
+  **Intel 2.440 -> 2.369 m** (neutral RMSE, median WORSE 1.55 -> 2.30). One big
+  win, one big loss, one wash — high variance, no robust operating point.
+
+VERDICT (decisive, split): bundling is a REAL, quantified representation-level cost
+(the genuine match dilutes ~M^-0.35 and provenance is lost — the frontend and
+distinctive-content closure feel it), and where content is distinctive per-cluster
+recovers a modest discrimination edge (Intel closure AUC 0.573 vs 0.479; fr101 ATE
+halved). BUT per-cluster is NOT the lever that breaks the wall: on the MIT corridor
+it is chance-to-worse, and as a frontend it is a variance trade, not a net gain,
+because bundling's averaging is itself protective. The recurring verification wall
+is in the CONTENT, not the aggregation. Bundling stays the right default for the
+frontend/closure; the actionable residue is that where the local map has a clean
+dominant overlapping patch, a per-cluster best-patch frontend can sharply help
+(fr101) — a conditional lever, not a shippable one.
