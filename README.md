@@ -26,10 +26,15 @@ ATE rmse vs RBPF-corrected references; `ssp_bounded_carmen.py <log>`:
 |---|---|---|---|---|
 | Intel Research Lab (full) | **2.44 m** (median 1.55) | 24.2 m | 5–8 MB | 15–17 ms/kf |
 | Freiburg 101 (held-out) | **1.88 m** (median 1.55) | 8.56 m | 1.9 MB | 27 ms/kf |
-| Freiburg 079 (zero-shot) | 5.52 m | 14.4 m | 3.5 MB | 30 ms/kf |
-| ACES3 Austin (zero-shot) | 6.21 m | 5.41 m | 5.3 MB | 13 ms/kf |
+| Freiburg 079 (no retune) | 5.52 m | 14.4 m | 3.5 MB | 30 ms/kf |
+| ACES3 Austin (no retune) | 6.21 m | 5.41 m | 5.3 MB | 13 ms/kf |
 | Belgioioso Castle (held-out) | 2.64 m | 1.72 m | 1.6 MB | 27 ms/kf |
-| MIT Infinite Corridor, 1.9 km (held-out) | 38–58 m | 189 m | 27 MB | 12–21 ms/kf |
+| MIT Infinite Corridor, 1.9 km (held-out) | 42.66 m (38–58 band) | 189 m | 27 MB | 12–21 ms/kf |
+
+*Transfer caveat:* Intel/fr079/ACES are **not** held out — the shipped config was
+selected by minimizing the worst-of-three ATE ratio over those three, so they are
+the selection set (run with no per-log retune, but not unseen). **fr101,
+belgioioso, and MIT are the genuinely held-out logs**, all zero-retune.
 
 In-repo baselines on identical parsing/keyframing/eval (`baseline_*.py`):
 ICP+graph 1.70 m (35 MB, retains all scans), correlative grids 3.27 m,

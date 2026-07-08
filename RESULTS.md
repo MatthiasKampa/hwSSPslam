@@ -35,7 +35,8 @@ continual system runs Intel at 2.440 m ATE / 3.6 cm-per-m RPE@10m median
 Intel/fr079/ACES, so those logs are no longer held-out. HELD-OUT TEST RUN
 (MIT Infinite Corridor, 17,480 scans, 1.9 km, 2.1 h — 4-6x longer than any
 tuning log; zero code/parameter changes): bounded SLAM 57.8 m rmse vs raw
-odometry 189.3 — a 3.3x reduction on a genuinely unseen log at 12 ms/kf and
+odometry 189.3 (ORIGINAL held-out record; drought relocalization R3/R4/R5 later
+improved this to the SHIPPED 42.66 m / ~4.4x — see those sections) at 12 ms/kf and
 a 27 MB map, degrading gracefully (locally rigid, globally bent) rather than
 diverging; only 77 closures fired (~0.5% density, none in the final hour),
 demonstrating the revisit-density limit on real data at full scale. The
@@ -1573,7 +1574,11 @@ the consensus-size requirement correctly holds. This sharpens the corridor
 verdict one level past R4: the limit is not a correlated-alias family fooling
 the backend (DC-GM's case, which PCM/consensus clustering is built to catch) —
 it is upstream information STARVATION that no backend consensus can undo, true
-or false. The gain R5 books is not accuracy (it matches R4 bit-for-bit) but
+or false. [ROOT CAUSE LATER CORRECTED — see "Richer place descriptor" and
+"Ring-key shortlister" below: the coarse-band starvation is a representation
+artifact (retrieval recovers to 0.808); the true wall is verification/consensus,
+which SeqSLAM then shows is sequence-ambiguous. This R5 line is kept as
+stratigraphy.] The gain R5 books is not accuracy (it matches R4 bit-for-bit) but
 architecture and evidence: R4's three separate heuristics (single-pending
 replace-on-conflict, implied-correction-at-anchor agreement, and a bolt-on
 deep-search hold) collapse into one principled PCM admission layer with 8 years
@@ -2066,7 +2071,11 @@ match is low-coherence / ill-conditioned by the indicators already computed for
 loop closures) could recover ACES + belgioioso toward odometry parity without
 touching Intel/fr079/fr101, where odometry drifts and the frontend is the hero
 (Intel 24.2 -> 2.44). Open experiment; a load-bearing frontend change, so it
-needs the full six-log validation before it can ship. NOTE the hard-veto column
+needs the full six-log validation before it can ship. [OUTCOME: this guard was
+built and REFUTED — see "The frontend do-no-harm guard: a clean negative" and
+"... is CLOSED: a triple negative" below. No per-frame or windowed signal
+separates the regimes; the gap is irreducible at the frontend.] NOTE the
+hard-veto column
 still edges soft@0.55 on both odo-excellent logs (ACES 5.94 vs 6.21, fr101 1.80
 vs 1.88) exactly as the worst-of-three coh_target sweep predicted — soft's win
 is concentrated on Intel; it is a small, known cost elsewhere.

@@ -68,9 +68,9 @@ that down from both ends:
   scan-matching frontend replaces good odometry deltas with slightly worse ones
   (see "The frontend do-no-harm gap", §6). Not a loop-backend failure — on ACES
   the closure backend is net-positive.
-- **MIT is the deep held-out test** — 4–6× longer than any tuning log, a 3.3×
-  drift reduction that demonstrates the revisit-density limit at full scale, and
-  the site of the now-closed corridor information-limit (§5).
+- **MIT is the deep held-out test** — 4–6× longer than any tuning log, a ~4.4×
+  drift reduction (42.66 m vs raw 189.3) that demonstrates the revisit-density
+  limit at full scale, and the site of the now-closed corridor limit (§5).
 
 > **Transfer caveat (referee).** Intel/fr079/ACES are no longer held out: the
 > shipped config was selected by minimizing the worst-of-three ATE ratio.
@@ -313,10 +313,12 @@ but could not say whether that was an *environment* limit or a *summary* artifac
 
 ### 5.2 Scan-Context control: the signal IS in the raw scan (representation, not environment)
 
-The decisive control. A Scan-Context radial ring-key computed on the *raw* MIT
-scan retrieves true revisits at **recall@40 0.808** (deep/late-corridor third
-0.788) where the coarse SSP relo band scores **0.317** (deep 0.273) — and 0/106
-at the deepest revisits. **The coarse-band "starvation" was a
+The decisive control. A standalone Scan-Context radial ring-key computed on the
+*raw* MIT scan retrieves true revisits at **recall@40 0.674** (deep-corridor
+third 0.717) where the coarse SSP relo band scores **0.000** (0/106 at the
+deepest revisits). Wired into the drought pipeline as a shortlister (§5.3) the
+same descriptor reaches **0.808** (coarse-band 0.317 on the identical attempts) —
+the canonical 0.32→0.81 lift. **The coarse-band "starvation" was a
 representation/summary artifact, not an environment limit:** the radial-occupancy
 signal that distinguishes corridor places is present and retrievable; the
 λ 5.3/12.8 m summary throws it away. This overturns the §5.1 root-cause reading.
@@ -493,8 +495,10 @@ SotA/spectral_registration.md; "Related work" in RESULTS).
 
 ## 9. Limits, honest framing, and open questions
 
-**What this is not.** Not SotA-accurate (RBPF is ~20× better on revisit-dense
-logs; ICP beats us everywhere). Not bytes/m²-compact — the SSP map is 3–12×
+**What this is not.** Not SotA-accurate (ICP beats us everywhere; RBPF's ~14×
+edge on revisit-dense logs is partly self-referential — the ATE reference is
+itself GMapping/RBPF output, see the circularity caveat under §1). Not
+bytes/m²-compact — the SSP map is 3–12×
 *denser* per m² than a 5 cm occupancy grid; the memory win holds only against
 history-storing baselines. Trajectory bookkeeping still grows O(time) (as any
 trajectory output must); full-graph relaxation is the one remaining O(t) compute
