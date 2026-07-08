@@ -33,8 +33,15 @@ ATE rmse vs RBPF-corrected references; `ssp_bounded_carmen.py <log>`:
 
 In-repo baselines on identical parsing/keyframing/eval (`baseline_*.py`):
 ICP+graph 1.70 m (35 MB, retains all scans), correlative grids 3.27 m,
-RBPF/GMapping-lite **0.12 m** (56 MB peak, particle grids). The honest
-positioning: this project's contribution is the **representation** —
+RBPF/GMapping-lite **0.12 m** (56 MB peak, particle grids). *Caveat on the
+0.12 m:* the ATE reference (`intel.gfs.log`) is itself GridFastSLAM (GMapping,
+an RBPF grid SLAM) output, so the RBPF baseline is scored against its own
+algorithm family and its number is **partly self-referential** — not
+head-to-head comparable with the non-RBPF methods. The mutually comparable,
+cross-family numbers are **ours 2.44, ICP 1.70, CSM 3.27** (all "distance to a
+GMapping estimate"); treat RBPF's 0.12 as "reproduces the reference," not a
+14× accuracy win. The honest positioning: this project's contribution is the
+**representation** —
 **O(area)-bounded** (not O(time)), **history-free**, **algebraically
 transformable** maps at usable accuracy — not state-of-the-art accuracy, and
 not raw spatial compactness. Per m² the SSP map is actually *denser* than an

@@ -225,11 +225,23 @@ in the curved blob world and loses everywhere flat walls dominate.
 | Correlative grids (`baseline_csm.py`) | 3.27 (med 0.98) | 2.27 | 0.22 | 15-26* | 19-28 MB | endpoints+grids |
 | RBPF GMapping-lite (`baseline_rbpf.py`) | **0.12** | 2.74** | **0.12** | 6 | 39-56 MB peak | particle grids |
 
-*under shared-CPU load. **high seed variance (1.26-2.74 across seeds).
+*under shared-CPU load. **high seed variance (1.26-2.74 across seeds); the
+Intel 0.12 is single-seed and should carry a mean+/-std.
+CIRCULARITY CAVEAT (do not read RBPF's 0.12 as a head-to-head win): the ATE
+reference (`*.gfs.log`) is itself GridFastSLAM/GMapping output — an RBPF grid
+SLAM — so the RBPF baseline is scored against its OWN algorithm family. Both
+build occupancy grids from the same scans with the same motion model, so their
+errors are correlated by construction and RBPF's error toward the reference
+collapses toward zero. The mutually comparable, cross-family numbers are ours
+2.44 / ICP 1.70 / CSM 3.27 (all "distance to a GMapping estimate"); RBPF's 0.12
+is the one non-comparable outlier — "reproduces the reference," not 14x more
+accurate in absolute terms. (An underpowered lite RBPF still hitting 0.12
+reinforces this — it is structural, not skill.)
 Honest verdict: RBPF is GMapping-class on the revisit-dense logs (sub-15 cm,
-near the eval's timestamp-slop floor) — a 20x accuracy gap to ours there; ICP
-beats ours everywhere at 2-4x our memory with full scan retention; CSM beats
-ours on fr079/ACES and loses on Intel rmse (wins median). Ours holds the
+near the eval's timestamp-slop floor) but that number is partly self-referential
+(see caveat); ICP beats ours everywhere at 2-4x our memory with full scan
+retention; CSM beats ours on fr079/ACES and loses on Intel rmse (wins median).
+Ours holds the
 smallest, boundedly-sized, history-free state. This quantifies the ledger's
 long-standing positioning: the contribution is the representation and its
 memory/algebra properties, not absolute accuracy. Baseline details (tuning

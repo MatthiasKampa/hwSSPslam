@@ -45,8 +45,12 @@ deterministic, reproduced bit-exact by an independent auditor.
 In-repo reference baselines (identical parsing / keyframing / eval,
 `baseline_*.py`; see "Reference baselines"): ICP + pose graph **1.70 m** (15–35
 MB, retains all scans), correlative grids 3.27 m, RBPF/GMapping-lite **0.12 m**
-(39–56 MB peak, particle grids). The positioning is deliberate: RBPF is a ~20×
-accuracy gap on revisit-dense logs; ICP beats us everywhere at 2–4× our memory
+(39–56 MB peak, particle grids). *Caveat:* the ATE reference (`*.gfs.log`) is
+itself GMapping (RBPF) output, so the RBPF baseline's 0.12 m is scored against
+its own algorithm family — partly self-referential, and the only one of the
+four numbers not cross-family comparable; read it as "reproduces the reference,"
+not a 14× accuracy win. The comparable numbers are ours 2.44 / ICP 1.70 / CSM
+3.27. The positioning is deliberate: ICP beats us everywhere at 2–4× our memory
 with full scan retention. We hold the smallest, boundedly-sized, history-free
 state. The stack pays off **in proportion to dead-reckoning drift**, and three
 held-out logs (fr101, belgioioso, MIT — zero code/parameter changes) now nail
