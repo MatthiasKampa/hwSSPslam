@@ -1,3 +1,0 @@
-4934 scans -> 3071 keyframes   hybrid seg_nring=4 spin_excl=False use_irls=True
-  kf 0/3071  t=0s  loops=0  spin_skip=0  mem=11 KB
-  kf 1000/3071  t=27s  loops=8  spin_skip=0  mem=1294 KB

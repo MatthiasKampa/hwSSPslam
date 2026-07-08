@@ -1467,3 +1467,114 @@ Intel-safe predicate at any fixed threshold; the fine band's viewpoint/overlap
 fragility on real 180-deg-FOV logs is indistinguishable, within one match, from
 a corridor twin's collapse. Reproduce: `python3 ssp_cascade.py
 [selftest|roc|intel|all]`; figure cascade_roc.png.
+
+### R5 refinement (PCM consensus-set admission for drought closures, 2026-07-07): the R3/R4 single-pending pairing is replaced by Mangelson et al.'s Pairwise-Consistent-Measurement-Set maximization (SE(2) cycle-consistency graph + max clique); a principled admission layer that SUBSUMES R4's deep-search-escalation hack and reproduces every shipped number BIT-IDENTICALLY (bench 4/4 5.0-6.1 cm, Intel 2.440, fr079 5.523, MIT 42.952) — and delivers the verdict R4 could only conjecture: cross-edge consistency does NOT break the deep-corridor limit because the deep corridor musters no exploitable consensus, true or false
+
+WHAT SHIPPED (HybridSLAM drought path, ssp_hier.py; normal-closure path
+untouched). R4 diagnosed the MIT bottleneck as VERIFICATION information: a
+corridor-twin false closure is INTERNALLY consistent (the measured wrong pair
+agreed tighter, 0.54 m/0.6 deg, than the genuine junction snaps at
+0.72 m/2.6 deg), so no per-pair residual separates truth from twin, and R4's
+two-consecutive-consistency gate is defeated. R5 implements the prescribed
+fix — "verification information beyond a single pair":
+
+1. PCM PAIRWISE CYCLE-CONSISTENCY (`_pcm_cycle`). Two candidate drought edges
+   e1=(a1,b1,Z1), e2=(a2,b2,Z2) have cycle error
+   C = Z1 . seq(b1->b2) . Z2^-1 . seq(a2->a1), seq(x->y) = anchors[x]^-1 .
+   anchors[y] read off the anchor graph (odometry-rigid on the dangling side,
+   constrained on the old side). C is frame-independent (all factors relative)
+   and equals identity iff the two edges imply the SAME rigid correction of the
+   dangling frame — the coordinate-clean generalization of R3/R4's implied-
+   correction agreement. Selftest verifies C~=I for genuine and for twin pairs,
+   ~5 m for a truth/twin cross pair.
+2. CONSISTENCY GRAPH + MAX CLIQUE (`_pcm_admit`). A buffer of verified
+   candidate edges (cand_window=200 kf) is turned into a graph (edge i~j iff
+   independent — distinct anchors, >= drought_every kf apart — and the cycle
+   clears the R4-calibrated box gate pair_tol_t/pair_tol_r); the MAXIMUM clique
+   containing the freshest fire is found by Bron-Kerbosch with pivoting (tiny
+   graphs, real-time). Only clique edges enter the pose graph; pre-alignment
+   and insertion are the R3 machinery verbatim, applied to the whole clique.
+3. BREADTH ESCALATION AS CONSENSUS SIZE (deep_noff recast). R4's ad-hoc "hold
+   the pair, demand a third consecutive fire when the sweep exceeded 6000
+   cells" becomes: if any admitted-clique member was found under deep search
+   (noff > deep_noff), the required clique grows pcm_min_clique(2) ->
+   pcm_deep_min(3). A deep closure must be part of a THREE-way consistent
+   family, not just a pair. This is the search-breadth crowding law expressed
+   as an evidence requirement.
+
+The KEY INSIGHT PCM exploits and the old single-pending gate could not: a
+genuine closure is consistent with OTHER genuine closures (they all imply one
+global correction), while a twin family is consistent only with its own twins
+and inconsistent with the true junction snaps + the odometry cycle — so the
+trusted family is the larger clique. Selftest (extended): a synthetic graph of
+3 mutually-consistent TRUE edges + 2 twin-FALSE edges (fixed 5 m wrong shift)
+admits EXACTLY the 3 true (max clique containing the freshest); a lone twin
+pair still admits at size 2 UNLESS a member is deep (then held for want of a
+third); the 3-true set with one deep member still admits.
+
+ACCEPTANCE (all four, ship code, deterministic):
+
+1. selftest — PASS (`python3 ssp_hier.py selftest`): the PCM cycle identities,
+   the truth/twin cross-inconsistency, the 3-true/2-twin clique selection, and
+   the deep-escalation size gate, alongside the R3/R4 coarse-hyp/pre-align/
+   raster asserts.
+2. Drought bench (`python3 ssp_hier.py drought`) — BIT-IDENTICAL to R4: seeds
+   1-4 armed 5.0 / 5.4 / 5.9 / 6.1 cm (baseline 329-352), 4/4, both engineered
+   droughts broken, snaps at kf 1176/1575. The genuine bench pairs form a
+   consistent clique of 2 at the same attempts the old gate paired them.
+3. MIT (mit_hy4.py, 14,499 kf): 42.952 m / 39.118 median / 47.588 final-third,
+   60 loop edges, 2 snaps at kf 1340 & 2980 (both distinctive junctions,
+   clique=2, shallow noff 1943-3018) — TRAJECTORY BIT-IDENTICAL to the R4-ship
+   run (max|est-diff| = 0.000, same 60 edges). Recall/attempt 0.04 (106 true
+   revisits, 4 stage-1 hits, 102 wrong-peak, 0 sub-gate — retrieval untouched).
+   No wrong snap.
+
+   CONSENSUS-SET STATISTICS (the primary evidence, per the MIT chaos-band
+   caveat). Of 41 verified fires, max-clique-size distribution is {1: 37,
+   2: 4}; NO fire ever reached clique 3. The two snaps are the two clique-2
+   fires at shallow junctions. In the DEEP corridor (noff 10672/15348, 31
+   fires) clique_max reaches 2 only twice — kf 9264 (the EXACT R4 twin pair
+   9236+9264) and kf 13940 — both HELD by pcm_deep_min=3 and never admitted.
+   The many junction-hotspot fires near (-20, 63) are pairwise-INCONSISTENT
+   scatter: clique_max stayed 1 even with 3-6 co-located candidates in the
+   buffer (kf 11840-11980, 13380-13548) — they match different wrong twins /
+   different drift states and imply DIFFERENT corrections, so they form no
+   family at all.
+4. Regression — Intel 2.440 / 1.553 / 6.420 m, 80 loop edges, 6 pruned,
+   drought 43 try -> 26 hyp -> 3 verified -> 0 snaps; fr079 5.523 / 3.533 /
+   14.617, 32 edges, 2 pruned, 23 -> 10 -> 3 -> 0. Both BIT-IDENTICAL to
+   R3/R4/shipped. The 3 verified fires per run do not form a consistent
+   independent pair, so PCM admits nothing — the mechanism is inert where
+   droughts do not bind, and produces 0 false snaps.
+
+VERDICT — PCM admission does NOT break the corridor limit, and now we know
+exactly why. R4 said "retrieval was never the bottleneck; verification
+information is," and conjectured that consistency beyond a single pair was the
+missing evidence. R5 implements precisely that cross-edge consistency and
+measures the answer: there is no consensus to find. (a) There is no TRUE
+clique — retrieval scores 0/106 stage-1 hits at deep true revisits (all
+wrong-peak), so no genuine deep closure exists for a clique to lock onto; the
+place-recognition information is simply absent at lam 5.3/12.8. (b) There is no
+large FALSE family either — the deep-corridor wrong fires are mostly pairwise-
+inconsistent scatter (clique_max=1) with only sporadic 28-kf twin PAIRS, which
+the consensus-size requirement correctly holds. This sharpens the corridor
+verdict one level past R4: the limit is not a correlated-alias family fooling
+the backend (DC-GM's case, which PCM/consensus clustering is built to catch) —
+it is upstream information STARVATION that no backend consensus can undo, true
+or false. The gain R5 books is not accuracy (it matches R4 bit-for-bit) but
+architecture and evidence: R4's three separate heuristics (single-pending
+replace-on-conflict, implied-correction-at-anchor agreement, and a bolt-on
+deep-search hold) collapse into one principled PCM admission layer with 8 years
+of literature behind it, the deep-search hack becomes a consensus-size rule,
+and the "information-limited, not tuning-limited" verdict is now demonstrated
+rather than argued. rmse 42.952 sits in the same MIT chaos band as the R3
+record 38.03 (a 0.26 mm relax perturbation moves this dataset 12.5 m); the
+closure/consensus statistics, not the single-run rmse, are the evidence.
+
+Runtime: MIT 21 ms/kf (unchanged; the max-clique is over <= ~6-node buffers),
+Intel 18. Reproduce: `python3 ssp_hier.py selftest | drought |
+hyintel data/intel.log` (and data/fr079.log); MIT driver mit_hy4.py, recall
+r4_recall.py (both session scratchpad); trajectory mit_traj_hy4_r5pcm.npz
+(bit-identical to mit_traj_hy4_r4ship.npz). Selftest additionally covers the
+PCM cycle identities, truth/twin cross-inconsistency, 3-true/2-twin clique
+selection, and the deep-escalation consensus-size gate.

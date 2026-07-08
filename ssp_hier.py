@@ -572,17 +572,18 @@ class HybridSLAM(B.BoundedSLAM):
         self.drought_seed = (1.5, 0.75)     # verify seed grid: half-width, step
         self.drought_nms = 2.5              # R4: stage-1 NMS radius (m)
         self.drought_slope = 0.5            # innovation allowance per m travelled
-        self.pair_window = 200              # kf: two fires must pair within
-        #   this; the base cadence (drought_every) doubles as the MINIMUM
-        #   spacing — two fires 25 kf (~3 m) apart are independent
-        #   viewpoints. (A 3-kf pair from an accelerated variant snapped a
-        #   bench seed to 74 cm residual vs 5 cm from spaced pairs.)
+        self.pair_window = 200              # kf: legacy pairing horizon (R5's
+        #   PCM buffer uses cand_window; kept for external probes). The base
+        #   cadence (drought_every) doubles as the MINIMUM spacing — two fires
+        #   25 kf (~3 m) apart are independent viewpoints. (A 3-kf pair from
+        #   an accelerated variant snapped a bench seed to 74 cm vs 5 cm from
+        #   spaced pairs; PCM keeps that guard in _pcm_consistent.)
         # R4: pair_tol_t 3.0 -> 1.2 m. Verified fires are fine-band poses
         # (cm-precise when right); genuine pairs agree to well under a
         # meter. 3.0 m let a correct fire pair with a matched-band 2 m
         # scene-alias fire (measured, bench seed 4 post-widening) — the
         # tolerance must sit BELOW the 2 m alias spacing.
-        self.pair_tol_t = 1.2               # m: implied-correction agreement
+        self.pair_tol_t = 1.2               # m: PCM cycle-error box gate
         self.pair_tol_r = np.deg2rad(8.0)
         # R4 DEEP-SEARCH ESCALATION. In-pipeline stage-1 recall at MIT's
         # true corridor revisits is 0.00 (R3) -> 0.03 (whitened+NMS+
@@ -597,10 +598,14 @@ class HybridSLAM(B.BoundedSLAM):
         # pair is SEARCH BREADTH, the study's own crowding law (junk
         # extreme values grow with searched area): it formed while
         # sweeping 10672 cells over 4+ era shards, vs 1948/2989 at the
-        # two genuine junction snaps and <=3300 on every bench fire. When
-        # the sweep exceeded deep_noff cells, a consistent pair is HELD
-        # and must be re-confirmed by a third consecutive consistent fire
-        # before the graph accepts it; the fallback (no snap) is exactly
+        # two genuine junction snaps and <=3300 on every bench fire. R5
+        # recasts this as the PCM consensus SIZE: if any member of the
+        # admitted clique was found under deep search (noff > deep_noff), the
+        # required clique grows to pcm_deep_min (3) — a deep closure must be
+        # part of a THREE-way consistent family, not just a pair. (Measured:
+        # the deep corridor musters twin PAIRS at most, clique_max=2 at kf
+        # 9264 — the exact R4 twin — so this correctly holds them.) The
+        # fallback (no snap) is exactly
         # R3's measured-best behavior in the deep corridor drought.
         # R5: deep_noff now scales the REQUIRED CONSENSUS SIZE (a deep-search
         # fire in the admitted clique demands >= pcm_deep_min members, not
