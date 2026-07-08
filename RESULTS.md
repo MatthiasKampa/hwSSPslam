@@ -2455,3 +2455,60 @@ the missing precondition. End-to-end multi-session is therefore gated on wiring
 ring-key place recognition into cross-session detection — a concrete next step,
 not a new limit. The naive metric-matcher demonstration does NOT establish
 cross-session correspondences and must not be reported as if it does.
+
+---
+
+## Ring-key cross-session correspondence: retrieval unblocks the seed, but the wall moves to cross-session VERIFICATION
+
+The oracle-free completion of the multi-session thread: use ring-key APPEARANCE
+retrieval (not a metric seed, not the shared index) to establish cross-session
+correspondences, then joint-relax + superpose. `ssp_multisession_ringkey.py`
+(imports the session/merge/ring-key helpers; edits nothing). Anti-oracle
+guarantee VERIFIED by direct read: candidates are ALL A anchors ranked by
+ring-key L2 (20-float body-frame appearance) — the keyframe index never selects,
+orders, or seeds; the metric seed is the RETRIEVED anchor's pose + SC column-
+shift yaw (drift-independent, not B's estimate); REF is used only to score
+retrieval hits and validate ties, never to select/seed/verify.
+
+**The result decomposes cleanly (a precisely-located LIMIT, not a win):**
+1. APPEARANCE RETRIEVAL WORKS. Over 314 genuine cross-pass opportunities,
+   ring-key recall@40 = 0.78 (any correct) / 0.64 (correct AND cross-pass),
+   reproducing Intel's ~0.81. Its seed is drift-INDEPENDENT, so it supplies
+   exactly the candidate the metric-seed baseline (2/274) missed on B's 4.37 m
+   self-drift. The seed-drift limit is removed.
+2. CROSS-SESSION METRIC VERIFICATION FAILS (the new break). Of 435 B anchors
+   only 63 verify, and 51/63 are false = 81 % FP; cross-pass, 50 admitted / 5
+   correct. So ring-key+verify recovers 5/314 genuine cross-pass ties — more than
+   the metric-seed 2/274, but swamped by false positives. The 81 % FP poisons the
+   joint relax: B ATE 4.37 -> 6.32 m (WORSE), tail residual 381 -> 469 cm.
+3. MECHANISM (probed, not a bug): ring-key ranks the correct A anchor #0 and it
+   scores coherence ~0.88 when reached — but the shipped acceptance gate is a
+   SESSION-RELATIVE ratio (0.55 x coh_ref ~= 0.223 absolute), tuned for the
+   same-session frontend where the odometry seed is ALREADY near-correct and the
+   gate never had to DISCRIMINATE places. Under appearance seeding, wrong-but-
+   nearby places (5-15 m off) routinely clear 0.223 (FPs) while viewpoint-changed
+   genuine cross-pass ties fall just below (misses). The gate was doing
+   confirmation, not discrimination — the (now-removed) oracle seed did the
+   discrimination.
+4. THE PIECES ARE SOUND — only verification is broken. Diagnostic (REF-filtered
+   upper bound, explicitly NOT the oracle-free method): feeding the joint relax
+   only the 12 REF-correct cross edges gives tail residual 172 cm and B 4.37 ->
+   **2.49 m (beats the 2.44 single-run ceiling)**. So retrieval + pose-graph
+   merge + superposition all work; the single missing link is a cross-session
+   VERIFIER that can discriminate.
+
+**Verdict — the multi-session thread is complete, and its bottleneck is the
+project's recurring one (verification, not retrieval):**
+- COMPOSITION (superposition) — works (bit-exact).
+- MERGE given correspondences — works (joint relax; clean ties -> B 2.49 m).
+- CORRESPONDENCE retrieval — works (ring-key appearance, drift-independent).
+- CORRESPONDENCE verification — the WALL: the same-session-tuned coherence gate
+  cannot reject cross-session twins (81 % FP). This mirrors the MIT corridor
+  close (retrieval solved, verification is the wall) but on distinctive Intel and
+  for a different reason: the gate does confirmation, not discrimination.
+The capstone is one cross-session VERIFIER away (an ABSOLUTE coherence margin +
+PCM geometric-consensus over the appearance shortlist, replacing the session-
+relative confirmation gate) — a verification fix, not a new retrieval method, and
+the diagnostic proves it would land (clean ties -> 2.49 m). This is the concrete,
+scoped next step; the naive session-relative gate must not be used for
+appearance-seeded cross-session admission.
