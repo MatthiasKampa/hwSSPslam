@@ -3038,3 +3038,55 @@ overlaps from noise — the verification wall. (Multi-session, where the map is 
 and there IS room, is the honest remaining test — the flow locked confident
 regions from a loose init there, so anchored refinement of a loose alignment is
 not a foregone negative.)
+
+---
+
+## Hybrid multi-session: sparse anchors do the work; overlap-flow has real local signal but is net-negative on ATE (the wall, precisely localized)
+
+The honest test of the user's hybrid ("loop detection + direct warp AND relaxing
+via overlaps"): a two-session field (Intel A/B split, A fixed as gauge, B free,
+coarse GT-free 6 m init -- same as ssp_flow test_multi) with sparse cross-session
+ANCHOR edges (`ssp_hybrid.run_multi`). The anchors are a FENCED DIAGNOSTIC: GT is
+used ONLY to pick which anchor pairs genuinely co-observe and to supply the
+closure relative-pose Z (perfect detection + measurement) -- never in the flow
+force. This isolates the overlap-flow's refinement value from the detection wall.
+Decompose anchors-only (lam_ov=0 = pure pose-graph) vs anchors+overlap (hybrid):
+
+| n_anchors | lam_ov | coobs_med (B->A) | B_ATE (B->GT) |
+|---|---|---|---|
+| 0  | 0.0 | 6.00 | 6.60 |  (init, unchanged)
+| 0  | 2.0 | **5.51** | 7.07 |  (pure overlap flow, no anchors)
+| 8  | 0.0 | 4.36 | 5.92 |
+| 8  | 2.0 | **3.97** | 6.30 |
+| 30 | 0.0 | 0.91 | 6.09 |
+| 30 | 2.0 | **0.76** | 6.37 |
+
+The two metrics DIVERGE, and that divergence is the whole story:
+
+1. **Sparse correct anchors do the real alignment work.** 30 perfect closures pull
+   B's co-observed anchors onto A's frame: coobs 6.00 -> 0.91 m. The pose-graph
+   backend works fine GIVEN closures -- consistent with every prior finding that
+   the entire problem is DETECTION, not the backend.
+
+2. **Overlap-flow carries GENUINE local signal.** It tightens the co-observed
+   (truly overlapping) anchors at EVERY anchor level -- even standalone at k=0
+   (6.00 -> 5.51, ~8%), and 0.91 -> 0.76 (~16%) atop 30 anchors. The overlap force
+   is NOT pure noise: on genuinely-overlapping pairs it pulls inward correctly.
+
+3. **But it is NET-NEGATIVE on global ATE at every level** (+0.3 to +0.5 m). Within
+   the gate radius the same inward force also pulls TWIN / aliased near-pairs
+   together (it cannot tell genuine overlap from a twin -- the content wall), and
+   that distorts the non-overlapping trajectory. B-ATE is additionally floored by
+   A's OWN drift (A map ATE 3.30 m rmse) since B is pinned to a drifted reference,
+   plus B's raw drift in the 156/435 anchors that visit A-unseen regions.
+
+**Verdict: the hybrid does NOT beat anchors-alone on the deployable metric (ATE).**
+This is the most PRECISE localization of the wall to date: the overlap force is not
+"no signal" -- it measurably tightens true overlaps (~8-16%) -- it is "signal not
+SEPARABLE from twin-noise." Because aliased twins rival/outnumber genuine overlaps
+inside any usable gate, the aggregate force is net-negative even with perfect
+sparse anchors. Detected closures (the topology) do all the useful work; dense
+overlap refinement cannot add net value without first solving genuine-vs-twin
+discrimination -- the same verification wall, now shown to bound even the
+gradient-flow refinement layer. (Fenced GT-anchor diagnostic, not deployable;
+`ssp_hybrid.py run_multi`.)

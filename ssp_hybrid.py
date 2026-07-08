@@ -126,6 +126,119 @@ def run_single(path, lam_ov=0.3, iters=400, lr=0.4, gate_r=5.0, verbose=True):
     return a_ship, a_hyb, slam
 
 
+def run_multi(n_list=(0, 8, 30), lam_ov_list=(0.0, 2.0), init="coarse",
+              verbose=True):
+    """Multi-session hybrid: sparse cross-session ANCHOR edges (perfect closure
+    RELATIVE-POSE at co-visible places -- a fenced diagnostic isolating the
+    overlap-flow's refinement value from detection error) + continual overlap
+    flow. Decomposes anchors-only (lam_ov=0 = pure pose-graph) vs anchors+overlap
+    (hybrid) across anchor counts. A fixed (gauge), B flows.
+
+    NB: GT is used ONLY to (a) pick which anchor pairs are genuinely co-visible
+    and (b) supply the closure relative-pose Z and score -- never in the flow
+    force. This is an UPPER-BOUND diagnostic (perfect detection+measurement), not
+    a deployable system: it answers 'does overlap-flow converge B GIVEN correct
+    sparse anchors?'."""
+    import ssp_multisession as M
+    from scipy.spatial import cKDTree
+
+    blob = F._load_sessions()
+    gtd = M.gt_dense(blob["kts"], blob["rts"], blob["rp"])
+    A, Bs = blob["A"], blob["B"]
+    aidsA = sorted(A["segvec"]); aidsB = sorted(Bs["segvec"])
+    idxA, idxB = A["idx"], Bs["idx"]
+    finA, finB = A["fin"], Bs["fin"]
+    AN = F.ANCHOR
+    nA, nB = len(aidsA), len(aidsB)
+
+    # ---- coarse, GT-free, correspondence-free init for B (same as test_multi)
+    b0 = blob["b0"]
+    kA = np.searchsorted(idxA, b0); kB = 0
+    T0 = M.se2(finA[kA], M.se2i(finB[kB]))
+    if init == "coarse":
+        pert = np.array([1.5, -1.0, np.deg2rad(6.0)])
+        T_init = M.se2(T0, pert)
+    else:
+        T_init = T0
+
+    posA = np.array([A["anchors"][a][:2] for a in aidsA])
+    thA = np.array([A["anchors"][a][2] for a in aidsA])
+    posB0 = np.array([M.se2(T_init, Bs["anchors"][a])[:2] for a in aidsB])
+    thB0 = np.array([M.se2(T_init, Bs["anchors"][a])[2] for a in aidsB])
+    pos = np.vstack([posA, posB0]); th = np.concatenate([thA, thB0])
+    segvec = np.array([A["segvec"][a] for a in aidsA]
+                      + [Bs["segvec"][a] for a in aidsB], complex)
+    segder = np.array([A["segder"][a] for a in aidsA]
+                      + [Bs["segder"][a] for a in aidsB], complex)
+    free = np.concatenate([np.zeros(nA, bool), np.ones(nB, bool)])
+    sess = np.concatenate([np.zeros(nA, int), np.ones(nB, int)])
+    order = np.concatenate([np.arange(nA), np.arange(nB)])
+    remapB = {a: nA + i for i, a in enumerate(aidsB)}
+    seqB = [(remapB[a], remapB[b], Z, wt, wr)
+            for a, b, Z, wt, wr, kind in F._session_seq(Bs)
+            if a in remapB and b in remapB]
+
+    # ---- co-visible anchor pairs (GT: which places overlap + closure Z) ----
+    gtA = np.array([gtd[idxA[a * AN]] for a in aidsA])        # (nA,3) full pose
+    gtB = np.array([gtd[idxB[a * AN]] for a in aidsB])        # (nB,3)
+    treeA = cKDTree(gtA[:, :2])
+    dco, jco = treeA.query(gtB[:, :2])
+    corr = np.flatnonzero(dco < 0.5)                          # B locals co-vis
+    jAmatch = jco[corr]                                       # matching A locals
+
+    def anchor_edges(k):
+        if k <= 0 or len(corr) == 0:
+            return []
+        sel = np.unique(np.linspace(0, len(corr) - 1, k).round().astype(int))
+        edges = []
+        for m in sel:
+            bi, aj = corr[m], jAmatch[m]
+            Z = L.se2_mul(L.se2_inv(gtA[aj]), gtB[bi])        # GT closure rel-pose
+            edges.append((aj, nA + bi, Z, 1 / 0.10, 1 / np.deg2rad(1.0)))
+        return edges
+
+    # scoring: co-observed residual (B flowed vs A) + B-only ATE vs GT
+    def score(ff):
+        Bx = np.stack([ff.x[nA:], ff.y[nA:]], 1)
+        Ax = np.stack([ff.x[:nA], ff.y[:nA]], 1)
+        d = np.linalg.norm(Bx[corr] - Ax[jAmatch], axis=1)
+        both = np.vstack([Ax, Bx]); gt_both = np.vstack([gtA[:, :2], gtB[:, :2]])
+        al = C.align_se2(both, gt_both)
+        e = np.linalg.norm(al - gt_both, axis=1)
+        return float(np.median(d)), float(np.sqrt((e[nA:] ** 2).mean()))
+
+    # coarse+mid rings only (skip the all-rings FINE stage: it is the memory hog
+    # -- 88k cross-session pairs x 360 dims thrashes; MID's 240 dims answer
+    # 'does overlap refine?' without cm registration). gate 6m keeps the pair set
+    # tractable while still spanning the 6m init offset.
+    stages = [(F.RINGS_COARSE, 6.0, 10 ** 9, 0.25, 0.48, 300),
+              (F.RINGS_MID, 6.0, 10 ** 9, 0.28, 0.50, 500)]
+
+    print(f"  multi-session: A={nA} B={nB} anchors, {len(corr)} GT co-visible, "
+          f"init={init}", flush=True)
+    ff0 = F.FlowField(pos, th, segvec, segder, seqB, free, sess, order,
+                      lam_seq=1.0, lam_ov=0.0, gate_r=6.0, sep=10 ** 9)
+    ff0.build_pairs()
+    r0 = score(ff0)
+    print(f"  init co-observed residual {r0[0]:.2f} m  B-ATE {r0[1]:.2f} m",
+          flush=True)
+    print(f"  {'n_anch':>7} {'lam_ov':>7} | {'coobs_med':>9} {'B_ATE':>7}",
+          flush=True)
+    results = {}
+    for k in n_list:
+        aedges = anchor_edges(k)
+        for lov in lam_ov_list:
+            edges = seqB + aedges
+            ff = F.FlowField(pos.copy(), th.copy(), segvec, segder, edges,
+                             free, sess, order, lam_seq=1.0, lam_ov=lov,
+                             gate_r=6.0, sep=10 ** 9)
+            F.run_flow(ff, stages, lr=0.4, mom=0.85, verbose=False)
+            med, bate = score(ff)
+            results[(k, lov)] = (med, bate)
+            print(f"  {k:7d} {lov:7.1f} | {med:9.2f} {bate:7.2f}", flush=True)
+    return results, r0
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "selftest"
     if cmd == "selftest":
@@ -147,6 +260,9 @@ def main():
         path = sys.argv[2]
         for lam in [0.0, 0.1, 0.3, 0.6, 1.0]:
             run_single(path, lam_ov=lam, verbose=False)
+    elif cmd == "multi":
+        init = sys.argv[2] if len(sys.argv) > 2 else "coarse"
+        run_multi(init=init)
     else:
         print(__doc__)
 
