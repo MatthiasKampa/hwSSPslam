@@ -1578,3 +1578,36 @@ r4_recall.py (both session scratchpad); trajectory mit_traj_hy4_r5pcm.npz
 (bit-identical to mit_traj_hy4_r4ship.npz). Selftest additionally covers the
 PCM cycle identities, truth/twin cross-inconsistency, 3-true/2-twin clique
 selection, and the deep-escalation consensus-size gate.
+
+### Session-relative profile veto in the deliverable — tested and REJECTED (2026-07-07, Opus)
+
+Follow-up to the scale-cascade result: wire its profile statistic (fine-ring
+coherence / coarse-ring coherence) as a SESSION-RELATIVE veto in
+`ssp_bounded.py` try_constraint (EMA baseline `prof_ref` over accepted
+closures, like the coherence veto's `coh_ref`; veto when ratio <
+prof_target * prof_ref). Hypothesis: catch corridor twins whose ABSOLUTE
+coherence clears the veto but whose fine geometry collapsed.
+
+RESULT — catastrophic over-veto, no operating point works. Paired bench (4
+seeds), profile OFF -> ON: room 6.4 -> 15.1 cm (142 -> 10 edges), sparse
+12.1 -> 41.1 cm (120 -> 4 edges), corridor 379 -> 380 cm (5 -> 4 edges,
+aperture-limited regardless). IDENTICAL across prof_target in {0.2, 0.3, 0.4}
+— the threshold is not the binding factor.
+
+CORRECTED MECHANISM (the important part — it sharpens the cascade agent's
+"relocates the transfer problem" verdict): the profile's discriminative
+DIRECTION is geometry-specific. On the bench, GT-labelled accepted candidates
+have GENUINE fine coh 0.760 / coarse 0.650 (ratio ~1.17) but FALSE fine 0.651
+/ coarse **-0.031** (coarse near ZERO -> ratio EXPLODES to ~1e5). So the
+bench's false closures (aperture aliases with weak coarse correlation) have
+the OPPOSITE profile to the cascade's CONSTRUCTED self-similar-corridor twins
+(coarse-locked, fine-collapsed, low ratio). The huge false-closure ratios
+dominate the EMA `prof_ref`, which then vetoes the genuine closures (ratio
+1.17 << 0.55 x huge). The cascade's AUC-0.948 separation is specific to
+constructed corridor-twin geometry and does NOT generalise even to the
+bench's own false-closure population — so the profile cannot serve as a
+general veto. Reverted; the deliverable is unchanged. The scale-cascade
+statistic remains a valid CORRIDOR-TWIN precision tool where that specific
+geometry dominates (its ROC stands), but not a drop-in general veto — exactly
+the transfer bound the cascade agent flagged, now with the sign-flip
+mechanism measured.
