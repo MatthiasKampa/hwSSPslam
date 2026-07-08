@@ -2391,3 +2391,67 @@ self-localization test, so it shows COMPOSITION-WITHOUT-CORRUPTION, not
 from-scratch multi-session relocalization; and aligning two drifted maps to
 sub-wavelength (the precondition) is a general multi-session problem this does
 not solve. A clean positive capability with an honestly bounded scope.
+
+---
+
+## Cross-session alignment: pose-graph merge works GIVEN correspondences; establishing them is the (recurring) relocalization limit
+
+Follow-up to "VSA map composition" (which proved superposition merges two
+ALIGNED maps): can two independently-drifted sessions be aligned end-to-end via
+cross-session loop closures + a joint pose-graph relax, then superposed?
+`ssp_multisession_align.py` attempts it on the two Intel sessions. A read-only
+audit found the initial "win" is a FALSE WIN, and the corrected result is the
+honest — and more interesting — finding.
+
+**The false win (what NOT to claim).** The reported "213 correct / 1 false
+cross-session closures, overlap 31->3 cm, B improves 4.37->3.49 m" is real
+arithmetic but rests on an A-PRIORI DATA-ASSOCIATION ORACLE, not genuine
+relocalization. A=kf[0:3723] and B=kf[2482:6205] are split from ONE Intel log,
+so keyframes [2482,3723) are the SAME physical scans in both sessions. The
+coarse-alignment bootstrap uses that KNOWN per-keyframe index correspondence
+(kf i in A == kf i in B) to seed the cross-session matcher AT the answer — for
+an overlap anchor the seed IS A's own estimate of the same scan (cm away), so
+acceptance is a foregone conclusion. Of 214 admitted edges, ~211 are the same
+scan tied to itself across the artificial split; only 3 are genuine cross-pass.
+The "213/1 correct" validation is trivially true for same-index ties ("a scan is
+near itself"). The 31->3 cm residual is measured on the shared SAME-LAP
+co-traversal (self-consistency of the tied nodes, near-tautological) — NOT the
+~1.2 m non-rigid warp the experiment set out to fix, which lives in the
+cross-pass tail. No GT leaks into the estimate; the oracle is the session
+index-correspondence (worse, because it is disguised as "gt-free").
+
+**Strip the oracle -> the genuine result (2/274).** On the truly independent
+cross-pass revisits (B on a later lap over A's earlier-mapped area, no shared
+index), metric relocalization recovers 2 correct closures out of ~274
+opportunities; the tail overlap residual barely moves (565 -> 532 cm); no
+alignment. Root cause (audit-confirmed, not FP and not the pose graph): SEED
+QUALITY. A metric cross-session seed for a B tail keyframe comes from B's own
+estimate, and B's 4.37 m self-drift puts the seed ~7 m off — only ~3 % land in
+any matcher basin. This is EXACTLY the project's documented relocalization-prior
+limit (the drought/R3/R4 story: the matched band needs a prior within its basin;
+metric priors drift out of it).
+
+**What IS validly demonstrated (the VSA-native parts, both sound):**
+1. GIVEN correct cross-session correspondences, the joint pose-graph relax over
+   both sessions' anchors + cross-session edges (shipped `_gn` TRF + IRLS + LOO,
+   gauge-fixed at A) genuinely merges the maps: on the co-observed stretch it
+   pulls the drifted session toward the tighter one (B 4.37 -> 3.49, A preserved
+   3.30 -> 3.41) and drives the tied-region residual to sub-wavelength. Pose-
+   graph merging is sound.
+2. The superposition step (composition) then applies unchanged.
+
+**Conclusion — multi-session VSA mapping decomposes into three parts:**
+(a) map COMPOSITION (superposition) — WORKS (bit-exact, prior section);
+(b) pose-graph MERGE given correspondences — WORKS (this section);
+(c) establishing cross-session CORRESPONDENCES metrically — BLOCKED at the
+    relocalization-prior/seed-drift limit (2/274). Parts (a) and (b) are the
+VSA-native / backend contributions and are demonstrated; part (c) is the general
+place-recognition problem the project has already characterized, and its
+identified fix is the SAME appearance-based retrieval that solved MIT drought
+retrieval — the ring-key (recall@40 0.81 on Intel), which never needs a metric
+seed. So the multi-session thread REDISCOVERS the project's central recurring
+limit: metric relocalization priors drift out of basin; appearance retrieval is
+the missing precondition. End-to-end multi-session is therefore gated on wiring
+ring-key place recognition into cross-session detection — a concrete next step,
+not a new limit. The naive metric-matcher demonstration does NOT establish
+cross-session correspondences and must not be reported as if it does.
