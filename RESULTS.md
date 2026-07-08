@@ -2747,3 +2747,35 @@ best-transfer fr101), neutral-to-negative on well-conditioned ones, and on the
 corridor it neutralizes catastrophic slides but cannot beat conservative
 rejection. It partially addresses the geometry half of the two-fold corridor wall
 (rescue, not cure), consistent with that limit being genuine.
+
+### Anisotropic constraints — FINAL VERDICT (corrected after the full follow-up sweep)
+
+Two claims in the section above were too optimistic and are corrected here by the
+complete pruning-fix + conditioning-gate follow-ups:
+
+- **The real-log wins are FRAGILE, not a conditioning-gateable opt-in.** The
+  per-closure conditioning gate (leave well-conditioned closures isotropic,
+  anisotropize only degenerate ones) FAILED on a false premise: Intel's closures
+  are mostly ILL-conditioned (48-64 % trip the gate), so gating cannot spare them
+  — and selective anisotropy destabilizes MORE than uniform (fr079 -> 11.4,
+  chaotic Intel). The iso-pruning fix also failed (doesn't recover Intel, removes
+  fr079's win). Root cause: the Intel edge-flood is a TRAJECTORY-FEEDBACK loop in
+  edge ADMISSION (anisotropic down-weighting -> more marginal closures admitted ->
+  jitter -> more closures), not a fixable ranking/weighting knob. So fr101 +22 % /
+  fr079 +8 % are real observations for ONE uniform weighting but are fragile
+  artifacts of that feedback, NOT a robust, shippable, or gateable improvement.
+- **The MIT oracle-B DID edge below conservative rejection** (41.04 -> 39.12,
+  admitting a 4th near-pure-slide genuine revisit that contributes its observable
+  cross-corridor component) — but ~2 m on the 38-58 m MIT chaos band is
+  mechanistically real yet only marginally significant, not a robust gain.
+
+**Net:** the technique (rank-deficient constraints from the SSP correlation-surface
+observability structure) is correctly implemented (bit-exact isotropic
+reproduction, FD-checked Jacobian) and mechanistically does what it should
+(neutralizes catastrophic along-corridor slides; the geometry half of the
+two-fold wall is PARTIALLY addressable in the oracle setting). But it is NOT a
+shippable net-positive: on the real-log suite it is a fragile, feedback-entangled,
+regime-specific effect with no robust operating point, and the corridor gain is
+chaos-band-marginal. Honest outcome: a genuine but non-shippable backend
+experiment — a clean mechanism demonstration, not an accuracy win. The shipped
+isotropic backend stands.
