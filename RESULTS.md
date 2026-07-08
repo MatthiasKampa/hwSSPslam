@@ -2779,3 +2779,35 @@ regime-specific effect with no robust operating point, and the corridor gain is
 chaos-band-marginal. Honest outcome: a genuine but non-shippable backend
 experiment — a clean mechanism demonstration, not an accuracy win. The shipped
 isotropic backend stands.
+
+---
+
+## Iterative large-to-small scale map correlation for cross-session alignment — NEGATIVE
+
+Tests whether whole-map multi-scale correlation (coarse ring first for a broad
+basin, then refine down the wavelengths) solves cross-session alignment where the
+metric seed failed (`ssp_iteralign.py`, oracle-free, REF scores only). Positive
+control PASSES (recovers a known rigid move of A to 0.18 m via the shift-theorem
+correlator <A, shift(d)·rot(m)·B>), so the negative is genuine.
+
+- **Coarse ring is translation-AMBIGUOUS, not a broad basin** — the core claim
+  inverts: ring 12.8 m gives Terr 10.8 m (WORST band; 12.8 m period over a ~30 m
+  map aliases), 5.3+12.8 -> 19.2 m, MAIN band 5.2 m (least-bad, still out of
+  basin). No basin at the true T_AB for the cascade to start from.
+- **Cascade DIVERGES even seeded at REF** (4.0 -> 8.7 m): whole-map fine-band
+  correlation's global max is not at truth (O(N^2) cross-term clutter + the
+  ~1.2 m non-rigid warp bury the true peak). It loses the basin between scales.
+- **Piecewise local refinement** is boundary-pinned noise (177-202 cm, 48-81 %
+  at the search boundary) — LARGER than the 1.22 m rigid residual it should fix.
+
+Root cause: <A, shift·rot·B> is a feature-weighted dense cross-correlation of the
+two decoded density fields; it peaks at truth only if the map is distinctive at
+that scale AND the two views share content. Coarse rings fail distinctiveness
+(aliasing); all scales fail the cross-session viewpoint change + non-rigid warp.
+This rediscovers the recurring result from a new angle — multi-scale map
+correlation INHERITS the coarse band's place-recognition limit (cf. Scan-Context
+vs coarse SSP relo) rather than escaping it. It is not a substitute for appearance
+retrieval + a discriminating verifier. IMPLICATION for map handling: BUNDLED
+whole-map comparison is fundamentally aliasing/clutter-limited, which motivates
+PER-CLUSTER comparison (compare candidate patches individually, let consensus
+select) over a single bundled inner product.
