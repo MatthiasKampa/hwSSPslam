@@ -2271,6 +2271,26 @@ separation over 34 true-revisit attempts that had a genuine candidate:
   of single-fire admission). seq+PCM's clique requirement safely blocks the
   twins (0 snaps) but sequence gives PCM nothing new to consense on -> 45.24,
   identical to drought-off.
+- WINDOW-LENGTH ALIASING SWEEP (does more temporal context help?): fraction of
+  9 REF true-revisit droughts where the genuine diagonal beats the best twin,
+  vs window travel: L=8 (4.8 m) 0.222 | L=15 (9 m) 0.222 | L=25 (15 m) 0.222 |
+  L=40 (24 m) 0.111. At EVERY window up to 24 m of travel it is at-or-below
+  chance (0.5) — twins routinely score BETTER. Longer sequences do NOT
+  disambiguate: the corridor is geometrically identical over the entire
+  practical sequence range, so the descriptor SEQUENCE aliases as badly as the
+  single frame. This is the deepest confirmation that the limit is the
+  sensor-environment pair, not the window.
+- INTEL CONTROL (is the METHOD broken, or is MIT genuinely ambiguous?): on
+  Intel's DISTINCTIVE geometry sequence DOES separate — genuine-over-twin 4/6 =
+  0.667 (vs MIT 0.500), and seq-only snapped 1 GENUINE revisit (0 twins). So
+  SeqSLAM works where geometry permits; MIT's failure is corridor
+  self-similarity, not a method defect. BUT seq-only's aggressive single-fire
+  admission REGRESSES even Intel (2.540 -> 3.984): Intel needs no drought
+  relocalization (baseline snaps 0), and forcing an unnecessary — if genuine —
+  building-scale snap + chain pre-alignment perturbs the already-converged
+  graph. seq+PCM blocks the lone fire and holds 2.540. NET: seq-only is too
+  aggressive EVERYWHERE (twins on MIT, needless snaps on Intel); seq+PCM is
+  safe everywhere but adds nothing. The shipped conservative drought is right.
 
 **Verdict — the MIT corridor limit is CLOSED, triangulated across all three
 axes of place recognition:**
