@@ -10,6 +10,7 @@ data/*
 # transient agent run logs
 scratch_*.log
 scratch_*.py
+scratch_*.out
 
 # regenerable trajectory outputs (drivers/experiments write these; rpe.py
 # consumes them). The ~20 MB already tracked from earlier in the session is
