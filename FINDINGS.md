@@ -371,6 +371,57 @@ achievable frontier; more aggressive relocalization (seq-only) snaps twins and i
 strictly worse (56.23 m).** The right move under an irreducible ambiguity is to
 decline it, which is what ships.
 
+### 5.6 The wall bounds the refinement layer and the cross-session case too
+
+Three further paradigms — each a detection-free or refinement-based attempt to
+*sidestep* verification rather than perform it — independently reach the same wall,
+extending the triangulation from single-session place recognition to the
+gradient-refinement layer and the cross-session axis.
+
+- **Continual gradient-flow closure** (`ssp_flow.py`). A detection-free energy in
+  which spatially-near / temporally-distant segments attract via the *analytic*
+  SSP-correlation gradient (translation = phase gradient iW, rotation = stored
+  d/dθ vector; FD-exact to 8e-8), fixed anchor for gauge. Valid, well-conditioned,
+  non-folding — but from a GT-perfect init the flow **drifts away** (the true
+  alignment is not an attractor), because genuine co-observed cross-pass cosine
+  (0.097) is indistinguishable from noise-pair cosine (p90 0.29). It refines
+  *within* the coarse-ring basin; it cannot recover drift or establish
+  cross-session association. The gradient-L2 normalization (divide the force by
+  |uᵢ||uⱼ|, keep stored vectors raw so additivity survives) and soft/hex
+  partition-of-unity binning are confirmed **conditioning/robustness wins**
+  (lr-robust; smoother, wider-basin descent) — but neither moves the cosine wall.
+- **Hybrid: detected anchors + overlap-flow** (`ssp_hybrid.py`). Sparse verified
+  closures (topology) + dense overlap refinement (deformation), the classic
+  pose-graph intuition. Single-session: **net-negative** (overlap adds only bounded
+  noise to an already-solved map; λ_ov=0 = shipped is best). Multi-session (a fenced
+  GT-anchor diagnostic — GT only selects co-visible pairs, supplies the closure Z,
+  and scores; the flow force is GT-free): the overlap force **always tightens**
+  genuinely-overlapping anchors (~8–16%, a real local signal) but **always worsens**
+  global ATE (twin/aliased near-pairs it cannot discriminate); sparse correct
+  anchors do all the useful work and the hybrid **does not beat anchors-alone**.
+  Independently audited SOUND. This is the most precise statement of the limit: the
+  overlap force is *signal not separable from twin-noise*, not *no signal* —
+  verification bounds even the gradient-flow refinement layer.
+- **Viewpoint dual-channel** (`ssp_viewpoint.py`). A second channel binding the
+  robot *poses* a cell's points were sampled from (distinct symbol; rides the graph
+  rigidly, channel-off bit-exact to shipped). A genuine **win for map
+  composition / redundancy-dedup** (corr +0.93 with true viewpoint proximity, 48/53
+  revisits flagged vs blind bundling double-counting all 53) — valuable for the
+  bounded-map storage question. But **not a genuine-vs-twin discriminator**: on
+  low-drift Intel it is confounded by spatial proximity (viewpoint AUC 0.896 < the
+  0.909 proximity confound — it merely re-encodes "near in the estimate," which the
+  pose already gives for free); on the deep MIT corridor it is *below chance*. Where
+  drift is low the pose already discriminates; where drift is high — the case that
+  needs it — appearance (content **or** viewpoint) cannot.
+
+**Extended verdict.** Every mechanism that could substitute for verified detection
+— detection-free flow, anchored overlap refinement, viewpoint appearance — converges
+on the same genuine-vs-twin indistinguishability. The backend (pose-graph +
+overlap-flow + VSA composition) is provably sound *given* closures; detection /
+verification is the single irreducible limit, on both the corridor (§5.5) and the
+cross-session axis. (Depth: RESULTS.md "Continual gradient-flow", "Hybrid …
+single-session", "Hybrid multi-session", "Viewpoint-tagged dual-channel".)
+
 ---
 
 ## 6. The frontend do-no-harm gap (a second irreducible limit)
@@ -443,6 +494,9 @@ RESULTS section.
 | Ring-key drought shortlister | Scan-Context kNN feeding drought verify+PCM | retrieval solved (recall 0.317→0.808) but verified fires 70→252 with **0** admitted cliques (baseline 2); better retrieval makes geometric consensus *harder* (twin scatter), MIT 42.66→45.24 (§5.3, "Ring-key shortlister") |
 | SeqSLAM sequence consistency | velocity-swept diagonal of ring-key matches | corridor twins produce diagonals as temporally consistent as genuine (genuine-vs-twin 0.500 = chance); seq-only snaps 2 twins (56.23 m, catastrophic), seq+PCM adds nothing (§5.4, "SeqSLAM sequence consistency") |
 | Frontend do-no-harm guard | shrink scan-match correction on low-confidence frames | triple negative — per-frame coherence/magnitude, windowed translation-ρ, and heading-ρ all fail; "odometry is already good" is not scan-match-observable (§6, "The frontend do-no-harm gap is CLOSED") |
+| Continual gradient-flow closure | detection-free analytic SSP-correlation-gradient flow (no detect/gate) | valid/non-folding but from GT-perfect init drifts *away* — genuine cross-pass cosine 0.097 ≈ noise 0.29; refines within-basin only, no drift recovery or cross-session assoc (§5.6, "Continual gradient-flow") |
+| Hybrid overlap-refinement | detected anchors + dense overlap-flow relaxation | single-session net-negative; multi-session tightens true overlaps (~8–16%) but worsens ATE via twin contamination — does not beat anchors-alone; "signal not separable from twin-noise" (§5.6, audited SOUND, "Hybrid multi-session") |
+| Viewpoint dual-channel (discrimination) | second channel binding sampled-from robot poses | compose/dedup WIN (corr +0.93) but not a discriminator: Intel viewpoint AUC 0.896 < spatial-proximity confound 0.909; MIT below chance (§5.6, "Viewpoint-tagged dual-channel") |
 
 **Two of these negatives were saved from being false by a read-only audit before
 the result was trusted.** The ring-key run's deep-consensus escalation was
