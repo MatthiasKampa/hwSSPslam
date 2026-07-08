@@ -2226,3 +2226,71 @@ guard would require an INDEPENDENT odometry-quality estimate (e.g. wheel-slip /
 IMU residual), which this sensor suite does not provide. Shipped behavior
 stands; the ACES/belgioioso regression is a documented, understood, irreducible
 property of scan-matching against good odometry.
+
+---
+
+## SeqSLAM sequence consistency: the corridor is SEQUENCE-AMBIGUOUS (thread closed)
+
+The ring-key experiment relocated the MIT corridor limit to CONSENSUS: retrieval
+is solved (0.808) but PCM admits 0 cliques because twins verify geometrically
+and scatter. PCM checks GEOMETRIC pairwise consistency; it does NOT check
+TEMPORAL consistency. SeqSLAM (Milford & Wyeth 2012) is the SotA answer: a
+genuine revisit should yield a temporally-consistent RUN of matches along the
+trajectory (query k~old j, k+1~j+1, ...), a velocity-swept diagonal; a twin is
+an isolated coincidence. `ssp_seqslam.py` stores a per-keyframe ring-key,
+scores the velocity-swept diagonal (both traversal directions) at each drought
+candidate, and admits either seq-only (single confirmed fire) or seq+PCM.
+
+An independent read-only audit FIRST caught a decisive lifecycle bug (the
+current keyframe's descriptor was stored AFTER `_try_drought` ran, so the seq
+drought early-returned on every attempt — the first run was a degenerate
+356/0/0/0 that would have been misread as "sequence cleanly avoids twins"). It
+also flagged that seq-only's single-fire snap removes PCM's two-consistent
+requirement and rests entirely on the fine verifier + a hand-set seq gate. Both
+concerns proved central. After the fix (query window ends at the newest STORED
+keyframe; verified d_hyp>0):
+
+| config | ATE (m) | try/hyp/ver/snap | snaps |
+|---|---|---|---|
+| baseline HY4 (shipped drought) | 42.66 | 331/324/70/2 | 2 GENUINE |
+| HY4 drought-OFF | 45.24 | 0/0/0/0 | 0 (drought worth +2.6 m) |
+| SeqSLAM seq-only | **56.23** | 311/204/9/2 | **2 TWIN (false)** |
+| SeqSLAM seq+PCM | 45.24 | 356/242/13/0 | 0 |
+
+**Sequence does NOT separate genuine revisits from twins.** REF-aware diagonal
+separation over 34 true-revisit attempts that had a genuine candidate:
+
+- SEQUENCE picks genuine over the best twin **17/34 = 0.500 (chance)**;
+  single-frame 10/34 = 0.294. The diagonal adds essentially nothing.
+- Gate sensitivity: at EVERY threshold twins pass at >= the genuine rate
+  (thresh 0.06: genuine 34/44, twin 36/44; thresh 0.10: genuine 38/44, twin
+  43/44). No threshold separates them — a passing result would be pure
+  threshold-fitting.
+- seq-only therefore snapped 2 TWINS (ATE 56.23, max error 200 m — a
+  catastrophic wrong building-scale snap, exactly the audit's predicted failure
+  of single-fire admission). seq+PCM's clique requirement safely blocks the
+  twins (0 snaps) but sequence gives PCM nothing new to consense on -> 45.24,
+  identical to drought-off.
+
+**Verdict — the MIT corridor limit is CLOSED, triangulated across all three
+axes of place recognition:**
+1. RETRIEVAL (Scan-Context / ring-key): the revisit signal is in the raw scan
+   and recoverable (recall 0.317 -> 0.808). NOT the bottleneck.
+2. GEOMETRIC CONSENSUS (PCM): twins verify geometrically and scatter; no
+   pairwise-consistent clique isolates the genuine set. Unfixable by a tighter
+   per-pair gate.
+3. TEMPORAL SEQUENCE (SeqSLAM): corridor twins produce diagonals AS CONSISTENT
+   AS genuine revisits — the geometry is identical over the whole sequence
+   window, so the temporal signal is 50/50 (chance).
+
+The MIT infinite corridor is fundamentally ambiguous from 2D-lidar appearance at
+EVERY level available to a bounded appearance-only SLAM — per-frame, per-place-
+descriptor, per-geometric-consensus, and per-temporal-sequence. Correct
+relocalization there requires an INDEPENDENT ABSOLUTE CUE (global positioning,
+surveyed landmarks, active perception, or a wider-aperture/3D sensor) that lidar
+appearance alone cannot supply. The shipped conservative drought (2 genuine
+snaps, 42.66 m) is at the achievable frontier; more aggressive relocalization
+(seq-only) snaps twins and is strictly worse. This closes the corridor thread
+opened by the R3/R4/R5/cascade/belief investigations: it was never a tuning or
+representation deficiency — it is an information limit of the sensor-environment
+pair, now proven from three independent directions.
