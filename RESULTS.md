@@ -3091,6 +3091,20 @@ discrimination -- the same verification wall, now shown to bound even the
 gradient-flow refinement layer. (Fenced GT-anchor diagnostic, not deployable;
 `ssp_hybrid.py run_multi`.)
 
+**Independent audit (SOUND, two caveats surfaced).** An independent read confirmed
+the anti-oracle fence (GT confined to co-visibility selection + anchor-edge Z +
+scoring; the flow force is GT-free -- cleanest at the k=0/lam_ov=2 row, which has
+ZERO anchor edges yet still moves coobs 6.00->5.51), the edge convention, and the
+arithmetic. Two honest qualifications: (1) `coobs` measures exactly the quantity the
+attractive force targets while ignoring its false attractions, so it is a
+force-favorable/partial metric -- the load-bearing evidence is the fair aggregate
+B-ATE (cleanly net-negative and monotone: +0.47/+0.38/+0.28 at k=0/8/30), not the
+~8-16% coobs tightening. (2) The twin/aliased-contamination MECHANISM is inferred,
+not isolated by ablation -- but it is corroborated by the pure-overlap ATE (k=0,
+lam_ov=2) reaching 7.07 m, which OVERSHOOTS the perfect-30-anchor floor of 6.09 m:
+overlap injects error BEYOND merely pulling B toward a drifted A, consistent with
+spurious twin attraction. Neither caveat overturns the headline.
+
 ---
 
 ## Viewpoint-tagged dual-channel submap: compose/dedup WIN, but not a genuine-vs-twin discriminator
