@@ -2111,6 +2111,18 @@ odo-drift log, IMPROVES under damping — 1.88->0.26 — so the frontend is
 genuinely over-trusted in general; only the very-high-drift logs need full
 frontend authority, and they are exactly the ones every rule breaks.)
 
+**Control that seals it (the regression is intrinsic to damping, not a gate
+artifact).** A COHERENCE-BLIND constant damping (alpha=0.25, no gate) reproduces
+the identical frontier: it pulls ACES to 3.11 but drives Intel to 14.09
+(+478%) — worse than any gated rule. The gate buys only a marginal ACES/Intel
+tradeoff, never separation. So "odometry is already accurate" is a property of
+the odometry vs unavailable ground truth; it is NOT observable from ANY scan-
+match confidence signal, because a large frontend correction is per-frame
+indistinguishable between "odometry drifted, trust the match" (Intel) and
+"odometry fine, match is map-noise" (ACES). A do-no-harm frontend guard would
+require an INDEPENDENT odometry-quality estimate — which is exactly what the
+windowed systematic-vs-random probe below attempts.
+
 **The one untested escape hatch (data-motivated).** ACES's corrections are
 larger per-frame yet its odometry is better — reconcilable only if ACES's
 corrections are RANDOM (cancel, don't accumulate) while Intel's are SYSTEMATIC
@@ -2121,3 +2133,96 @@ sliding window) could separate the regimes where per-frame signals provably
 cannot. That is the next experiment; until it is tested, the shipped conclusion
 stands: the ACES/belgioioso frontend regression is NOT closable at the frontend
 with a per-frame confidence signal.
+
+---
+
+## Ring-key shortlister: MIT corridor RETRIEVAL solved, but the wall moves to consensus
+
+The Scan-Context ring-key finding ("Richer place descriptor vs the corridor
+limit") proved the MIT revisit signal survives in the raw scan. This experiment
+(`ssp_ringkey.py`, HybridSLAM subclass; drought candidates come from a per-
+segment ring-key kNN instead of / alongside the coarse-band cell sweep, feeding
+the UNCHANGED `_drought_verify` + PCM admission) tests whether wiring that
+retrieval into the drought path breaks the MIT ATE. An independent read-only
+audit first hardened it (deep-consensus escalation was disabled because
+`noff`=pool-size never reached the shipped `deep_noff` threshold — fixed; plus
+per-snap REF-revisit validation added; eviction leak pruned).
+
+**Retrieval: solved.** hit-rate@40 over MIT TRUE revisits (range-identity REF):
+
+| region | ring-key | coarse-band (shipped) |
+|---|---|---|
+| all true revisits (104) | **0.808** | 0.317 |
+| mid corridor (52) | 0.827 | 0.173 |
+| late/deep corridor (33) | 0.788 | 0.273 |
+
+Ring-key recovers 84/104 true revisits where the coarse SSP band gets 33/104 —
+including the deep corridor the coarse band originally scored ~0 on. The R3/R4
+"place-recognition starvation at lam 5.3/12.8" is a coarse-summary artifact, not
+an environment limit: the radial-occupancy signal is there and retrievable.
+
+**ATE: unchanged-to-worse, because the bottleneck was never retrieval.**
+
+| log | verified fires | snaps | ATE (m) |
+|---|---|---|---|
+| MIT baseline HY4 | 70 | 2 | 42.66 |
+| MIT ring-key | 252 | **0** | 45.24 |
+| Intel baseline HY4 | 3 | 0 | 2.540 |
+| Intel ring-key | 37 | 0 | 2.540 (bit-identical) |
+
+Ring-key raises verified drought fires 3.6x (70->252 on MIT, 3->37 on Intel) yet
+admits ZERO consistent cliques on MIT (vs the baseline's 2) — so ATE nudges
+WORSE (45.24 vs 42.66, within the MIT chaos band) and Intel is untouched. The
+252 verified fires include many corridor TWINS that each pass fine verification
+(they align geometrically) but point to DIFFERENT wrong places, so PCM's
+pairwise-consistent consensus finds no clique — and, crucially, the extra
+genuine revisits do not rescue it because they arrive diluted by even more
+twin scatter. **Better retrieval made consensus HARDER, not easier.**
+
+**Verdict — the corridor limit is now definitively a TWIN-DISAMBIGUATION /
+CONSENSUS problem, not a retrieval or information problem.** This closes the
+loop opened by the drought/R4/R5/cascade/belief triangulation and the
+Scan-Context control: (1) the info is in the raw scan (Scan-Context), (2) it is
+retrievable into the drought pool (ring-key, 0.808), (3) per-fire verification
+passes (252 fires), but (4) CONSENSUS admission cannot isolate a genuine
+mutually-consistent subset from the twin scatter. The next lever is not more
+retrieval or a tighter per-pair gate — it is SEQUENCE consistency: a genuine
+revisit yields a temporally-consistent RUN of ring-key matches along the
+trajectory, while twins are isolated coincidences (SeqSLAM, Milford & Wyeth
+2012). That is the queued next experiment. (Implementation note: the 60-min MIT
+run is the per-drought coarse-band A/B measurement scaffolding
+`_coarse_score_anchors` — a per-anchor Python loop — NOT the ring-key mechanism,
+which is a vectorized 20-dim kNN; production ring-key drought is cheap.)
+
+## The frontend do-no-harm gap is CLOSED: a triple negative
+
+Extending "The frontend do-no-harm guard: a clean negative", the windowed
+systematic-vs-random probe (`ssp_frontsys.py`) tested whether correction
+ACCUMULATION over a trailing window separates the regimes where per-frame
+signals could not. rho = ||sum delta_i|| / sum||delta_i|| over the last W
+accepted frontend corrections (delta = cand - guess); rho->1 systematic
+(drift-fixing), rho->0 random (map-noise).
+
+- **Translation rho: decisive negative** — the regimes interleave BACKWARDS.
+  fr101 (drift log, frontend essential 8.56->1.88) has the LOWEST xy rho of all
+  five logs (0.098 at W=30), below both odo-excellent logs; belgioioso
+  (excellent) sits above two of three drift logs. Even Intel's genuine
+  drift-fix is a small mean buried under scan-match jitter that dominates rho
+  everywhere. The two-log Intel-vs-ACES intuition did not survive five logs.
+- **Heading rho: orders correctly at the median but fails the sweep.** Heading
+  corrections DO accumulate on real heading drift (drift med 0.15-0.38 vs
+  excellent 0.067-0.085), but the tails overlap massively, so no threshold is
+  per-frame separable. The guard sweep confirms it: every heading-keyed config
+  regresses the drift logs +62% to +135% while only partially helping ACES —
+  no do-no-harm frontier (worst-case identical to the per-frame rules).
+
+**So do-no-harm is a TRIPLE negative: per-frame coherence/magnitude, windowed
+translation-systematicness, and windowed heading-systematicness all fail.** The
+frontend's two entangled jobs — absorbing gross odometry drift (essential) and
+needlessly perturbing already-good odometry (harmful) — are not separable from
+ANY scan-match-observable signal, because "odometry is already accurate" is a
+property of the odometry vs unavailable ground truth. A do-no-harm frontend
+guard would require an INDEPENDENT odometry-quality estimate (e.g. wheel-slip /
+IMU residual), which this sensor suite does not provide. Shipped behavior
+stands; the ACES/belgioioso regression is a documented, understood, irreducible
+property of scan-matching against good odometry.
