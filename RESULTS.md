@@ -2684,3 +2684,66 @@ geometry a lidar matcher can pin down at all, so even oracular place recognition
 buys ~4 %. The synthesis stands and is sharpened: retrieval and the VSA algebra
 are sound; the residual limit is verification — and on aperture-degenerate
 geometry, verification means place AND pose, both of which need an external cue.
+
+---
+
+## Observability-weighted anisotropic loop constraints: a regime-specific backend win
+
+The concrete lever the two-fold corridor finding exposed: genuine corridor
+revisits fail on GEOMETRY (the matcher slides along the unobservable corridor
+axis), yet the code ALREADY computes each candidate's observability structure —
+the translation Hessian K = sum_k Re(c_k) w_k w_k^T (MAIN band) with eigenvalues
+l_weak <= l_strong — and uses it only to VETO. `ssp_aniso.py` (subclass; imports
+only) instead inserts the closure as a RANK-DEFICIENT constraint: a per-edge 2x2
+information matrix Lambda = wt^2 K / l_strong (condition number l_weak/l_strong
+clamped to a floor, rotated into the anchor's body frame), whitening the
+translation residual anisotropically in a reimplemented analytic-Jacobian _gn.
+Correctness gates ALL pass: use_aniso=False reproduces shipped BoundedSLAM
+BIT-EXACT (max|dpose|=0), the analytic Jacobian matches finite-difference to
+2e-8, the body-frame weak eigenvector is exact, and Intel-isotropic = 2.4395 ==
+shipped 2.440 — so the ATE numbers are the anisotropy, not a solver artifact.
+
+**REAL LOGS (ATE m; floor 0.1-0.2 usable band):**
+
+| log | shipped | anisotropic | verdict |
+|---|---|---|---|
+| fr101 (dense-revisit) | 1.881 | **1.47** | WIN ~22% (stable across all 4 floors) |
+| fr079 (floppy) | 5.523 | 5.09 | WIN ~8% |
+| ACES (sparse closures) | 6.212 | 6.16 | wash |
+| Intel (well-conditioned) | 2.440 | 3.69 | REGRESS |
+
+**It is REGIME-SPECIFIC: it helps ill-conditioned / dense-revisit graphs (fr101
++22 %, the best-transfer log; floppy fr079 +8 %), washes the sparse-closure log
+(ACES), and regresses the well-conditioned one (Intel).** fr101's edge set is
+stable (53->56) — a clean observable-direction gain; Intel's blows up (80->158)
+and goes chaotic.
+
+**The Intel regression is NOT a pruning artifact (net-positive hypothesis
+REFUTED).** Hypothesis: down-weighting the weak direction shrinks the whitened
+residual that LOO/chi2 pruning ranks on, so weak-geometry edges survive. Fix
+tested: rank pruning on the ISOTROPIC (geometric) residual while keeping the
+anisotropic SOLVE. It did NOT recover Intel — it made it WORSE (aniso 3.69 ->
+aniso+fix 5.58 at floor 0.1). So the regression is deeper: the anisotropic
+weighting itself discards weak-direction information that a WELL-CONDITIONED graph
+genuinely uses (its "weak" direction still carries real signal isotropic
+captured). Anisotropy is therefore not a safe global default; it would need to be
+GATED (enabled only on detected ill-conditioning) or offered opt-in.
+
+**CORRIDOR GT-ORACLE (the direct test of the geometry half of the two-fold
+wall):** anisotropic insertion of the geometrically-partial genuine revisits
+RESCUES the isotropic catastrophe (ISO oracle-A 73.47 -> ANISO 45.6-48.3 across
+floors, admitting 5-6 genuine closures whose along-corridor slide is now
+neutralized) but does NOT beat conservative rejection (ISO oracle-B 41.04). So
+the observability-weighting mechanically does what it should — it turns a
+catastrophic partial-DOF closure into a harmless one — but the salvaged
+cross-corridor component is not enough to beat simply dropping those closures:
+the along-corridor DOF was GENUINELY unobservable, exactly the two-fold finding.
+
+**Verdict.** A genuine SotA backend technique (rank-deficient constraints from the
+SSP correlation-surface observability structure, verified correct) with a real,
+characterized regime-dependence: net-positive on ill-conditioned / dense-revisit
+graphs (a usable opt-in / conditioning-gated improvement, notably +22 % on the
+best-transfer fr101), neutral-to-negative on well-conditioned ones, and on the
+corridor it neutralizes catastrophic slides but cannot beat conservative
+rejection. It partially addresses the geometry half of the two-fold corridor wall
+(rescue, not cure), consistent with that limit being genuine.
