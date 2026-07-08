@@ -602,8 +602,35 @@ class HybridSLAM(B.BoundedSLAM):
         # and must be re-confirmed by a third consecutive consistent fire
         # before the graph accepts it; the fallback (no snap) is exactly
         # R3's measured-best behavior in the deep corridor drought.
+        # R5: deep_noff now scales the REQUIRED CONSENSUS SIZE (a deep-search
+        # fire in the admitted clique demands >= pcm_deep_min members, not
+        # just 2) — the principled form of R4's third-consecutive-fire hold.
         self.deep_noff = 6000
-        self._drought_buf = []              # recent verified closures (dicts)
+        # ---- R5: PCM consensus-set admission (Mangelson et al. ICRA 2018) ---
+        # The R3/R4 pairing was a single-pending, two-consecutive-consistency
+        # gate. It cannot see the failure R4 diagnosed: a corridor-twin false
+        # closure is INTERNALLY consistent (self-similar wrongness is
+        # systematic — the measured wrong pair agreed TIGHTER, 0.54 m/0.6 deg,
+        # than the genuine junction snaps at 0.72 m/2.6 deg), so no per-pair
+        # residual tolerance separates truth from twin. PCM replaces the gate
+        # with a Pairwise-Consistent-Measurement-Set maximization: keep a
+        # BUFFER of verified candidate drought edges, build the pairwise
+        # cycle-consistency graph (edge i~j iff the SE(2) cycle
+        # Z_i . seq(b_i->b_j) . Z_j^-1 . seq(a_j->a_i) ~ I under the composed
+        # covariance), and admit only the MAXIMUM consistent clique. The
+        # insight PCM exploits and the old pairing could not: a genuine
+        # closure is consistent with OTHER genuine closures (they all imply
+        # one global correction) while a twin family is consistent only with
+        # its own twins and INCONSISTENT with the true junction snaps + the
+        # odometry chain — so the trusted family is the larger/lower-residual
+        # clique. deep_noff folds R4's search-breadth law in as the consensus
+        # size a deep-search fire must reach.
+        self.pcm_min_clique = 2             # normal consensus size to admit
+        self.pcm_deep_min = 3               # required if any member is deep
+        self.cand_window = 200              # kf horizon of the candidate buffer
+        self._drought_cand = []             # verified drought edges awaiting
+        #   admission (PCM consistency graph is built over these)
+        self._drought_buf = []              # (legacy; unused, kept for probes)
         self._last_reloc_k = -10 ** 9
         self._force_relax = False
         # drought clock: last GENUINE accept only. last_accept_k cannot serve
@@ -1386,63 +1413,133 @@ class HybridSLAM(B.BoundedSLAM):
         T = L.se2_mul(self.anchors[c_aid], Z)     # implied CURRENT my_aid pose
         entry = dict(k=k, my_aid=my_aid, c_aid=c_aid, Z=Z, sig_t=sig_t,
                      sig_r=sig_r, T=T, b_pos=self.anchors[my_aid][:2].copy(),
-                     dr=S.wrap(T[2] - self.anchors[my_aid][2]))
+                     dr=S.wrap(T[2] - self.anchors[my_aid][2]),
+                     noff=log.get("noff", 0), lever=float(lever))
         log["phase"] = "pending"
-        # Consistency: each fire implies a rigid world correction
-        # new(x) = T + R(dr) (x - b_pos); compare the pending and the new
-        # fire at x* = the current anchor position (short lever between the
-        # fire points, so small heading disagreements are not amplified by
-        # absolute coordinates).
-        # SINGLE pending + two-way consistency + replace-on-conflict, at the
-        # base cadence. This exact shape is the measured optimum of five MIT
-        # variants (38.0 m vs 59.6 hot-window / 86.9 hot+12-kf-floor / 70.3
-        # buffered / bench-degrading triplet); the aggressive variants pair
-        # faster but pair CORRELATED or ambiguous fires in self-similar
-        # corridors, and a wrong pre-aligned snap is unrecoverable.
-        buf = [e for e in self._drought_buf
-               if k - e["k"] <= self.pair_window]
-        P = buf[-1] if buf else None
-        if P is not None and P["my_aid"] != my_aid:
-            y1 = P["T"][:2] + S._rot(P["dr"]) \
-                @ (self.anchors[my_aid][:2] - P["b_pos"])
-            log["pair_dt"] = float(np.linalg.norm(y1 - T[:2]))
-            log["pair_drh"] = float(np.rad2deg(
-                abs(S.wrap(P["dr"] - entry["dr"]))))
-            log["pair_gap"] = k - P["k"]
-            if np.linalg.norm(y1 - T[:2]) < self.pair_tol_t \
-                    and abs(S.wrap(P["dr"] - entry["dr"])) < self.pair_tol_r:
-                if len(buf) == 1 and log.get("noff", 0) > self.deep_noff:
-                    # deep-search escalation: hold the pair, demand a
-                    # third consecutive consistent fire
-                    log["phase"] = "pair-held"
-                    self._drought_buf = [P, entry]
-                    return
-                log["phase"] = "snap"
-                self._distribute_correction(my_aid, T)
-                for e in (P, entry):
-                    key = (e["c_aid"], e["my_aid"])
-                    if key in self.banned:
-                        continue
-                    edge = (e["c_aid"], e["my_aid"], e["Z"], 1 / e["sig_t"],
-                            1 / e["sig_r"], "loop")
-                    if key in self.edge_seen:
-                        self.edges[self.edge_seen[key]] = edge
-                    else:
-                        self.edge_seen[key] = len(self.edges)
-                        self.edges.append(edge)
-                    self.pending_new.append(key)
-                self.dirty = True
-                self._force_relax = True
-                self.last_accept_k = k
-                self.last_true_accept_k = k
-                self.dist_at_accept = self.dist_trav
-                self._streak = 0
-                self._streak_xy = None
-                self._drought_buf = []
-                self.n_drought_snap += 1
+        # ---- PCM consensus-set admission (Mangelson et al. ICRA 2018) -------
+        # Add this verified fire to the candidate buffer and admit the maximum
+        # pairwise-consistent clique that contains it (only when the freshest
+        # fire is in a clique does a new one form — older cliques would have
+        # admitted when their newest member arrived). Only clique edges enter
+        # the pose graph. Nothing snaps on a single fire; the twin-vs-truth
+        # ambiguity R4 exposed is resolved by CONSENSUS SIZE (breadth), not by
+        # a tighter per-pair residual.
+        self._drought_cand = [e for e in self._drought_cand
+                              if k - e["k"] <= self.cand_window]
+        self._drought_cand.append(entry)
+        clique = self._pcm_admit(self._drought_cand)
+        if clique is None:
+            return
+        # winning-pair diagnostics (closest independent pair in the clique)
+        if len(clique) >= 2:
+            te, re_ = self._pcm_cycle(clique[-2], clique[-1])
+            log["pair_dt"], log["pair_drh"] = float(te), float(np.rad2deg(re_))
+            log["pair_gap"] = clique[-1]["k"] - clique[-2]["k"]
+        log["phase"] = "snap"
+        log["clique"] = len(clique)
+        log["clique_noff"] = [int(e["noff"]) for e in clique]
+        # pre-align the dangling chain to the freshest clique member's implied
+        # pose (largest my_aid), then insert every clique edge — the older
+        # members carry small residuals after the pre-align because they agree
+        # with the same correction (that is what the clique certified).
+        tail = clique[-1]
+        self._distribute_correction(tail["my_aid"], tail["T"])
+        for e in clique:
+            key = (e["c_aid"], e["my_aid"])
+            if key in self.banned:
+                continue
+            edge = (e["c_aid"], e["my_aid"], e["Z"], 1 / e["sig_t"],
+                    1 / e["sig_r"], "loop")
+            if key in self.edge_seen:
+                self.edges[self.edge_seen[key]] = edge
+            else:
+                self.edge_seen[key] = len(self.edges)
+                self.edges.append(edge)
+            self.pending_new.append(key)
+        self.dirty = True
+        self._force_relax = True
+        self.last_accept_k = k
+        self.last_true_accept_k = k
+        self.dist_at_accept = self.dist_trav
+        self._streak = 0
+        self._streak_xy = None
+        self._drought_cand = []
+        self.n_drought_snap += 1
+
+    # ---- R5: PCM cycle-consistency and maximum consistent set ---------------
+    def _pcm_cycle(self, e1, e2):
+        """SE(2) cycle error of two candidate drought edges e1=(a1,b1,Z1),
+        e2=(a2,b2,Z2): C = Z1 . seq(b1->b2) . Z2^-1 . seq(a2->a1), where
+        seq(x->y) = anchors[x]^-1 . anchors[y] is the sequential-chain
+        transform read off the current anchor graph (odometry-rigid on the
+        dangling side, constrained on the old side). C is frame-independent
+        (all factors are relative transforms) and equals identity iff the two
+        edges imply the SAME rigid correction of the dangling frame — the
+        exact PCM cycle-consistency check, generalizing R3/R4's implied-
+        correction agreement to a coordinate-clean SE(2) residual. Returns
+        (translation error m, |heading error| rad)."""
+        a1, b1, Z1 = e1["c_aid"], e1["my_aid"], e1["Z"]
+        a2, b2, Z2 = e2["c_aid"], e2["my_aid"], e2["Z"]
+        seq_b = L.se2_mul(L.se2_inv(self.anchors[b1]), self.anchors[b2])
+        seq_a = L.se2_mul(L.se2_inv(self.anchors[a2]), self.anchors[a1])
+        C = L.se2_mul(L.se2_mul(Z1, seq_b), L.se2_mul(L.se2_inv(Z2), seq_a))
+        return float(np.linalg.norm(C[:2])), float(abs(S.wrap(C[2])))
+
+    def _pcm_consistent(self, e1, e2):
+        """PCM pairwise consistency: independent viewpoints (distinct anchors,
+        >= drought_every kf apart — the R3 independence guarantee) whose cycle
+        error clears the composed-covariance gate. The gate is the R4-measured
+        box (pair_tol_t/pair_tol_r), which is a diagonal chi2 with those
+        bounds; residual size alone cannot separate truth from a self-similar
+        twin (R4), so this predicate is deliberately permissive and the
+        SEPARATION is delegated to clique SIZE + the breadth escalation."""
+        if e1["my_aid"] == e2["my_aid"]:
+            return False
+        if abs(e1["k"] - e2["k"]) < self.drought_every:
+            return False
+        t_err, r_err = self._pcm_cycle(e1, e2)
+        return t_err < self.pair_tol_t and r_err < self.pair_tol_r
+
+    def _pcm_admit(self, cands):
+        """Build the pairwise cycle-consistency graph over the candidate
+        drought edges and return the MAXIMUM consistent clique that contains
+        the freshest candidate (Bron-Kerbosch with pivoting; the buffers here
+        are tiny). Admit only if the clique reaches the required consensus
+        size: pcm_min_clique normally, escalated to pcm_deep_min if ANY member
+        was found under deep search (noff > deep_noff) — the search-breadth law
+        (R4) recast as 'evidence must scale with the crowding of the sweep'.
+        Returns the clique (list of entries, freshest last) or None."""
+        n = len(cands)
+        new = n - 1
+        adj = [set() for _ in range(n)]
+        for i in range(n):
+            for j in range(i + 1, n):
+                if self._pcm_consistent(cands[i], cands[j]):
+                    adj[i].add(j)
+                    adj[j].add(i)
+        best = []                                  # max clique containing `new`
+
+        def bk(R, P, X):
+            nonlocal best
+            if not P and not X:
+                if len(R) > len(best):
+                    best = list(R)
                 return
-            log["phase"] = "pair-conflict"
-        self._drought_buf = [entry]
+            pivot = max(P | X, key=lambda u: len(adj[u] & P))
+            for v in list(P - adj[pivot]):
+                bk(R | {v}, P & adj[v], X & adj[v])
+                P = P - {v}
+                X = X | {v}
+
+        bk({new}, set(adj[new]), set())
+        self._pcm_best = len(best)              # diagnostics: max clique size
+        self._pcm_deep = any(cands[i]["noff"] > self.deep_noff for i in best)
+        need = self.pcm_min_clique
+        if self._pcm_deep:
+            need = max(need, self.pcm_deep_min)
+        if len(best) < need:
+            return None
+        return [cands[i] for i in sorted(best, key=lambda i: cands[i]["my_aid"])]
 
 
 # ---------------------------------------------------------------------------
@@ -1800,10 +1897,49 @@ def hybrid_self_test():
     o1 = dict(g7)[1]                                    # shard-1 group only
     assert np.abs(o1 - np.array([20.0, 0.0])).sum(1).min() < 1.2
     assert np.abs(o1 - np.array([0.0, 0.0])).sum(1).min() > 5.0  # aid0 not in 1
+    # R5: PCM consensus-set admission. A synthetic candidate set of 3 mutually
+    # consistent TRUE drought edges (all implying the identity correction) and
+    # 2 twin-FALSE edges (mutually consistent, implying a fixed wrong 5 m
+    # shift) must admit EXACTLY the 3 true — the max clique containing the
+    # freshest fire. This is the failure R4 could not resolve with a per-pair
+    # residual: the twin pair is internally as tight as the truth; only the
+    # clique STRUCTURE distinguishes them.
+    hy8 = HybridSLAM()
+    hy8.anchors = [np.array([0.0, 0.0, 0.0]), np.array([10.0, 0.0, 0.0]),
+                   np.array([20.0, 0.0, 0.0]),                 # a0,a1,a2 (old)
+                   np.array([3.0, 5.0, 0.1]), np.array([13.0, 5.0, 0.2]),
+                   np.array([23.0, 5.0, -0.1]),                # true b: 3,4,5
+                   np.array([8.0, 8.0, 0.3]), np.array([18.0, 8.0, -0.2])]
+
+    def _mk(a, b, g, kk, noff=0):
+        T = L.se2_mul(g, hy8.anchors[b])
+        Z = L.se2_mul(L.se2_inv(hy8.anchors[a]), T)
+        return dict(k=kk, my_aid=b, c_aid=a, Z=Z, sig_t=0.1,
+                    sig_r=np.deg2rad(2.0), T=T,
+                    b_pos=hy8.anchors[b][:2].copy(),
+                    dr=S.wrap(T[2] - hy8.anchors[b][2]), noff=noff, lever=0.0)
+
+    gT = np.zeros(3)                                    # true correction = I
+    gF = np.array([5.0, 0.0, 0.0])                      # twin-false: 5 m shift
+    t0, t1, t2 = _mk(0, 3, gT, 10), _mk(1, 4, gT, 40), _mk(2, 5, gT, 70)
+    f0, f1 = _mk(0, 6, gF, 20), _mk(1, 7, gF, 50)
+    # true-true cycle ~ identity; twin-false cycle ~ identity; true-false ~ 5 m
+    assert hy8._pcm_cycle(t0, t1)[0] < 1e-6 and hy8._pcm_cycle(f0, f1)[0] < 1e-6
+    assert hy8._pcm_cycle(t0, f1)[0] > 1.2 and not hy8._pcm_consistent(t0, f1)
+    cands = [t0, f0, t1, f1, t2]                        # freshest (t2) is true
+    clique = hy8._pcm_admit(cands)
+    assert clique is not None and [e["my_aid"] for e in clique] == [3, 4, 5], \
+        [e["my_aid"] for e in (clique or [])]
+    # a lone consistent pair still admits at pcm_min_clique=2 ...
+    assert hy8._pcm_admit([f0, f1]) is not None
+    # ... unless a member was found under DEEP search: consensus must reach 3
+    fd0, fd1 = _mk(0, 6, gF, 20, noff=9000), _mk(1, 7, gF, 50, noff=9000)
+    assert hy8._pcm_admit([fd0, fd1]) is None            # size 2 < deep min 3
+    assert hy8._pcm_admit([_mk(0, 3, gT, 10, noff=9000), t1, t2]) is not None
     print("hybrid self-test ok: fine fold/rotation, gating, mid roundtrip, "
           "coarse relocalization (whitened), spin exclusion, IRLS switch, "
           "drought coarse-hyp (whitened+NMS, sharded)/pre-align/raster, "
-          "coarse-band-only scoring")
+          "coarse-band-only scoring, PCM consensus clique (3 true / 2 twin)")
 
 
 # ---------------------------------------------------------------------------

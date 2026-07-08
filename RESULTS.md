@@ -1359,8 +1359,111 @@ entirely (0.0898; full-resolution derivative is 0.0725). The derivative
 carries real high-angular-frequency content (confirming the "4x load-bearing"
 ablation); it cannot be cheaply compressed. complex64 remains the clean win.
 
+CROSS-LOG VERIFICATION (independent audit, 2026-07-07, BLAS threads pinned for
+a single-variable comparison): fr079 c128==c64 BIT-IDENTICAL (5.523 m, 5.22 ->
+2.61 MB); ACES c128==c64 BIT-IDENTICAL (6.212 m, 5.30 -> 2.65 MB). MIT (14,499
+kf, chaos-sensitive) is NOT bit-reproducible under c64: 42.95 -> 66.02 m, a
+23 m swing — but same-order as MIT's intrinsic non-determinism (BLAS threading
+alone moves it ~5 m; a 0.26 mm relax perturbation moves it 12 m), with NO new
+failure mode (both degrade gracefully, revisit-density-limited). VERDICT
+(validated): keep c64 OPT-IN — free on bounded/revisit-dense logs, unsafe to
+make the global default on chaos-sensitive long runs. Shipped policy correct.
+
+MEMORY-FRONTIER HONEST FRAMING (audit): the shipped representation
+(HY4 matched-band + c64, 3.75 KB/segment) is 2.7 (MIT) - 4.8 (Intel) KB/m^2 —
+i.e. 3-12x DENSER per m^2 than a 5 cm occupancy grid (400 B/m^2 at 1 byte/cell)
+and 15-110x denser than 2D NDT. SSP is NOT bytes/m^2-competitive with classical
+area maps; a 5 cm occupancy grid of Intel is ~0.2-0.9 MB vs our 2.6 MB. The
+memory win over the in-repo baselines (ICP 15-35 MB, RBPF 39-56 MB) holds ONLY
+because those store HISTORY (ICP retains every scan = O(time); RBPF = particles
+x grids). The genuine, defensible properties are: O(area)-BOUNDED not O(time)
+(Intel plateaus at 698 segs / 84% of the cell-cap ceiling; MIT grows dead-
+linear at 1.26 seg/m as new corridor is exposed), HISTORY-FREE continual
+folding, and an ALGEBRAICALLY TRANSFORMABLE map — not raw spatial compactness.
+
 Net memory story after this session: HY4 matched-band split (0.67x) x
 complex64 (0.5x) = ~0.33x of the original 8 MB shipped map at bit-identical
 Intel accuracy, i.e. the deliverable's map is ~2.6 MB with no accuracy cost —
 and the scale-arrays study establishes WHY going further (spatial O(area)) is
 not free: it trades the closure sharpness SLAM needs.
+
+## Iterative slow-to-fast scale-cascade loop closure (2026-07-07)
+
+`ssp_cascade.py` (new, imports only — edits nothing). Applies classic
+multi-wavelength phase unwrapping to loop-closure VERIFICATION on the shipped
+ring lattice (lam 0.25/0.5/1/2/5.3/12.8 x 60 angles). Given a candidate
+(query scan, old-pass bundle B, seed pose) the cascade walks rings SLOW->FAST:
+stage 0 = wide phase-correlation on the 12.8 ring (rotation via exact
+`rot_permute` x translation) for a rough (theta_0,t_0); each finer stage i
+seeds from i-1, searches a translation window ~lam_{i-1}/4 + a 1-step rotation
+refine on ring i's phase (`grid_scores` on that ring's mask), and records the
+correction d_i=|t_i-t_{i-1}| and per-ring coherence coh_i. Three acceptance
+tests: (a) unwrap-consistency (reject if any d_i > lam_{i-1}/2); (b)
+coherence-profile ratio coh_fine/coh_coarse (fine=lam0.5/0.25, coarse=lam
+12.8/5.3) — a ratio, so nominally scale-invariant; (c) final-precision
+(finest coh + correction within noise). Unwrapping condition holds on the
+octave ladder: the tightest rung is 5.3->2 (2.65x, window 1.33 m vs ring
+ambiguity radius 1.0 m); empirically the coarse stage always lands inside the
+radius (unwrap pass rate 1.00 on every bench below).
+
+**The mechanism is real and the profile out-separates single-scale coherence
+ON A LABELLED CORRIDOR BENCH.** Self-similar repeated-bay corridor world
+(identical alcove every 6 m = coarse alias; a per-bay jagged wall fingerprint
+that blurs out at lam>=2 m; `shared` blends a common fine texture so twins keep
+MODERATE fine coherence). Selftest: a strong genuine passes all three tests; a
+constructed corridor twin (query bay k vs map bay k+-1, seed one period off so
+the coarse alcove aliases) collapses coh coarse->fine (0.96->0.49) and is
+REJECTED by the profile while a single-scale fine-coherence veto ACCEPTS it —
+and it must, because a genuine PARTIAL-OVERLAP revisit has fine coh 0.42
+(BELOW the twin's 0.49) yet profile ratio 0.67 (ABOVE the twin's 0.51): any
+absolute fine-coherence bar low enough to keep that genuine also admits the
+twin. GT-labelled ROC (160 genuine w/ mixed partial-overlap + noise
+degradation, 135 twins): profile ratio AUC 0.897 / profile slope AUC 0.948 vs
+single-scale fine coherence AUC 0.782 (coarse coherence AUC 0.19 — coarse is
+HIGHER on twins, it locks the alias). A/B at matched 90% genuine recall: the
+profile admits 31% of twins (42/135 false edges) vs single-scale's 76%
+(102/135) — false edges more than halved at equal recall. Whitening the
+scatter (cascade_roc.png right panel): at equal fine coherence, genuine sit
+above twins in ratio. WHY it works: the profile's denominator (coarse
+coherence) divides out the per-candidate absolute level that varies with
+overlap/clutter — the exact common-mode nuisance that swamps a single-scale
+absolute threshold.
+
+**But the absolute profile threshold does NOT transfer to real data — the
+Intel regression is the honest bound.** 80 genuine Intel revisits (GT-close,
+>400 kf apart; bundle from 30 GT-posed old keyframes, seed at GT) have profile
+ratio mean 0.456 / median 0.438 (coarse coh 0.765, fine coh 0.350): genuine
+real-log revisits show the SAME coarse>fine collapse as twins, because a
+180-deg-FOV SICK revisit's viewpoint change, partial overlap and dynamic
+clutter are all FINE-SELECTIVE (they kill the short wavelengths first, exactly
+like a twin). The corridor-tuned absolute threshold 0.55 keeps only 17/80
+(21%) of genuine Intel closures; even 0.35 keeps 50%; a session-relative
+threshold (0.55 x session median = 0.24) recovers 66%. So the "scale-invariant,
+absolute-level-free" hope is only HALF true: the ratio removes the
+per-candidate absolute level WITHIN a domain (hence the better within-domain
+AUC), but HOW MUCH fine degrades relative to coarse on a genuine closure is
+itself domain-dependent (sensor FOV, viewpoint diversity, clutter), so a fixed
+ratio threshold still does not transfer. A drop-in predicate (`accept()` is
+provided) must be session-calibrated exactly like the shipped coherence veto
+it aimed to replace — it relocates the transfer problem from an absolute
+coherence bar to a ratio bar, it does not eliminate it.
+
+**Two structural findings, honest either way (the task's anticipated result).**
+(1) The unwrap-consistency test is INERT in smooth corridors: both genuine and
+twin corrections stay < lam/2 (a corridor lets the finer rings slide to a local
+fit rather than jump a period), so ALL discrimination comes from the
+coherence-profile, none from unwrap magnitude — the geometric-consistency
+signal the cascade was built around does not fire where the aperture problem
+lives. (2) The cascade INHERITS the coarse rings' place-recognition limit
+(R3/R4): if lam 5.3/12.8 cannot distinguish two bays (they can't — that IS the
+corridor self-similarity), stage 0 cannot pick the right bay, so the cascade
+cannot RECALL a genuine closure the coarse ring missed. What it CAN do is
+REJECT a twin the coarse ring locked onto (precision, not recall) — within-
+match multi-scale consistency raises precision on coarse-ambiguous candidates
+but cannot exceed the coarsest ring's place-recognition information for recall.
+Net verdict: a materially better twin DISCRIMINATOR on labelled synthetic
+corridors (AUC +0.11, false edges halved at equal recall), NOT a drop-in
+Intel-safe predicate at any fixed threshold; the fine band's viewpoint/overlap
+fragility on real 180-deg-FOV logs is indistinguishable, within one match, from
+a corridor twin's collapse. Reproduce: `python3 ssp_cascade.py
+[selftest|roc|intel|all]`; figure cascade_roc.png.

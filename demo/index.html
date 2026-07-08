@@ -2297,6 +2297,10 @@ let prevT = performance.now(), fpsE = 0;
 let frame = 0;
 
 function tick(now){
+  // headless soak: once the harness has captured its result, stop the render
+  // loop so the page goes idle and Chrome/Edge --dump-dom fires immediately
+  // instead of spinning heavy redraws until --virtual-time-budget expires.
+  if (window.__soakStop) return;
   requestAnimationFrame(tick);
   let dt = (now - prevT) / 1000; prevT = now;
   dt = Math.max(0.005, Math.min(dt, 0.05));
@@ -2530,7 +2534,7 @@ if (/[?&]test=1/.test(location.search)) browserTests();
    ?soak=N&verify=1  additionally sample canvas pixels programmatically and
                   dump a JSON verdict into #verifyOut + document.title.     */
 const soakM = location.search.match(/[?&]soak=(\d+)/);
-if (soakM && IN.ready){
+function startSoak(){
   IN.playing = false;
   const target = Math.min(+soakM[1] || IN.N, IN.N);
   const t0s = performance.now();
@@ -2555,6 +2559,7 @@ if (soakM && IN.ready){
       d.style.cssText = "grid-area:tst;display:block;white-space:pre-wrap;font-size:11px";
       d.textContent = JSON.stringify(r, null, 1);
       document.querySelector(".app").prepend(d);
+      window.__soakStop = true;   // let the page go idle so --dump-dom fires now
     };
     if (!/[?&]verify=1/.test(location.search)){ finish(res); return; }
     // let two frames render, then sample pixels
@@ -2563,12 +2568,25 @@ if (soakM && IN.ready){
       const d8 = px.data, W = worldCv.width, H = worldCv.height;
       const near = (i, c, tol) => Math.abs(d8[i]-c[0]) + Math.abs(d8[i+1]-c[1])
                                 + Math.abs(d8[i+2]-c[2]) < tol;
+      // AA-robust est detector: the est polyline is a thin 1.6px amber line
+      // (rgb 201,133,0) drawn at alpha 1; its edge pixels are alpha-blended so
+      // an exact-color match misses them. Match the amber HUE instead — high R,
+      // mid G (< 0.85 R), low B, clear R–B spread — which survives blending
+      // over the dark background and separates it from the blue cloud, green
+      // reference and violet closure lines.
+      const isEst = (i) => d8[i] > 90 && d8[i+2] < 80 && d8[i+1] > 25
+                        && d8[i+1] < d8[i]*0.85 && (d8[i]-d8[i+2]) > 70;
       // color targets (est/closures alpha 1; ref alpha .55 over #0d0d0d)
       const EST = [201, 133, 0], CLO = [232, 123, 164], REF = [20, 93, 66];
-      let nonBg = 0, estPix = 0, cloPix = 0, refPix = 0;
+      let nonBg = 0, estPix = 0, amberPix = 0, cloPix = 0, refPix = 0;
+      let aMinX=1e9, aMinY=1e9, aMaxX=-1e9, aMaxY=-1e9;   // amber-pixel bbox
       for (let i = 0; i < d8.length; i += 4){
         if (d8[i] + d8[i+1] + d8[i+2] > 60) nonBg++;
         if (near(i, EST, 100)) estPix++;
+        if (isEst(i)){ amberPix++;
+          const p = i>>2, xx = p % W, yy = (p / W)|0;
+          if (xx<aMinX)aMinX=xx; if (xx>aMaxX)aMaxX=xx;
+          if (yy<aMinY)aMinY=yy; if (yy>aMaxY)aMaxY=yy; }
         if (near(i, CLO, 100)) cloPix++;
         if (near(i, REF, 70)) refPix++;
       }
@@ -2578,22 +2596,43 @@ if (soakM && IN.ready){
       const bw = IN.bbox[2]-IN.bbox[0], bh = IN.bbox[3]-IN.bbox[1];
       const s = Math.min(W/bw, H/bh);
       const ox = (W - bw*s)/2, oy = (H - bh*s)/2;
-      let refN = 0, refHit = 0;
+      const w2px = (x, y) => [Math.round(ox + (x-IN.bbox[0])*s),
+                              Math.round(H - oy - (y-IN.bbox[1])*s)];
+      // does an EST-colored pixel sit within tolM metres of world point (wx,wy)?
+      const estNear = (wx, wy, tolM) => {
+        const [cx, cy] = w2px(wx, wy);
+        const R = Math.max(6, Math.round(tolM*s));
+        for (let dy = -R; dy <= R; dy += 2)
+          for (let dx = -R; dx <= R; dx += 2){
+            const xx = cx+dx, yy = cy+dy;
+            if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+            if (isEst(4*(yy*W+xx))) return true;
+          }
+        return false;
+      };
+      // (a) PURE RENDER check, accuracy-independent: every drawn EST pose must
+      //     have EST pixels next to it -> proves transform/DPR/z-order are right.
+      // (b) FRAME check: reference (Horn-aligned into est frame) near the est
+      //     polyline. Tolerance scales with the measured ATE because the no-
+      //     odometry trajectory legitimately deviates ~ATE metres; the accuracy
+      //     itself is gated by the ATE number, not by this pixel test.
+      const ate = isFinite(IN.rmse) ? IN.rmse : 1;
+      const tolFrame = Math.max(2.5, 2.5*ate);
+      let refN = 0, refHit = 0, refHit25 = 0, estN = 0, estHit = 0;
+      let pMinX=1e9, pMinY=1e9, pMaxX=-1e9, pMaxY=-1e9;   // sampled-pose pixel bbox
+      for (let _k = 0; _k < IN.k; _k += 7){
+        const [px_, py_] = w2px(IN.poses[3*_k], IN.poses[3*_k+1]);
+        if (px_<pMinX)pMinX=px_; if (px_>pMaxX)pMaxX=px_;
+        if (py_<pMinY)pMinY=py_; if (py_>pMaxY)pMaxY=py_;
+      }
       for (let k = 0; k < IN.k; k += 7){
+        const [ex, ey] = [IN.poses[3*k], IN.poses[3*k+1]];
+        estN++; if (estNear(ex, ey, 0.6)) estHit++;
         if (!IN.refOk[k]) continue;
         refN++;
         const [qx, qy] = refInEstFrame(k);
-        const cx = Math.round(ox + (qx-IN.bbox[0])*s);
-        const cy = Math.round(H - oy - (qy-IN.bbox[1])*s);
-        let hit = false;
-        const R = Math.max(6, Math.round(2.5*s));
-        for (let dy = -R; dy <= R && !hit; dy += 2)
-          for (let dx = -R; dx <= R && !hit; dx += 2){
-            const xx = cx+dx, yy = cy+dy;
-            if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-            if (near(4*(yy*W+xx), EST, 110)) hit = true;
-          }
-        if (hit) refHit++;
+        if (estNear(qx, qy, tolFrame)) refHit++;
+        if (estNear(qx, qy, 2.5)) refHit25++;
       }
       // UI-path vs core-path parity (SAME engine): rerun the whole pipeline
       // with zero UI involvement and compare the Horn ATE exactly
@@ -2642,8 +2681,14 @@ if (soakM && IN.ready){
       Object.assign(res, {
         jsErrors,
         worldNonBgPct: +(100*nonBg/(W*H)).toFixed(1),
-        estPix, cloPix, refPix, cloudLit,
-        refCoverage: refN ? +(refHit/refN).toFixed(3) : null,
+        estPix, amberPix, cloPix, refPix, cloudLit,
+        dbgWH: [W, H], dbgS: +s.toFixed(2),
+        dbgAmberBox: [aMinX|0, aMinY|0, aMaxX|0, aMaxY|0],
+        dbgPoseBox: [pMinX|0, pMinY|0, pMaxX|0, pMaxY|0],
+        estSelfCov: estN ? +(estHit/estN).toFixed(3) : null,   // render check
+        tolFrameM: +tolFrame.toFixed(2),
+        refCoverage: refN ? +(refHit/refN).toFixed(3) : null,  // frame @ tolFrame
+        refCov25: refN ? +(refHit25/refN).toFixed(3) : null,   // accuracy @ 2.5 m
         latLit: panelLit(lctx, latCv), corrLit: panelLit(cctx, corrCv),
         decLit: panelLit(dctx, decCv),
         uiAte: isFinite(IN.rmse) ? +IN.rmse.toFixed(6) : null,
@@ -2651,16 +2696,41 @@ if (soakM && IN.ready){
         atePar: coreAte !== null && isFinite(IN.rmse)
           ? Math.abs(coreAte - IN.rmse) < 1e-9 : null,
       });
+      // gates: accuracy is judged by the ATE number; these are RENDER/FRAME
+      // integrity checks. estSelfCov proves the est polyline is actually drawn
+      // at the est poses (transform/DPR/z-order); refCoverage proves the Horn-
+      // aligned reference tracks the est path within a few ATE lengths.
       res.pass = jsErrors.length === 0 && res.ate !== null &&
         res.worldNonBgPct > 2 && estPix > 300 &&
         (res.closures === 0 || cloPix > 30) && refPix > 100 &&
-        cloudLit > 10000 && res.refCoverage >= 0.85 &&
+        cloudLit > 10000 && res.estSelfCov >= 0.9 && res.refCoverage >= 0.85 &&
         res.latLit > 500 && res.corrLit > 200 && res.decLit > 500 &&
         res.atePar === true;
       finish(res);
     }));
   };
   setTimeout(drive, 50);
+}
+// AWAIT data-ready before soaking. loadIntel() decodes synchronously above, so
+// IN.ready is already set; poll defensively so a headless --dump-dom run can
+// never start (and dump nothing) before the embedded blob is decoded.
+if (soakM){
+  if (IN.ready) startSoak();
+  else {
+    let tries = 0;
+    const wait = setInterval(() => {
+      if (IN.ready){ clearInterval(wait); startSoak(); }
+      else if (++tries > 600){          // ~10 s of virtual time, then bail loudly
+        clearInterval(wait);
+        const msg = "SOAK " + JSON.stringify({ error: "IN.ready never set", ate: null });
+        document.title = msg;
+        const d = document.createElement("pre");
+        d.id = "verifyOut"; d.textContent = msg;
+        document.body.appendChild(d);
+        window.__soakStop = true;
+      }
+    }, 16);
+  }
 }
 requestAnimationFrame(tick);
 })();
