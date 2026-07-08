@@ -2909,3 +2909,50 @@ target. So "redundant != compressible for SLAM" is a floppy-graph property, not
 universal. VERDICT: a real memory-efficiency improvement on the O(area) constant
 (30-60 %, esp. MIT), robust in the memory axis, brittle in the ATE axis — usable
 as a memory lever (conservative tau ~0.85), not as an accuracy improvement.
+
+---
+
+## Hierarchical multi-resolution (SSP-scale) pose-graph correction — LIMIT: flat relax already optimal
+
+Tests whether a coarse-first correction keyed to the SSP scale structure (group
+5-kf anchors into large super-nodes = the low-frequency scale, relax the coarse
+graph first, DRAG the fine anchors by a smooth inverse-distance-weighted
+deformation field, then refine) beats the shipped flat anchor pose graph
+(`ssp_hiergraph.py`, HierGraphSLAM(BoundedSLAM); sanity: hier=False and span=inf
+both BIT-EXACT to BoundedSLAM.relax; flat baselines reproduce shipped exactly).
+
+**The decisive isolation:** on a FIXED graph (flat vs hier over the identical
+loop set, 8 seeds), both give the SAME ATE to <=0.1 % (0.002 vs 0.002 m). **The
+flat single global least-squares solve already reaches the optimum — the 5-kf
+anchor pose graph IS the multi-resolution deformation model, and coarse-first
+converges to the same point.** So every real-log difference is an ONLINE-FEEDBACK
+artifact, never a better optimum.
+
+Real-log ATE (rmse m), flat vs hierarchical span sweep:
+| log | flat | best hier | verdict |
+|---|---|---|---|
+| fr101 (dense) | 1.881 | 1.882 | neutral (well-constrained) |
+| fr079 (floppy) | 5.523 | 7.16 | HURTS +30-95 % |
+| intel | 2.440 | 3.57 | HURTS +46-126 % |
+| MIT (bends) | 57.383 | 40.7 | apparent -29 % but a CHAOS ARTIFACT |
+
+- Neutral where dense revisits over-constrain (fr101); WORSE on floppy/drifty logs
+  (the transient coarse warp destabilizes the frontend + drift-gated loop
+  admission — Intel loop count balloons 80 -> 147-171 with low-quality edges).
+  Damage SHRINKS as span grows toward the flat limit — the best hierarchical
+  config is the one that least resembles a hierarchy.
+- SLOWER, refuting the multigrid hypothesis (Intel relax 8.95 s -> 17-34 s: the
+  fine full solve still runs every relax, plus coarse overhead plus more edges).
+- The MIT "win" is NOT better optimization — it is fewer/less-catastrophic
+  closures (max-err 221 -> 79-97 m); the drag's online perturbation accidentally
+  suppresses some false corridor snaps in the documented MIT chaos regime. The
+  fixed-graph isolation proves the coarse level does not optimize better; same
+  class as "drop corridor closures and ride odometry", not a multi-resolution
+  correction absorbing the bend.
+
+VERDICT: SSP-scale hierarchical correction does NOT improve on the flat anchor
+pose graph — neutral at best, worse on floppy logs, slower. The flat relax already
+distributes low-frequency drift optimally; the hierarchy only injects blocky-drag /
+condensed-edge perturbation. Confirms the dispatch prediction: the 5-kf anchor is
+already a deformation node. (No positive to audit — the MIT apparent-win is a
+quantified chaos artifact.)
