@@ -2956,3 +2956,51 @@ distributes low-frequency drift optimally; the hierarchy only injects blocky-dra
 condensed-edge perturbation. Confirms the dispatch prediction: the 5-kf anchor is
 already a deformation node. (No positive to audit — the MIT apparent-win is a
 quantified chaos artifact.)
+
+---
+
+## Continual gradient-flow closure: valid non-folding mechanism, not a detection replacement
+
+Detection-free paradigm (`ssp_flow.py`, subclass; no shipped edit): energy
+E = lam_seq*||seq skeleton||^2 - lam_ov*sum rho(cos<P_i,P_j>) over ALL
+spatially-near / temporally-distant anchor pairs (no detect/gate), fixed anchor
+gauge. The overlap force is the ANALYTIC SSP correlation gradient (translation =
+phase gradient iW, rotation = the stored d/dtheta derivative vector),
+finite-difference-exact to rel 8e-8. Sanity: lam_ov=0 == odometry (0.0000 cm);
+collapse guard holds (traj length 604->604 m with the stiff skeleton; +29 %
+distortion without -> skeleton load-bearing).
+
+- **Single-session (T1) — matches detected closure ONLY where the frontend is
+  already in-basin.** fr101 flow 3.21 vs shipped 3.32 (median 1.18 < 1.37); but
+  Intel flow 5.24 vs shipped 2.44, fr079 11.4 vs 5.52 (flow ~= frontend-only
+  5.07/11.6). Detection-free flow CANNOT recover drift beyond the coarse-ring
+  basin (~6 m) + spatial gate — it only REFINES, it can't do the long-range data
+  association that detect+snap does. Annealing HURT (folded max 15-18 m).
+- **MIT (T2) — GRACEFUL by construction.** Traj length 604->604 m, max anchor
+  displacement 3.3 m, no twin fold / no 100 m blowup. The bounded robust kernel
+  never COMMITS a corridor twin, so it cannot fold — graceful WITHOUT drought/PCM
+  (but it also does not improve).
+- **Multi-session (T3, the crown) — does NOT converge.** From a GT-free single-tie
+  init (6 m) the residual stalls 6.00 -> 5.95 m; root-cause probe: genuine
+  co-observed cross-pass cosine 0.097 vs noise p90 0.29 -> INDISTINGUISHABLE (the
+  same cross-session data-association wall the discrete methods hit). From a
+  favorable rigid T_AB init (2.64 m) the flow LOCKS confidently-overlapping
+  regions (within-1 m anchors 8 -> 40) but the median doesn't converge —
+  region-by-region locking only, not global alignment. (Anti-oracle confirmed:
+  single-tie/rigid init, GT scores only, no shared-index.)
+
+**User-suggested enhancements — both CONFIRMED as real conditioning/robustness
+wins (not content fixes):** (a) GRADIENT-L2 normalization (divide the force by
+|u_i||u_j|, keep stored vectors RAW so additivity is preserved) -> lr-ROBUST
+(2.50-2.64 across lr 0.1-1.0) where the raw force DIVERGES at lr 0.1 (169 m); (b)
+SOFT/HEX partition-of-unity feature distribution (bilinear-kernel /
+Delaunay-barycentric) -> SMOOTHER descent (monotone % 46-50 vs hard 27) + wider
+offset tolerance (kernel held 3.69 at a 1.5 m offset where hard degraded to 4.43),
+point-mass conserved. Neither moves the cosine-indistinguishability wall.
+
+VERDICT: continual gradient-flow closure is a valid, well-conditioned,
+non-folding mechanism, but NOT a viable detection-free REPLACEMENT — it can only
+refine when already in-basin and does not solve cross-session association. This
+motivates a HYBRID (next): detected+verified closures do the long-range topology
+(getting in-basin) that the flow can't, and the overlap flow does the dense
+deformation refinement between them (the region-by-region locking it CAN do).
