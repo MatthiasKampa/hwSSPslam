@@ -521,6 +521,30 @@ for the frontend do-no-harm guard §6; global positioning / surveyed landmarks /
 3D or wider-aperture sensing for the corridor §5.5) — outside this bounded,
 appearance-only, 2D-lidar problem statement.
 
+**The unifying finding — verification, not retrieval, is the recurring wall.**
+The strongest cross-cutting result of the whole campaign is that every hard limit
+lands on the *same* structural bottleneck: appearance-only place **verification /
+discrimination** — separating a genuine revisit from a consistent alias — not
+retrieval, and not the VSA algebra. The MIT corridor (§5): ring-key *retrieves*
+the true revisits (recall 0.32→0.81), but geometric consensus and temporal
+sequence cannot *verify* them against self-similar corridor twins. Multi-session
+map merging (§3, the composition capstone): superposition, algebraic merge, and
+ring-key retrieval all *work*, but establishing cross-session correspondences hits
+the identical wall — absolute coherence cannot separate viewpoint-changed genuine
+ties from wrong-nearby places (correct/false coherence medians 0.171 vs 0.172),
+and PCM consensus helps (best oracle-free two-session ATE 3.35 m, over B-alone
+4.37) but cannot close it because the aliased twins are themselves geometrically
+consistent. Both are the same limit approached from opposite environments —
+self-similar corridors vs cross-session viewpoint change — and both confirm that
+what the SSP/VSA representation contributes (drift-independent retrieval,
+algebraic composition, bounded history-free maps) is *sound and demonstrated*,
+while the residual limit is a property of appearance-only place recognition that
+no representation removes without an independent cue. The positive corollary: the
+VSA-native pieces — composition, algebraic merge, ring-key appearance retrieval —
+are each independently validated; a system that pairs them with an external
+verification cue (loop-closure ground truth, GPS, or a discriminative learned
+place model) inherits all three for free.
+
 **Open questions.**
 
 1. **The small-correlated-alias case.** Outlier robustness is proven against
