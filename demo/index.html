@@ -1692,6 +1692,12 @@ function resetIntel(){
   IN.rmse = NaN; IN.horn = null;
   IN.poseVersion = -1; IN.poseUpto = 0;
   IN.cloudN.fill(0);
+  // dynamic world view (est frame). meta.bbox assumes "est stays inside" the
+  // odom/reference envelope, which held only for the odometry-composed pipeline;
+  // the no-odometry est frame drifts rotationally OUTSIDE bbox, so we frame the
+  // view on the live content (est + odom + cloud) and grow it as the run drifts.
+  IN.vb = [IN.odom[0] - 1, IN.odom[1] - 1, IN.odom[0] + 1, IN.odom[1] + 1];
+  ensureCloudCanvas();
   IN.cctx.clearRect(0, 0, IN.cloud.width, IN.cloud.height);
   decIN.row = 0; decIN.max = 0; decIN.scale = 1e-6;
   decIN.img.data.fill(0);
@@ -1744,7 +1750,9 @@ function intelProcessKF(){
     nc++;
   }
   IN.cloudN[k] = nc;
-  drawCloudKf(k);          // incremental; full redraw after each relax
+  // grow the est-frame view if this keyframe drifted past it, else draw fast
+  if (extendViewForKf(k)) redrawCloud();   // rare (4 m slack per expansion)
+  else drawCloudKf(k);     // incremental; full redraw after each relax
   if (IN.refOk[k]){
     const [qx, qy] = refInEstFrame(k);   // Horn-consistent instantaneous errors
     IN.lastErrE = Math.hypot(est[0]-qx, est[1]-qy);
@@ -1822,10 +1830,41 @@ function cloudStyleFor(k){
   const t = 0.2 + 0.75 * k / IN.N, ci = Math.round(t * 255) * 3;
   return `rgb(${LUT_BLUE[ci]},${LUT_BLUE[ci+1]},${LUT_BLUE[ci+2]})`;
 }
+/* grow-only est-frame view window. GP metres of slack per expansion keeps the
+   offscreen from resizing every keyframe. returns true if the window grew. */
+function extendViewIN(x, y){
+  const M = 1.0, GP = 4.0;
+  let g = false;
+  if (x - M < IN.vb[0]){ IN.vb[0] = x - M - GP; g = true; }
+  if (y - M < IN.vb[1]){ IN.vb[1] = y - M - GP; g = true; }
+  if (x + M > IN.vb[2]){ IN.vb[2] = x + M + GP; g = true; }
+  if (y + M > IN.vb[3]){ IN.vb[3] = y + M + GP; g = true; }
+  return g;
+}
+// size the offscreen map canvas to the current view at cloudScale px/m
+function ensureCloudCanvas(){
+  const vw = IN.vb[2] - IN.vb[0], vh = IN.vb[3] - IN.vb[1];
+  const W = Math.max(1, Math.round(vw * IN.cloudScale));
+  const H = Math.max(1, Math.round(vh * IN.cloudScale));
+  if (IN.cloud.width !== W || IN.cloud.height !== H){ IN.cloud.width = W; IN.cloud.height = H; }
+}
+// world extent of one keyframe's cloud + pose; grows the view (no draw)
+function extendViewForKf(k){
+  let g = extendViewIN(IN.est[3*k], IN.est[3*k+1]);
+  g = extendViewIN(IN.odom[3*k], IN.odom[3*k+1]) || g;
+  const a = IN.slam.anchors[IN.slam.kfRef[k].aid];
+  const ca = Math.cos(a[2]), sa = Math.sin(a[2]);
+  for (let i = 0; i < IN.cloudN[k]; i++){
+    const px = IN.cloudPts[(k*IN.CLOUD_PER_KF + i)*2];
+    const py = IN.cloudPts[(k*IN.CLOUD_PER_KF + i)*2 + 1];
+    g = extendViewIN(a[0] + ca*px - sa*py, a[1] + sa*px + ca*py) || g;
+  }
+  return g;
+}
 function drawCloudKf(k){
   const a = IN.slam.anchors[IN.slam.kfRef[k].aid];
   const ca = Math.cos(a[2]), sa = Math.sin(a[2]);
-  const cs = IN.cloudScale, bx = IN.bbox[0], by = IN.bbox[3];
+  const cs = IN.cloudScale, bx = IN.vb[0], by = IN.vb[3];
   IN.cctx.fillStyle = cloudStyleFor(k);
   for (let i = 0; i < IN.cloudN[k]; i++){
     const px = IN.cloudPts[(k*IN.CLOUD_PER_KF + i)*2];
@@ -1835,6 +1874,9 @@ function drawCloudKf(k){
   }
 }
 function redrawCloud(){
+  // relax moved the anchors: re-fit the view over all live content, then redraw
+  for (let k = 0; k < IN.k; k++) extendViewForKf(k);
+  ensureCloudCanvas();                       // resizing the canvas clears it
   IN.cctx.clearRect(0, 0, IN.cloud.width, IN.cloud.height);
   for (let k = 0; k < IN.k; k++) drawCloudKf(k);
 }
@@ -2211,35 +2253,46 @@ function drawTri(pose, s, fill, stroke, w2p){
 
 /* --------------------------------------------------------- world: intel */
 function drawWorldIN(){
-  const bw = IN.bbox[2] - IN.bbox[0], bh = IN.bbox[3] - IN.bbox[1];
+  const vb = IN.vb;                          // dynamic est-frame view window
+  const bw = vb[2] - vb[0], bh = vb[3] - vb[1];
   fit(worldCv, Math.max(0.9, Math.min(2.2, bw / bh)));
   const W = worldCv.width, H = worldCv.height;
   wctx.clearRect(0, 0, W, H);
   const s = Math.min(W / bw, H / bh);
   const ox = (W - bw * s) / 2, oy = (H - bh * s) / 2;
-  const w2p = (x, y) => [ox + (x - IN.bbox[0]) * s, H - oy - (y - IN.bbox[1]) * s];
+  const w2p = (x, y) => [ox + (x - vb[0]) * s, H - oy - (y - vb[1]) * s];
   // accumulated map cloud
   wctx.globalAlpha = 0.9;
   wctx.drawImage(IN.cloud, ox, oy, bw * s, bh * s);
   wctx.globalAlpha = 1;
   const k = IN.k;
   if (k < 1) return;
-  // trajectories: odometry dead reckoning (gray), reference (green), est (yellow)
-  const poly = (getx, gety, ok, color, width, alpha) => {
+  // trajectories: odometry dead reckoning (gray), est (amber), reference
+  // (green). With the no-odometry est now correctly framed it sits ON the
+  // reference, so we draw the estimate first and the ground-truth reference
+  // LAST as a dashed bright line — both stay visible where they coincide and
+  // the amber shows through the gaps exactly where the estimate drifts (ATE).
+  // ok filters which keyframes contribute; invalid ones are SKIPPED but the pen
+  // stays down so the polyline bridges gaps. The reference is only timestamp-
+  // matched at ~24% of keyframes (fragmented, max run 8, and consecutive frames
+  // are 0.05 m ≈ sub-pixel apart) — breaking on every gap would render nothing,
+  // so we connect the valid points into one continuous ground-truth curve.
+  const poly = (getx, gety, ok, color, width, alpha, dash) => {
     wctx.strokeStyle = color; wctx.lineWidth = width; wctx.globalAlpha = alpha;
+    wctx.setLineDash(dash || []);
     wctx.beginPath();
     let pen = false;
     for (let j = 0; j < k; j++){
-      if (ok && !ok(j)){ pen = false; continue; }
+      if (ok && !ok(j)) continue;
       const [px, py] = w2p(getx(j), gety(j));
       if (!pen){ wctx.moveTo(px, py); pen = true; } else wctx.lineTo(px, py);
     }
-    wctx.stroke(); wctx.globalAlpha = 1;
+    wctx.stroke(); wctx.globalAlpha = 1; wctx.setLineDash([]);
   };
   poly(j => IN.odom[3*j], j => IN.odom[3*j+1], null, "#898781", 1.2, 0.8);
-  poly(j => refInEstFrame(j)[0], j => refInEstFrame(j)[1],
-       j => IN.refOk[j], "#199e70", 1.2, 0.55);
   poly(j => IN.poses[3*j], j => IN.poses[3*j+1], null, "#c98500", 1.6, 1);
+  poly(j => refInEstFrame(j)[0], j => refInEstFrame(j)[1],
+       j => IN.refOk[j], "#2fd18f", 1.8, 0.9);
   // accepted loop-closure edges between live anchor poses (violet)
   {
     const an = IN.slam.anchors;
@@ -2576,28 +2629,27 @@ function startSoak(){
       // reference and violet closure lines.
       const isEst = (i) => d8[i] > 90 && d8[i+2] < 80 && d8[i+1] > 25
                         && d8[i+1] < d8[i]*0.85 && (d8[i]-d8[i+2]) > 70;
-      // color targets (est/closures alpha 1; ref alpha .55 over #0d0d0d)
-      const EST = [201, 133, 0], CLO = [232, 123, 164], REF = [20, 93, 66];
-      let nonBg = 0, estPix = 0, amberPix = 0, cloPix = 0, refPix = 0;
-      let aMinX=1e9, aMinY=1e9, aMaxX=-1e9, aMaxY=-1e9;   // amber-pixel bbox
+      // AA/blend-robust reference detector: the dashed ground-truth line is
+      // green (rgb 47,209,143), drawn over amber/background, so match the green
+      // HUE (G dominant over both R and B) rather than an exact blended color.
+      const isRef = (i) => d8[i+1] > 90 && (d8[i+1]-d8[i]) > 40 && (d8[i+1]-d8[i+2]) > 25;
+      const CLO = [232, 123, 164];   // accepted-closure violet (alpha ~0.85)
+      let nonBg = 0, estPix = 0, cloPix = 0, refPix = 0;
       for (let i = 0; i < d8.length; i += 4){
         if (d8[i] + d8[i+1] + d8[i+2] > 60) nonBg++;
-        if (near(i, EST, 100)) estPix++;
-        if (isEst(i)){ amberPix++;
-          const p = i>>2, xx = p % W, yy = (p / W)|0;
-          if (xx<aMinX)aMinX=xx; if (xx>aMaxX)aMaxX=xx;
-          if (yy<aMinY)aMinY=yy; if (yy>aMaxY)aMaxY=yy; }
+        if (isEst(i)) estPix++;
         if (near(i, CLO, 100)) cloPix++;
-        if (near(i, REF, 70)) refPix++;
+        if (isRef(i)) refPix++;
       }
       // geometric truth: est path must pass near the (Horn-aligned) reference
       // polyline — a RENDERING check (transform/DPR/z-order), the accuracy
       // gate is the ATE number itself, so tolerance = 2.5 m
-      const bw = IN.bbox[2]-IN.bbox[0], bh = IN.bbox[3]-IN.bbox[1];
+      const vb = IN.vb;   // MUST match drawWorldIN's dynamic view exactly
+      const bw = vb[2]-vb[0], bh = vb[3]-vb[1];
       const s = Math.min(W/bw, H/bh);
       const ox = (W - bw*s)/2, oy = (H - bh*s)/2;
-      const w2px = (x, y) => [Math.round(ox + (x-IN.bbox[0])*s),
-                              Math.round(H - oy - (y-IN.bbox[1])*s)];
+      const w2px = (x, y) => [Math.round(ox + (x-vb[0])*s),
+                              Math.round(H - oy - (y-vb[1])*s)];
       // does an EST-colored pixel sit within tolM metres of world point (wx,wy)?
       const estNear = (wx, wy, tolM) => {
         const [cx, cy] = w2px(wx, wy);
@@ -2619,12 +2671,6 @@ function startSoak(){
       const ate = isFinite(IN.rmse) ? IN.rmse : 1;
       const tolFrame = Math.max(2.5, 2.5*ate);
       let refN = 0, refHit = 0, refHit25 = 0, estN = 0, estHit = 0;
-      let pMinX=1e9, pMinY=1e9, pMaxX=-1e9, pMaxY=-1e9;   // sampled-pose pixel bbox
-      for (let _k = 0; _k < IN.k; _k += 7){
-        const [px_, py_] = w2px(IN.poses[3*_k], IN.poses[3*_k+1]);
-        if (px_<pMinX)pMinX=px_; if (px_>pMaxX)pMaxX=px_;
-        if (py_<pMinY)pMinY=py_; if (py_>pMaxY)pMaxY=py_;
-      }
       for (let k = 0; k < IN.k; k += 7){
         const [ex, ey] = [IN.poses[3*k], IN.poses[3*k+1]];
         estN++; if (estNear(ex, ey, 0.6)) estHit++;
@@ -2681,10 +2727,7 @@ function startSoak(){
       Object.assign(res, {
         jsErrors,
         worldNonBgPct: +(100*nonBg/(W*H)).toFixed(1),
-        estPix, amberPix, cloPix, refPix, cloudLit,
-        dbgWH: [W, H], dbgS: +s.toFixed(2),
-        dbgAmberBox: [aMinX|0, aMinY|0, aMaxX|0, aMaxY|0],
-        dbgPoseBox: [pMinX|0, pMinY|0, pMaxX|0, pMaxY|0],
+        estPix, cloPix, refPix, cloudLit,
         estSelfCov: estN ? +(estHit/estN).toFixed(3) : null,   // render check
         tolFrameM: +tolFrame.toFixed(2),
         refCoverage: refN ? +(refHit/refN).toFixed(3) : null,  // frame @ tolFrame
