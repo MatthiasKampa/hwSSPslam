@@ -2058,3 +2058,66 @@ needs the full six-log validation before it can ship. NOTE the hard-veto column
 still edges soft@0.55 on both odo-excellent logs (ACES 5.94 vs 6.21, fr101 1.80
 vs 1.88) exactly as the worst-of-three coh_target sweep predicted — soft's win
 is concentrated on Intel; it is a small, known cost elsewhere.
+
+---
+
+## The frontend do-no-harm guard: a clean negative (per-frame signals can't do it)
+
+Follow-up to "the frontend do-no-harm gap": can a frontend guard shrink the
+scan-match correction toward the odometry guess on low-confidence frames,
+recovering the odo-excellent logs (ACES, belgioioso) toward odometry parity
+WITHOUT regressing the odo-drifting logs (Intel, fr079, fr101)? Built
+`ssp_frontguard.py` (FrontGuardSLAM subclasses BoundedSLAM, overrides ONLY the
+`_frontend_accept` hook; `identity` reproduces shipped bit-for-bit — asserted).
+
+**DIAGNOSTIC (the decisive evidence).** Per-accepted-frame distributions of the
+coherence ratio r = c01/coh_ref and the correction magnitude |cand-guess|:
+
+| log | r p10 | r med | r p90 | frac r<0.85 | \|cand-guess\| med |
+|---|---|---|---|---|---|
+| aces (odo-excellent) | 0.70 | 1.02 | 1.26 | 0.223 | 0.036 |
+| belgioioso (odo-excellent) | 0.64 | 1.03 | 1.30 | 0.261 | 0.027 |
+| intel (odo-drifts) | 0.72 | 1.01 | 1.26 | 0.209 | 0.017 |
+| fr101 (odo-drifts) | 0.72 | 1.00 | 1.25 | 0.237 | 0.026 |
+
+The coherence-ratio distribution is **essentially identical** across the two
+regimes — the session-relative EMA self-normalizes every log onto the same
+curve (median ~1.0, ~21-26% of frames below 0.85). Coherence carries NO
+per-frame signal for "odometry is already good." Correction magnitude inverts
+the naive expectation: ACES's corrections are LARGER (med 0.036) than Intel's
+(0.017) even though ACES odometry is far better — so "large correction" doesn't
+flag needless override either.
+
+**SWEEP (confirms the prediction).** ATE rmse m; blend/bayes/cap rules over the
+coherence ratio, vs the identity baseline (= shipped):
+
+| rule | Intel | fr079 | ACES | fr101 | belgioioso |
+|---|---|---|---|---|---|
+| identity (ship) | 2.44 | 5.52 | 6.21 | 1.88 | 2.64 |
+| blend 0.5-1.0 | 10.82 (+343%) | 10.84 | 2.86 | 1.43 | 0.61 |
+| blend 0.7-1.0 | 10.89 (+347%) | 6.62 | 3.65 | 0.26 | 1.97 |
+| blend 0.85-1.15 | 11.45 (+370%) | 11.68 | 2.80 | 1.43 | 0.98 |
+| bayes k=4 | 12.60 (+416%) | 8.03 | 2.86 | 0.81 | 0.95 |
+| bayes k=4 mag | 7.40 (+203%) | 11.15 | 1.20 | 0.41 | 4.53 |
+| cap 0.5/0.15 | 4.97 (+104%) | 11.23 | 2.21 | 1.18 | — |
+
+Every rule that materially helps ACES/belgioioso **catastrophically regresses
+Intel and fr079** — the two highest-drift logs, whose per-frame corrections ARE
+the drift fix. Intel's genuine corrections are indistinguishable by coherence
+from ACES's harmful ones (identical distributions), so any damping catches both;
+the excellent-log gain and the drift-log regression move together. **No do-no-
+harm rule exists in the per-frame coherence/magnitude signal.** (Note fr101, an
+odo-drift log, IMPROVES under damping — 1.88->0.26 — so the frontend is
+genuinely over-trusted in general; only the very-high-drift logs need full
+frontend authority, and they are exactly the ones every rule breaks.)
+
+**The one untested escape hatch (data-motivated).** ACES's corrections are
+larger per-frame yet its odometry is better — reconcilable only if ACES's
+corrections are RANDOM (cancel, don't accumulate) while Intel's are SYSTEMATIC
+(accumulate coherently to fix 24 m of drift). Per-frame magnitude/coherence is
+blind to this; a WINDOWED "are my recent corrections systematic or random?"
+detector (cumulative-sum / autocorrelation of the correction vector over a
+sliding window) could separate the regimes where per-frame signals provably
+cannot. That is the next experiment; until it is tested, the shipped conclusion
+stands: the ACES/belgioioso frontend regression is NOT closable at the frontend
+with a per-frame confidence signal.
