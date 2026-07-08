@@ -16,4 +16,10 @@ get "$BASE/MIT/MIT_Infinite_Corridor_2002_09_11_same_floor.log.gz"     mit_raw.l
 get "$BASE/MIT/MIT_Infinite_Corridor_2002_09_11_same_floor.gfs.log.gz" mit_raw.gfs.log.gz
 ln -sf mit_raw.log mit.log
 ln -sf mit_raw.gfs.log mit.gfs.log
+# held-out transfer logs added 2026-07 (see SotA/datasets.md for the selection):
+# fr101 = dense-revisit loopy building; belgioioso = non-Manhattan castle.
+get "$BASE/fr101/fr101.carmen.log.gz"       fr101.log.gz
+get "$BASE/fr101/fr101.carmen.gfs.log.gz"   fr101.gfs.log.gz
+get "$BASE/belgioioso/belgioioso.log.gz"     belgioioso.log.gz
+get "$BASE/belgioioso/belgioioso.gfs.log.gz" belgioioso.gfs.log.gz
 echo "done."

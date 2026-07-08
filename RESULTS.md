@@ -1782,3 +1782,279 @@ or 120-angle-no-derivative MATCHES better at equal storage is untested (they
 differ in COMPUTE — 120 angles doubles the matcher cost while the derivative
 only adds storage — so it is a tradeoff, not a free swap). Needs a lattice
 rebuild; flagged, not chased.
+
+## Richer place descriptor vs the corridor limit (ssp_scancontext.py, 2026-07-07): the MIT corridor revisits ARE recoverable — Scan-Context ring-key recall@1 0.272 / @40 0.674 where the coarse SSP relo ring scored 0/106; late/deep-corridor third recall@40 0.717. VERDICT: the limit is REPRESENTATIONAL (coarse-band + world-frame summing), not the environment; the raw corridor scans are distinguishable, the lam 5.3/12.8 summary throws the signal away
+
+R3/R4 left the MIT corridor verdict deliberately scoped: within the SSP
+architecture (coarse relo band lam 5.3/12.8, world-frame-summed) the deep-
+corridor drought is a "place-recognition information limit" — 0/106 stage-1
+hits at true revisits (R4), 0/25 global-peak in the offline capacity study.
+The unanswered question: is that information GONE FROM THE RAW SCAN (an
+environment/sensor limit — corridors mutually indistinguishable) or merely
+lost by the coarse SSP summary (a representation limit a richer descriptor
+would recover)? This experiment settles it with the standard classical
+control.
+
+EXPERIMENT (`ssp_scancontext.py`, NEW; reuses `ssp_slam_carmen.parse_flaser`
+/`keyframes` by import, edits no SSP module). Scan-Context (Kim & Kim, IROS
+2018) built from each keyframe's RAW scan (not the SSP encoding): a polar
+bird's-eye n_ring=20 x n_sector=60 point-density matrix in the sensor frame;
+the rotation-invariant RING-KEY (per-ring mean occupancy — yaw is a pure
+column shift, so the row statistic is heading-free) for coarse retrieval;
+the column-shift min-cosine SC distance for fine re-scoring. Evaluated on the
+SAME true-revisit set the drought relocalizer was scored on (true revisit =
+keyframe within 5 m in the REF frame of a >= 1500-kf-older keyframe; REF from
+gfs, MIT via range-array identity + interpolation exactly as mit_hy4 /
+r4_recall / mit_capacity; Intel via shared-base timestamps). recall@k = the
+fraction of true-revisit queries whose ring-key top-k over ALL >= 1500-older
+keyframes contains a correct within-5 m match. `selftest` covers ring-key
+order-invariance and SC-distance yaw-shift identity.
+
+RECALL@k (ring-key coarse retrieval; SC-rerank = ring-key top-100 re-ordered
+by the column-shift SC distance; random = chance top-k given the revisit
+density):
+
+| dataset | revisits | @1 | @5 | @20 | @40 |
+|---|---|---|---|---|---|
+| MIT ring-key | 4520 | **0.272** | 0.417 | 0.582 | **0.674** |
+| MIT SC-rerank | " | 0.254 | 0.400 | 0.569 | 0.659 |
+| MIT random-chance | " | 0.014 | 0.068 | 0.240 | 0.412 |
+| Intel ring-key | 4667 | 0.334 | 0.446 | 0.612 | 0.716 |
+| Intel SC-rerank | " | 0.313 | 0.444 | 0.613 | 0.712 |
+| Intel random-chance | " | 0.139 | 0.459 | 0.854 | 0.952 |
+| **SSP coarse relo ring, MIT** | 106 (R4 attempts) | **0.000** | — | — | **0.000** |
+
+MIT by run-third (ring-key recall@k): early (207) 0.126/0.164/0.261/0.348,
+mid (2193) 0.281/0.415/0.560/0.663, **late/deep-corridor (2120)
+0.277/0.444/0.635/0.717**. The deep final-hour corridor — the exact region
+the SSP capacity study scored 0/25 on and the drought relocalizer could only
+break at distinctive junctions — is recovered by Scan-Context at recall@40 =
+0.717, HIGHER than the mid third. (Early is thin because GAP=1500 leaves a
+small database near the start.)
+
+FINDINGS:
+
+1. **The information is THERE in the raw scan — the corridor limit is
+   REPRESENTATIONAL, not environmental.** A richer classical descriptor
+   built from the same keyframes recovers the MIT corridor revisits the
+   coarse SSP rings cannot. The density-robust head-to-head is recall@1
+   (the SSP relocalizer emits ONE hypothesis per attempt = top-1 semantics):
+   Scan-Context's single best ring-key match is a true within-5 m revisit
+   0.272 of the time on MIT (19x the 0.014 chance), 0.277 in the deep
+   corridor — vs the coarse SSP ring's 0.000 (0/106). The corridors are NOT
+   mutually indistinguishable; the lam 5.3/12.8 blur (plus world-frame
+   summing) discards the door/alcove-scale radial structure that
+   distinguishes them, and that structure survives in the raw scan.
+
+2. **Where the recoverable signal lives: the RADIAL OCCUPANCY PROFILE (ring
+   key), not fine yaw alignment.** SC-rerank (full column-shift alignment
+   over the ring-key top-100) does NOT beat the ring key and slightly HURTS
+   (@40 0.659 vs 0.674 on MIT, 0.712 vs 0.716 on Intel). Self-similar
+   corridor twins align nearly perfectly, so the fine SC distance ranks a
+   wrong twin above truth — the same "systematic self-similar wrongness"
+   R4 saw defeat the fine verifier and the two-consistent gate. The
+   discriminating information is the gross 20-ring radial profile (how far
+   the walls are at each range band), which is exactly what the SSP coarse
+   band collapses to 2 wavelengths and then world-frame-sums away. This is
+   the mechanism of the SSP loss, pinned.
+
+3. **Intel sanity holds and isolates the effect.** Scan-Context recalls
+   Intel revisits well (recall@1 0.334, early-third 0.561) — the descriptor
+   works on distinctive geometry, so MIT's non-zero recall is not a bug.
+   Intel's chance baseline is high (revisit-dense small building: @40 chance
+   0.95 exceeds SC@40, so @40 is uninformative there); the density-robust
+   recall@1 = 0.334 (2.4x chance) is the honest Intel number. The
+   Intel/MIT recall@1 gap is small (0.334 vs 0.272): Scan-Context treats the
+   two logs almost alike, whereas the SSP coarse ring works on Intel
+   (revisit-dense, no drought fires) and dies on MIT (0/106). The
+   corridor-specific SSP failure is thus specifically a coarse-summary
+   failure, reproduced and localized.
+
+VERDICT: **SSP-LOSSY, not environment-limited.** This sharpens — does not
+overturn — the R3/R4 conclusion, which was carefully scoped "within this
+architecture (a finer relo band cannot be world-frame-summed, per the R1/R2
+law)". The raw sensor data carries recoverable place information in the
+corridors; the residual 0/106 is a property of the coarse-band +
+world-frame-summed relo representation, not of the MIT environment. R3/R4's
+"place-recognition information limit" is real but is the SSP band's limit, not
+the scan's.
+
+SKETCH — augmenting the drought relocalizer with a ring-key-style descriptor
+(finding only; NOT wired into ssp_hier). The ring key sidesteps the R1/R2 law
+that killed a finer world-frame-summed band: it is a per-keyframe (unbundled)
+YAW-INVARIANT APPEARANCE signature (20 floats/kf ~ 160 B; MIT 14,499 kf =
+2.3 MB, ~0.25% of the segment map, or ~1/5 that at one per 5-kf segment),
+stored ALONGSIDE each segment anchor. The descriptor never moves with the
+graph (it is frame-relative appearance); the candidate POSE it points to is
+the anchor's current graph pose, which does — so it is graph-consistent
+without any world-frame accumulation or capacity crowding (the two things the
+capacity study blamed). Concretely: (a) replace drought STAGE-1 only — at a
+drought, kNN the query ring-key against pre-drought segment ring-keys ->
+top-40 candidate anchors (recall@40 0.67 puts the correct twin in the
+shortlist, vs the coarse SSP band's ~0), seeding the EXISTING fine-band
+cmatcher + session-relative coherence verification + two-consistent /
+deep-search-escalation gate UNCHANGED; the column-shift also hands the
+matcher a free yaw seed. (b) Do NOT trust top-1 (0.27 right = 0.73 wrong,
+usually a corridor twin) and do NOT lean on SC re-ranking to disambiguate
+(finding 2: it cannot). Disambiguation must stay with the multi-viewpoint
+two-consistent gate: because independent revisit viewpoints each retrieve
+THEIR correct twin, the consistency pairing — which R4 showed is defeated
+only because the SSP band supplied consistent WRONG twins — now has the
+correct candidate present to pair on. The honest expectation is bounded:
+retrieval was necessary-not-sufficient (R4: "retrieval was never the MIT
+bottleneck; verification information is"), so this restores the missing
+precondition (correct candidate in the shortlist) but the wrong-twin
+verification hazard is unchanged; the payoff rides on the two-consistent gate
+finally seeing truth among the candidates. A per-segment ring-key store is the
+concrete, R1/R2-legal, ~2 MB way to give it that chance.
+
+Reproduce: `python3 ssp_scancontext.py` (MIT + Intel, ~90 s + ~40 s);
+`python3 ssp_scancontext.py {mit,intel,selftest}`. Caveats: point-density
+Scan-Context (the max-height 3D form has no planar analogue; a max-range
+variant is the untested alternative the code notes); REF positions
+interpolated from gfs (~1 m spacing, well inside the 5 m tolerance); recall@40
+is revisit-density-inflated (use recall@1 for the density-robust claim);
+retrieval is over the labelled-REF-span keyframes with unlabelled frames as
+honest distractors; this measures RETRIEVAL recall, not end-to-end SLAM ATE
+(the sketch above is a finding, not a built-and-measured system).
+
+## Derivative vs angular resolution at equal storage (2026-07-07, Opus): the d/dtheta derivative WINS decisively — spend the storage on the derivative, not on more angles
+
+Answers the open question left by "Derivative-vector novelty ablation": the
+derivative doubles per-segment matched-band storage (segvec 240 + segder 240 =
+480 components/seg); is that budget better spent DERIVATIVE-ON at 60 angles, or
+DERIVATIVE-OFF at 120 angles (same 480 = segvec only, but the matcher works on
+D=480 not 240 — 2x compute)? Built `ssp_angles.py` (new; imports only, edits
+nothing): a parametrized rebuild of the `ssp_slam_loop` lattice (W/N_ANG/N_RING/
+MAIN/ENC/ENC_MAIN; `rot_permute`/`encode` read those globals so they generalize
+with zero edits) on the 4-ring matched band (lam 0.25/0.5/1/2), driving the
+UNMODIFIED `BoundedSLAM` via a thin subclass that gates the derivative on the
+existing `use_der` switch AND stores NO segder when off (honest memory). The
+4-ring matched band is decision-identical to the shipped 6-ring lattice for
+BoundedSLAM (the two coarse rings feed only coh[4:6]/diagnostics, never a
+decision), so 60+der reproduces every shipped number bit-for-bit. Selftest:
+`rot_permute` and `world_vec_seg` exact to <1e-13 (permutation identity, delta=0)
+at n_ang=60 AND 120; the +der branch beats permutation-only at sub-grid delta.
+
+Storage counted in complex components/segment on the matched band. **60+der and
+120-noder are EQUAL storage (480/seg) — memory identical per segment by
+construction — and differ only in compute (D=240 vs 480).**
+
+**Intel (6205 kf, deterministic, ATE rmse m):**
+
+| config    | store/seg | D (compute) | ms/kf | ATE   | loops |
+|-----------|-----------|-------------|-------|-------|-------|
+| 60+der    | 480       | 240         | 16.3  | **2.440** | 80 |
+| 120-noder | 480       | 480         | 29.9  | 7.926 | 101 |
+| 60-noder  | 240       | 240         | 15.8  | 5.238 | 48 |
+| 120+der   | 960       | 480         | 31.0  | 5.537 | 93 |
+
+**Equal-storage verdict: the derivative wins 3.2x (2.44 vs 7.93 m) at HALF the
+compute** (16 vs 30 ms/kf; memory identical by construction). 120-noder does not
+just fail to beat 60+der — it is beaten even by the HALF-storage 60-noder
+(5.24 m). SURPRISE: on Intel more angles HURT regardless of the derivative
+(120+der 5.54 > 60+der 2.44), and 120-noder finds the MOST loops (101) yet has
+the worst ATE — the sharper 1.5-deg lattice over-fits onto Intel's
+internally-drifted old bundles (genuine closures there sit at accepted-coherence
+median ~0.49) and accepts more geometrically-off closures, while the analytic
+sub-grid derivative on the coarser 60-angle lattice keeps the accepted closures
+honest. Angular resolution is not the bottleneck; rotational FIDELITY is, and
+the derivative delivers it in half the components and half the compute.
+
+**fr079 (3071 kf, top-2 = the equal-storage pair; transfer/regression):**
+
+| config    | store/seg | D   | ms/kf | ATE    |
+|-----------|-----------|-----|-------|--------|
+| 60+der    | 480       | 240 | 26.9  | **5.523** |
+| 120-noder | 480       | 480 | 46.4  | 14.801 |
+
+60+der reproduces the shipped 5.523 m EXACTLY; the equal-storage angle swap
+transfers its Intel loss (2.7x worse, 1.7x compute). Both real logs agree.
+
+**Bench (`ssp_bounded.run`-style paired seeds 1-3, laps=3; ATE cm, paired vs 60+der):**
+
+| world    | 60+der | 120-noder | 60-noder | 120+der | notes |
+|----------|--------|-----------|----------|---------|-------|
+| room     | 6.8    | 7.6 (+0.8)  | 26.0 (+19.2) | 6.5 (-0.3) | false 6-8 all |
+| sparse   | 11.8   | 12.4 (+0.7) | 32.2 (+20.4) | 8.0 (-3.8) | false 7-14 |
+| corridor | 263.5  | 415.9 (+152)| 623.6 (+360) | 268.3 (+4.8) | 60-noder false 10.7 vs 2.7 |
+
+On the CLEAN synthetic worlds the two equal-storage options are within ~1 cm
+(120-noder marginally worse both), but on the environment-coupled CORRIDOR the
+derivative's edge widens sharply (60+der 263 vs 120-noder 416 cm). Finding-6
+holds among the NO-derivative options — more angles help the rotation-coupled
+corridor (120-noder 416 beats 60-noder 624) — but the derivative is the more
+storage-efficient AND compute-cheaper route to the same rotational fidelity: it
+beats 120-noder while using D=240. Dropping the derivative for its half of the
+storage (60-noder) is catastrophic everywhere (+19-20 cm clean, +360 cm
+corridor, and 4x the false-edge rate in corridor: no sub-grid correction ->
+more geometrically-wrong closures admitted).
+
+**Is the derivative worth its half of the storage vs spending it on angles?
+Unambiguously yes.** Dropping it (60-noder) loses 2-4x accuracy for the memory
+saved; reinvesting the freed storage in angular resolution (120-noder) does NOT
+recover it and adds 2x matcher compute — worse than 60+der on BOTH real logs
+(Intel 3.2x, fr079 2.7x) and the corridor, and no better on clean rooms. The
+derivative is a genuine first-order Lie correction whose accuracy-per-component
+and accuracy-per-flop both dominate raw angular density; 60 angles + derivative
+is the operating point. (120+der, double storage, is marginally best only on the
+clean rooms and REGRESSES on both real logs — buying angles on top of the
+derivative is not worth it either.) No wash: the derivative is load-bearing, the
+angle swap is a net loss.
+
+---
+
+## Two new held-out logs (fr101, belgioioso) + the frontend do-no-harm gap
+
+Added two held-out CARMEN logs to fill gaps in the transfer suite (dataset
+survey + selection in `SotA/datasets.md`): **fr101** (Freiburg building 101 —
+a dense-revisit loopy multi-room building, the regime where loop closure should
+excel, missing between Intel and MIT's sparse corridors) and **belgioioso**
+(Belgioioso Castle — non-Manhattan stone-wall/courtyard structure, probing the
+encoder's one documented environment fragility). Both are zero-adapter for the
+CARMEN driver (FLASER, 180 deg FOV; fr101 360 beams, belgioioso 361). fr101 has
+clean shared-base timestamps; belgioioso's gfs is low-precision (MIT-class
+corrupt), so its ATE uses the range-array-identity convention (matched 395/395).
+
+Shipped BoundedSLAM (`ssp_bounded_carmen.py`, complex64, no retuning), plus a
+frontend-only / odometry breakdown (`scratch_aces_diag.py`,
+`scratch_belgioioso.py`), ATE rmse m vs the RBPF-corrected reference:
+
+| log            | raw odo | frontend-only | +loops (shipped) | regime |
+|---|---|---|---|---|
+| Intel          | 24.2 | ~ (frontend essential) | **2.44** | odo drifts |
+| fr079          | 14.4 |  —   | **5.52** | odo drifts |
+| **fr101**      | 8.56 | 3.16 | **1.88** | odo drifts — best transfer |
+| ACES           | 5.41 | 6.38 | 6.21 | odo excellent |
+| **belgioioso** | 1.72 | 2.45 | 2.64 | odo excellent |
+
+**fr101 confirms the dense-revisit hypothesis.** Everything helps and stacks:
+frontend cuts odometry 2.7x (8.56 -> 3.16), loop closures cut the remainder 1.7x
+(3.16 -> 1.88), on 53 accepted closures (vs ACES's 11) — the loopy building is
+exactly where the closure machinery pays off. 1.88 m is the best held-out
+transfer number in the project, at 1.9 MB / 337 segments, zero retuning.
+
+**belgioioso corroborates the ACES failure mode — and relocates it to the
+frontend.** A do-no-harm diagnosis on the two logs where odometry already beats
+the shipped result (ACES 5.41 vs 6.21; belgioioso 1.72 vs 2.64) shows the
+regression is NOT in loop-closure admission (the coherence-veto tuning the
+ledger spent so much on): on ACES the loop backend is net-POSITIVE
+(frontend-only 6.38 -> 6.21 soft / 5.94 hard veto), and on belgioioso only 1
+revisit exists to close at all. The damage is in the SCAN-MATCHING FRONTEND,
+which replaces already-good odometry deltas with slightly worse scan-matched
+ones. Two independent logs show it, so it is a generalizable regime, not an ACES
+quirk (and belgioioso's non-Manhattan geometry is precisely where the octave-ring
+matcher was predicted to underperform).
+
+**The pattern across all six logs: the frontend helps iff odometry drifts, and
+hurts when odometry is already excellent.** This is the do-no-harm gap. A
+frontend guard that detects "odometry is already self-consistent, don't override
+it" (e.g. shrink the frontend correction toward the odometry guess when the
+match is low-coherence / ill-conditioned by the indicators already computed for
+loop closures) could recover ACES + belgioioso toward odometry parity without
+touching Intel/fr079/fr101, where odometry drifts and the frontend is the hero
+(Intel 24.2 -> 2.44). Open experiment; a load-bearing frontend change, so it
+needs the full six-log validation before it can ship. NOTE the hard-veto column
+still edges soft@0.55 on both odo-excellent logs (ACES 5.94 vs 6.21, fr101 1.80
+vs 1.88) exactly as the worst-of-three coh_target sweep predicted — soft's win
+is concentrated on Intel; it is a small, known cost elsewhere.

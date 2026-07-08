@@ -25,8 +25,10 @@ ATE rmse vs RBPF-corrected references; `ssp_bounded_carmen.py <log>`:
 | log | ours | raw odometry | map memory | speed |
 |---|---|---|---|---|
 | Intel Research Lab (full) | **2.44 m** (median 1.55) | 24.2 m | 5–8 MB | 15–17 ms/kf |
+| Freiburg 101 (held-out) | **1.88 m** (median 1.55) | 8.56 m | 1.9 MB | 27 ms/kf |
 | Freiburg 079 (zero-shot) | 5.52 m | 14.4 m | 3.5 MB | 30 ms/kf |
 | ACES3 Austin (zero-shot) | 6.21 m | 5.41 m | 5.3 MB | 13 ms/kf |
+| Belgioioso Castle (held-out) | 2.64 m | 1.72 m | 1.6 MB | 27 ms/kf |
 | MIT Infinite Corridor, 1.9 km (held-out) | 38–58 m | 189 m | 27 MB | 12–21 ms/kf |
 
 In-repo baselines on identical parsing/keyframing/eval (`baseline_*.py`):
@@ -41,8 +43,11 @@ occupancy grid (~3 KB/m² vs ~0.4 KB/m²); the memory win holds only against
 particles × grids). The defensible properties are the bound, the absence of
 history, and the algebra — verified: Intel plateaus at 698 segments (84 % of
 the cell-cap ceiling), MIT grows dead-linear at 1.26 seg/m as new corridor is
-exposed. ACES is a frank negative; MIT demonstrates the revisit-density limit
-at scale.
+exposed. fr101 (a dense-revisit building, 1.88 m held-out) is where the closure
+machinery pays off most; MIT demonstrates the revisit-density limit at scale.
+ACES and belgioioso are frank negatives of a *specific* kind — logs whose
+odometry is already excellent, where the scan-matching **frontend** (not loop
+closure) is what costs accuracy; see RESULTS.md "the frontend do-no-harm gap".
 
 ## How it works (one screen)
 
