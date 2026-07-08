@@ -1326,3 +1326,41 @@ dimensionality on the segments themselves, not spatial reorganization.
 
 Reproduce: `python3 ssp_scale_arrays.py selftest | bench | carmen data/intel.log`;
 parametrized Intel probes in the session scratchpad (sa_intel.py).
+
+## Memory levers that preserve closure sharpness (2026-07-07): complex64 segment storage is a FREE 2x; derivative-vector resolution reduction is a dead end
+
+After the scale-arrays negative (spatial O(area) accumulation smears closure
+content), the remaining memory levers attack the segment vectors WITHOUT
+touching matching sharpness.
+
+**complex64 storage — verified free 2x, shipped.** Segment vectors (segvec +
+segder) stored at complex64 (8 B/component) instead of complex128 (16 B).
+Phasor bundles are numerically forgiving: round-trip relative vector error
+~2.4e-8, and the match-peak shift on real Intel geometry is **0.000 mm /
+0.00 millideg** (a wrong loop-closure decision needs cm-scale pose error;
+7 significant digits is ample). Paired verification:
+- Bench (room/sparse, seeds 1-2): ATE identical to 3 decimals (dATE +-0.000),
+  memory exactly halved (832 -> 416 KB).
+- **Full Intel: ATE 2.440 m / 1.553 median BIT-IDENTICAL, 80 loops, map
+  7852 -> 3926 KB.** Runtime unchanged (query arithmetic upcasts to c128;
+  only storage is 64-bit).
+Exposed as `BoundedSLAM.store_dtype` (default complex128 to keep the ledger's
+bit-exact HY4/drought/MIT numbers unperturbed — precision can shift a
+chaos-sensitive drought threshold); `ssp_bounded_carmen.py` sets complex64 by
+default (`c128` arg restores full precision). Stacks with HY4's matched-band
+split: HY4 5.24 MB -> ~2.6 MB at complex64.
+
+**Derivative-vector resolution reduction — dead end.** The d/dtheta vector
+only corrects sub-3-deg rotation, so half angular resolution (30 of 60 angles,
+nearest upsample) was tried for a further 0.75x. It FAILS: naive ::2
+downsampling aliases the derivative's genuine full-resolution angular
+structure, landing rel-error 0.0999 — WORSE than dropping the derivative
+entirely (0.0898; full-resolution derivative is 0.0725). The derivative
+carries real high-angular-frequency content (confirming the "4x load-bearing"
+ablation); it cannot be cheaply compressed. complex64 remains the clean win.
+
+Net memory story after this session: HY4 matched-band split (0.67x) x
+complex64 (0.5x) = ~0.33x of the original 8 MB shipped map at bit-identical
+Intel accuracy, i.e. the deliverable's map is ~2.6 MB with no accuracy cost —
+and the scale-arrays study establishes WHY going further (spatial O(area)) is
+not free: it trades the closure sharpness SLAM needs.

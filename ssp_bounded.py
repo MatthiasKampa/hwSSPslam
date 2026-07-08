@@ -74,6 +74,13 @@ class BoundedSLAM:
                                   rot_step_deg=1.5, perm=(4, L.N_ANG))
         self.robust, self.attempt_every, self.relax_every = robust, attempt_every, relax_every
         self.use_der = self.use_coh = self.use_innov = True   # ablation switches
+        # segment-vector storage precision. complex64 halves map memory with
+        # NO measured accuracy cost: phasor bundles are numerically forgiving
+        # (round-trip rel error ~2e-8, match-peak shift 0.000 mm on real Intel
+        # geometry), and a wrong loop-closure decision needs cm-scale pose
+        # error — 7 significant digits is ample. Default stays complex128;
+        # set store_dtype=np.complex64 for the 2x memory win.
+        self.store_dtype = complex
         self.anchors = []            # anchor poses, list of np3 (graph nodes)
         self.kf_ref = []             # per kf: (anchor_id, rel pose in anchor frame)
         self.segvec = {}             # anchor_id -> consolidated vector (anchor frame)
@@ -280,8 +287,8 @@ class BoundedSLAM:
             Cx = PA[:, 0:1] * L.W[:, 1] - PA[:, 1:2] * L.W[:, 0]
             vd = (1j * Cx * A).T @ w
             if aid not in self.segvec:
-                self.segvec[aid] = np.zeros(L.W.shape[0], complex)
-                self.segder[aid] = np.zeros(L.W.shape[0], complex)
+                self.segvec[aid] = np.zeros(L.W.shape[0], self.store_dtype)
+                self.segder[aid] = np.zeros(L.W.shape[0], self.store_dtype)
                 cell = tuple((self.anchors[aid][:2] // CELL).astype(int))
                 self.cells.setdefault(cell, []).append(aid)
                 if len(self.cells[cell]) > CELL_CAP:      # bounded by area
@@ -895,8 +902,10 @@ class BoundedSLAM:
         self.solve_log.append((self.k, self._last_nfree, "full-esc"))
 
     def memory_kb(self):
-        # segvec + segder, both complex128 D-vectors per segment
-        return len(self.segvec) * L.W.shape[0] * 16 * 2 / 1024
+        # segvec + segder D-vectors per segment (16 B/component at complex128,
+        # 8 B at complex64 via store_dtype)
+        bytes_per = 8 if self.store_dtype == np.complex64 else 16
+        return len(self.segvec) * L.W.shape[0] * bytes_per * 2 / 1024
 
 
 # --------------------------------------------------------------------------
