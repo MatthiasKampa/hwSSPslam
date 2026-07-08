@@ -2871,3 +2871,41 @@ is in the CONTENT, not the aggregation. Bundling stays the right default for the
 frontend/closure; the actionable residue is that where the local map has a clean
 dominant overlapping patch, a per-cluster best-patch frontend can sharply help
 (fr101) — a conditional lever, not a shippable one.
+
+---
+
+## Adaptive content-keyed map clustering: a real O(area)-constant memory win on a brittle ATE knob
+
+Information-driven patching (`ssp_adaptmap.py`, AdaptiveMapSLAM(BoundedSLAM), no
+shipped edit): when an anchor opens, encode its world-frame MAIN-band content and
+compare (normalized inner product) to nearby RECENT patches; above tau -> redundant
+-> bundle-merge into that owner (no new patch); below -> novel -> new patch.
+Same-pass drift guard (merge only within 20 anchors / 3 m -> a corridor revisited
+at a different drift state is far in anchor index, never merged -> avoids the
+scale-arrays smear). tau=inf reproduces the shipped map BIT-EXACT (selftest max
+|dpose| 0.00e0); merging only removes patches -> memory monotone in tau.
+
+**Memory mechanism WORKS (the robust result):** best memory at <= baseline ATE:
+Intel tau .85 -> 2.338 m / 489 seg / 2.69 MB (-30 %); fr101 tau .70 -> 1.279 m /
+138 seg / 0.76 MB (-59 % mem, -32 % ATE); MIT tau .75 -> 35.44 m / 1294 seg /
+7.11 MB (-46 % mem) with **MIT's O(area) constant dropping 1.287 -> 0.69 seg/m**.
+The linear-growth constant is genuinely compressible -> information-driven memory
+efficiency is real (the original project goal). Controlled/monotone -> trustworthy.
+
+**ATE-at-equal-memory is BRITTLE (the honest caveat):** the response is strongly
+NON-MONOTONE in tau (Intel .90 -> 3.96 / .85 -> 2.34 / .80 -> 7.94) and NO single
+tau transfers across logs. The swings are driven by merging RESHUFFLING the
+loop-closure graph (accepted loops vary 27 -> 230) — consolidating the recent
+bundle changes which closures fire and moves the frontend globally — the SAME
+brittleness signature as the shipped coherence veto, not smooth signal loss. So
+the ATE improvements are lucky operating points, not a robust Pareto gain; treat
+the memory cut as the win and hold the ATE bonuses at arm's length.
+
+**Key-tension answer:** "bland corridor content is redundant AND load-bearing"
+holds ONLY on fr079 (floppy, sparse-closure — every tau worse; redundant content
+is load-bearing there). Elsewhere merging is neutral-to-helpful, because on
+revisit-DENSER graphs a consolidated owner is a STRONGER, less-ghosted loop-closure
+target. So "redundant != compressible for SLAM" is a floppy-graph property, not
+universal. VERDICT: a real memory-efficiency improvement on the O(area) constant
+(30-60 %, esp. MIT), robust in the memory axis, brittle in the ATE axis — usable
+as a memory lever (conservative tau ~0.85), not as an accuracy improvement.
