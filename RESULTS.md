@@ -2326,3 +2326,68 @@ snaps, 42.66 m) is at the achievable frontier; more aggressive relocalization
 opened by the R3/R4/R5/cascade/belief investigations: it was never a tuning or
 representation deficiency — it is an information limit of the sensor-environment
 pair, now proven from three independent directions.
+
+---
+
+## VSA map composition: superposition merges two independently-built maps (with scope caveats)
+
+The paper's thesis is "algebraically transformable maps": translation = phase
+multiply, rotation = index permutation, and — the untested part — BUNDLING =
+vector addition, so two aligned maps of the same area should COMPOSE by adding
+their world-placed segment vectors, with no re-encoding. `ssp_multisession.py`
+(BoundedSLAM subclass/import, edits nothing shipped) tests this by splitting
+Intel into two independently-built sessions A=kf[0:3723], B=kf[2482:6205] (each
+from its own re-origined odometry) and merging them. A read-only audit checked
+it adversarially; the VERIFIED (audit-caveated) result:
+
+**What is solid (algebra + composition):**
+- The merge is a genuine per-cell A+B vector ADDITION (audit confirmed no
+  merged==single-session artifact), and the shift/permute/add algebra is
+  self-verified BIT-EXACT (selftest: standalone place() == world_vec_seg;
+  folding a rigid T into an anchor pose == transforming the world-placed
+  bundle). Composition = re-place each B anchor at se2_mul(T, pose) and add —
+  nothing re-encoded from scans.
+- Overlapping 2 m cells BUNDLE rather than duplicate: merged union of 93 cells
+  vs 147 duplicate-sum = a 37 % memory saving (O(area of the UNION), not sum of
+  sessions). Arithmetic verified. (These are idealized 1-vector/cell figures,
+  not the full BoundedSLAM footprint with CELL_CAP and segder — but the overlap
+  saving is model-independent.)
+- Adding session A does NOT destroy session B's signal: the bundled-cell cosine
+  to each constituent is 0.940 median (p10 0.591 — the tail where one session's
+  norm dominates, so the metric does surface washout, it is not hidden). No
+  destructive interference at this load.
+- Alignment sensitivity: perturbing B's placement before the merge is harmless
+  to delta ~= 0.25 m (the fine wavelength lam=0.25) and degrades clearly by
+  0.5-1.0 m. So the superposition tolerates SUB-WAVELENGTH misalignment.
+
+**What is NOT shown (the audit's load-bearing caveat):** the localization
+comparison (A-alone 46 cm / B-alone 31 / merged 33 cm) is a gt-SEEDED LOCAL
+REFINEMENT of B's OWN build scans, not from-scratch relocalization — ground
+truth sets both the 0.36 m starting guess and the 8 m local-map window, and the
+query scans are the same scans B's segments were folded from (self-
+localization). So the honest content is "adding A does not destroy B's self-
+signal, at a small ~9 % RMSE crosstalk cost" — NOT "the fused map relocalizes
+independently." Under a realistic odometry-only prior the absolute errors would
+be larger and the 0.25 m alignment bar likely tighter. Treat the cm figures as
+leak-assisted lower bounds; trust the qualitative "superposition composes maps
+without destroying information," not the specific numbers.
+
+**The alignment problem is real and NOT VSA-specific.** In the sessions' own
+independently-drifted frames, 245 place-correspondences show a single best rigid
+T_AB leaves a ~1.22 m median non-rigid residual (up to ~10 m; per-correspondence
+transform spread 3.2 m) — far beyond the 0.25 m superposition bar, which is
+exactly why naive rigid relocalization gave ~8 m errors. Two independently-
+drifted maps have their own internal warp; a single rigid transform cannot align
+them. This is a GENERAL multi-session SLAM problem (the standard fix is cross-
+session loop constraints + a joint pose-graph relax), NOT a property of the SSP
+representation — after alignment, the VSA superposition applies unchanged.
+
+**Verdict:** VSA superposition genuinely composes two independently-built maps
+by shift/permute/add — bit-exact algebra, O(area-of-union) memory, and adding a
+map does not destroy the other's signal (small crosstalk cost) — demonstrating
+the representation's unique algebraic-composition property (grids and point
+clouds cannot be superposed). The demonstration is a gt-seeded local-refinement /
+self-localization test, so it shows COMPOSITION-WITHOUT-CORRUPTION, not
+from-scratch multi-session relocalization; and aligning two drifted maps to
+sub-wavelength (the precondition) is a general multi-session problem this does
+not solve. A clean positive capability with an honestly bounded scope.
