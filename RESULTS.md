@@ -1611,3 +1611,174 @@ statistic remains a valid CORRIDOR-TWIN precision tool where that specific
 geometry dominates (its ROC stands), but not a drop-in general veto — exactly
 the transfer bound the cascade agent flagged, now with the sign-flip
 mechanism measured.
+
+## Belief-carrying frontend (ssp_belief.py, 2026-07-07): carrying pose belief through frontend ambiguity does NOT reduce drift — the aperture worlds have the TIGHTEST frontend surfaces, and wherever the belief fires at all it REGRESSES the result (bench +26 to +278 cm, Intel 2.44 -> 8.43 m). Honest negative, mechanism measured.
+
+CONCEPT AS BUILT. `BeliefSLAM(BoundedSLAM)` (ssp_belief.py, NEW file; parents
+untouched) replaces the frontend's gate-and-commit with a carried translation
+BELIEF on the matcher's OWN coarse correlation surface — the 17x17 (+-0.48 m /
+6 cm) grid `S.Matcher` already scans, no phasor CF, no new heavy compute. Per
+keyframe: (i) LIKELIHOOD = the matcher's coarse score surface at the winning
+heading, standardized and tempered `softmax(beta*zscore(s(d)))` — a sharp peak
+concentrates, an aperture ridge / alias spreads or splits; (ii) MOTION PREDICT =
+the previous posterior re-sampled onto the new grid (its center rides the
+const-vel / odometry guess) and Gaussian-blurred by the per-step motion noise
+(`ndimage.shift` + `gaussian_filter`, O(cells)); (iii) POSTERIOR = predict *
+likelihood, renormalized. COMMIT RULE: unimodal AND tight (one mode, positional
+spread < sig_cap) -> commit exactly as the shipped frontend (matcher argmax,
+fold, 0.03 m seq sigma). Multimodal OR diffuse -> navigate on the belief mean,
+inflate that span's seq sigma to the belief's own spread, optionally suppress
+the map fold. Heading tracks the matcher argmax. Backend (seq/loop edges,
+innovation gate, coherence response, IRLS+LOO, TRF relax) inherited UNCHANGED.
+(Distinct from the abandoned `ssp_posefilter.py`, whose belief was a full
+characteristic-function phasor vector + 9-way heading mixture — heavier; this
+one lives on the grid the matcher already computes.)
+
+SELFTEST (`python3 ssp_belief.py selftest`, deterministic) — the filter is
+CORRECT in isolation on a corridor-fork toy: through 8 ambiguous frames the
+carried belief HELD both forks (2 modes, sig_max ~18 cm, never commits) while a
+single-commit argmax frontend flipped between forks (4/8 wrong) and baked those
+jumps into its trajectory; at the distinctive fork frame the belief collapsed to
+the true mode (tight, mean error 0 cm). Motion-predict re-centering and
+mode/moment detectors are unit-tested (peak rides the moving grid center;
+bimodal round-trip recovers both modes at +-0.18 m). So the negative below is
+NOT a broken filter — it is the absence of the signal the filter needs.
+
+BENCH (`python3 ssp_belief.py bench`, corridor/sparse/room, seeds 1-4 paired,
+n=750; ATE cm mean [per-seed]; amb% = frontend keyframes the belief flagged
+ambiguous; infl-seq = fraction of seq edges it inflated):
+
+| world | config | ATE cm [seeds] | paired vs Bounded | amb% | infl-seq | false loops |
+|---|---|---|---|---|---|---|
+| corridor | BoundedSLAM (shipped) | 379.1 [288 280 222 726] | — | — | 6.7% | 5.2 |
+| corridor | Belief (default) | 380.0 [258 281 222 759] | +0.9 (1/4) | 0.1% | 7.0% | 4.8 |
+| corridor | Belief no-carry | 379.1 [288 280 222 726] | +0.0 (0/4) | 0.0% | 6.7% | 5.2 |
+| corridor | Belief sensitive | 509.0 [620 386 418 613] | +129.9 (1/4) | 22.5% | 43.1% | 7.2 |
+| corridor | Belief suppress-fold | 497.8 [597 435 524 436] | +118.7 (1/4) | 24.6% | 45.5% | 12.2 |
+| sparse | BoundedSLAM (shipped) | 12.1 [15 11 9 13] | — | — | 1.2% | 9.0 |
+| sparse | Belief (default) | 38.1 [17 112 12 13] | +26.1 (1/4) | 3.0% | 9.1% | 20.2 |
+| sparse | Belief no-carry | 12.1 [15 11 9 13] | +0.0 (0/4) | 0.0% | 1.2% | 9.0 |
+| sparse | Belief sensitive | 289.7 [718 92 158 192] | +277.7 (0/4) | 34.4% | 53.9% | 25.0 |
+| sparse | Belief suppress-fold | 231.7 [265 214 217 231] | +219.6 (0/4) | 29.4% | 49.3% | 30.0 |
+| room | BoundedSLAM (shipped) | 6.4 [7 7 7 5] | — | — | 0.7% | 7.2 |
+| room | Belief (default) | 55.4 [7 7 101 106] | +49.0 (0/4) | 1.7% | 7.2% | 13.0 |
+| room | Belief no-carry | 6.4 [7 7 7 5] | +0.0 (0/4) | 0.0% | 0.7% | 7.2 |
+| room | Belief sensitive | 123.4 [19 248 162 64] | +116.9 (0/4) | 22.6% | 41.1% | 32.0 |
+
+Findings:
+
+1. **The aperture worlds have the TIGHTEST frontend surfaces — there is no
+   ambiguity for the belief to catch.** Diagnostic (per-keyframe posterior
+   positional spread sig_max, seed 1, 750 kf, beta=4): corridor p90/p99 =
+   8.8/10.2 cm, 0.0% above 13 cm, 0.0% multimodal — vs room p90 8.7 and sparse
+   p90 9.7. The classic-aperture corridor is if anything TIGHTER than the
+   well-conditioned room, and there is NO sig_max separation between them.
+   Mechanism: the frontend matches against the RECENT local bundle (last 12
+   anchors) with a const-vel prior; aperture slip is a few cm/frame and resolves
+   to a single confident peak, not a >0.48 m ridge. The corridor's large ATE is
+   accumulated single-peak slip baked into an already-drifted local reference
+   map — a GLOBAL-drift error the belief cannot see, because within the local
+   window the match IS well-determined. This is the Rao-Blackwell split working
+   AGAINST a frontend belief: the map is deterministic given poses and the
+   frontend already extracts the ML pose crisply; the uncertainty that matters
+   lives in the graph, not the per-frame surface. (Confirms the ledger prior:
+   "the frontend map matching is generally good.")
+
+2. **Carrying is the ONLY thing that makes the belief fire — and firing HURTS.**
+   The no-carry ablation (fresh motion prior each frame) reproduces BoundedSLAM
+   BIT-IDENTICALLY on ALL three worlds (corridor 379.1 [288 280 222 726], sparse
+   12.1 [15 11 9 13], room 6.4 [7 7 7 5]; 0.0% amb each): a tight per-frame
+   motion prior x a tight likelihood is always tight, so it commits the matcher
+   argmax exactly like the shipped single-commit frontend. Only the CARRIED
+   prior accumulates enough blur to trip the ambiguity threshold — and those
+   trips are NOT the drifting frames. Acting on them (belief-mean navigation +
+   seq-sigma inflation) monotonically hurts, scaling with how much it fires:
+   room-default +49.0 (fires 1.7%, seeds 3-4 blow 7 cm -> ~1 m), sparse-default
+   +26.1, corridor-sensitive +129.9, sparse-sensitive +277.7 (seed 1 718 cm).
+   Inflating a large slice of the seq chain floppifies the graph and the extra
+   false loop closures (room 7.2 -> 32, sparse 9 -> 25) then pull it. The
+   belief's spread is honest uncertainty about a pose the frontend nonetheless
+   nailed; treating it as edge uncertainty is strictly counterproductive.
+
+3. **Even the conservative default regresses the room control** (+49.0, 0/4
+   better). It is only near-neutral (corridor +0.9) where it essentially never
+   fires (0.1%). There is no threshold that fires on the drift-causing frames
+   without firing on well-conditioned ones — no sig_max separation exists
+   (finding 1). Fold suppression makes it worse, not better (adds false loops).
+
+REAL LOGS (`ssp_belief.py carmen data/intel.log`, same harness, belief on vs
+off, deterministic):
+
+| Intel | ATE rmse | median | ms/kf | infl-seq | amb% (multi/diff) |
+|---|---|---|---|---|---|
+| BoundedSLAM (belief off) | **2.440 m** | 1.553 | 16 | 8.9% | — |
+| BeliefSLAM (default) | 8.433 m | 6.285 | 18 | 23.5% | 5.6% (192/129) |
+
+Intel REGRESSES 3.5x (2.440 -> 8.433 m; the 2.440 is the shipped number
+reproduced bit-exact in this harness with belief off). At the default threshold
+the belief fires on 5.6% of keyframes and inflates 23.5% of the seq chain; on
+Intel's floppy graph that destroys the seq-chain stiffness the shipped
+early-stop (max_nfev=30) regularizer relies on to hold flat valleys — the same
+flat-valley slide the Tikhonov and damped-GN experiments already documented
+(fr079 2.8 -> 10.4 m under looser regularization). fr079 was NOT run: the
+pre-registered gate ("helps materially on the ambiguity worlds WITHOUT
+regressing room -> Intel + fr079") failed at the bench (room itself regresses)
+and again on Intel; fr079 is the floppiest of the three graphs and would
+regress hardest. The Intel run is the confirmatory real-log negative.
+
+VERDICT (honest failure, exactly as the task's honest-failure clause
+anticipated). Carrying pose belief through frontend ambiguity does NOT reduce
+the drift that makes loop closures necessary, because on this stack that drift
+is not represented as frontend ambiguity: the coarse correlation surface is
+unimodal and tight even in the aperture corridor (the frontend is
+confidently-and-consistently slightly-wrong), so the belief faithfully reports
+"commit" on exactly the frames that drift. The shipped single-commit +
+drift-scaled-seq-sigma + innovation-gate + loop-closure stack already handles
+this regime; the belief adds a per-frame ambiguity signal that (a) reproduces
+the shipped frontend BIT-FOR-BIT where it stays silent (no-carry, all worlds)
+and (b) actively regresses every log wherever it is made to speak, because
+seq-sigma inflation on non-drifting frames floppifies an already-floppy graph.
+The RBPF advantage this tried to import — a carried multi-hypothesis pose
+posterior — pays off in RBPF because each particle carries a GLOBAL grid
+re-scored against OLD geometry (a loop-closure-like signal); a belief on the
+frontend's LOCAL-recent surface has no access to that signal and cannot
+substitute for the backend. Shipped `BoundedSLAM` frontend STANDS; `ssp_belief.py`
+is retained with its passing selftest as a documented negative and a reusable
+grid-Bayes belief primitive. Reproduce: `python3 ssp_belief.py selftest | bench
+| carmen data/intel.log [--base]`.
+
+## Derivative-vector novelty ablation (2026-07-07, Opus): the d/dtheta correction is a genuine first-order Lie correction; an equal-storage "more angles" alternative is an open question
+
+The scout flagged the d/dtheta companion vector as likely-novel in mechanism
+(Krausse et al. NICE 2025 solve sub-grid rotation via bump-vector convolution,
+not an analytic derivative) and prescribed an ablation. On real Intel segment
+geometry (rings x 60 angles), reconstruction rel-error of the world-frame ring
+block vs the exact re-encode, as a function of sub-grid angle delta (the
+nearest-3-deg permutation keeps delta in [0, 1.5 deg]):
+
+| delta (deg) | permutation only | + d/dtheta | ratio |
+|---|---|---|---|
+| 0.5 | 0.040 | 0.014 | 2.8x |
+| 1.0 | 0.077 | 0.052 | 1.5x |
+| 1.5 | 0.107 | 0.100 | 1.1x |
+| 2.0 | 0.129 | 0.150 | 0.9x |
+| 3.0 | 0.165 | 0.242 | 0.7x |
+
+The correction behaves EXACTLY as a genuine first-order (Lie-generator) term:
+maximal benefit at small delta (2.8x at 0.5 deg), tapering to the lattice edge
+(1.1x at 1.5 deg), and turning HARMFUL beyond ~2 deg (0.7x at 3 deg) — accurate
+near the expansion point, wrong far from it. Since the operating range is
+[0, 1.5 deg] it lives entirely in its beneficial regime. This is the clean
+proof the scout wanted that it is an analytic derivative companion, not a
+heuristic. (The ledger's "4x load-bearing" is the full-pipeline ATE impact,
+which amplifies this modest per-query reconstruction benefit through the
+matching + graph cascade.)
+
+OPEN QUESTION surfaced: the derivative doubles per-segment storage (segvec +
+segder); the SAME storage spent on doubling angular resolution (60 -> 120
+angles, no derivative, lattice step 3 -> 1.5 deg) gives a flat ~0.04
+reconstruction error with no large-delta blow-up. Whether 60-angle+derivative
+or 120-angle-no-derivative MATCHES better at equal storage is untested (they
+differ in COMPUTE — 120 angles doubles the matcher cost while the derivative
+only adds storage — so it is a tradeoff, not a free swap). Needs a lattice
+rebuild; flagged, not chased.
