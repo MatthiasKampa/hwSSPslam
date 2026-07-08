@@ -213,6 +213,24 @@ split is the shipped map refinement.
   result 12 m). Net map story: HY4 matched-band split (0.67×) × complex64
   (0.5×) ≈ 0.33× of the original 8 MB at bit-identical Intel accuracy (~2.6 MB).
 
+- **Map COMPOSITION works — the thesis realized** ("VSA map composition",
+  `ssp_multisession.py`, audit-verified). Two *independently*-built Intel
+  sub-maps compose by shift/permute/**add**: the merge is a genuine per-cell A+B
+  vector addition (bit-exact — standalone `place()` == `world_vec_seg`, and
+  folding a rigid T into an anchor pose == transforming the world-placed
+  bundle), so nothing is re-encoded from scans. Overlapping 2 m cells BUNDLE
+  rather than duplicate (37 % memory saving, O(area of the *union*)); adding one
+  session does not destroy the other's signal (bundled-cell cosine 0.940 median,
+  a small ~9 % RMSE crosstalk cost, not zero); and superposition tolerates
+  sub-wavelength (~0.25 m) misalignment. This is the property grids and point
+  clouds structurally lack. **Scope caveat** (from the audit): the localization
+  test is a gt-seeded local *refinement* of a session's own build scans, so it
+  demonstrates *composition-without-corruption*, not from-scratch cross-session
+  relocalization; and aligning two independently-drifted maps to sub-wavelength
+  (a ~1.2 m non-rigid residual to any single rigid T_AB) is a *general*
+  multi-session-SLAM problem — cross-session constraints + joint relax — not a
+  property of the representation. After alignment, the algebra applies unchanged.
+
 ---
 
 ## 4. The three architectural laws
