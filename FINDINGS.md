@@ -371,8 +371,10 @@ achievable frontier; more aggressive relocalization (seq-only) snaps twins and i
 strictly worse (56.23 m).** The right move under an irreducible ambiguity is to
 decline it, which is what ships.
 
-**This is the established information-theoretic limit, not an engineering gap**
-(confirmed by a targeted SotA exhaustion scout, 2026-07). Distinguish two cases:
+**This is a fundamental limit for one case and a strongly-triangulated,
+constraint-conditioned one for the other — not an engineering gap in either**
+(confirmed by a SotA exhaustion scout + an adversarial code review, 2026-07;
+epistemic status made precise per the latter). Distinguish two cases:
 *local degeneracy* — a smooth featureless corridor has a **singular range-finder
 Fisher Information Matrix**, its kernel the corridor axis, so along-axis position
 is unobservable and the Cramér-Rao bound blocks *every* unbiased estimator (Censi,
@@ -401,6 +403,20 @@ wins" frontend is doing geometric *sequence* disambiguation, the best such a met
 can, and it too fails on a genuine twin. (A clean impossibility theorem for range-
 only verification of internally-consistent aliased places is an open citation gap
 this work sits in.)
+
+*Epistemic precision (code review).* The smooth-degeneracy half is genuinely
+fundamental (the CRB is a proof). The discrete-aliasing half is a **strong,
+triangulated empirical conclusion conditioned on the stated constraint set** — the
+"twins are mutually consistent" fact was *measured with this system's lossy 5-kf
+descriptors, this matcher, and four classical robust backends*. A scan-retaining
+verifier (ICP-class, holding raw scans) or a higher-resolution geometric verifier
+with explicit along-corridor covariance has strictly more information and is *not*
+excluded by proof — it could pin partial lateral/heading constraints where the SSP
+matcher "slides" (coherence ~0.40). So the honest label is: the *decision* (decline
+the ambiguous closure) is correct and well-defended, but "information-theoretic
+limit" applies without qualification only to the FIM case; for discrete aliasing it
+is a limit *of this representation + these verifiers under these constraints*, and
+the general theorem remains the open gap above.
 
 ### 5.6 The wall bounds the refinement layer and the cross-session case too
 
@@ -607,6 +623,23 @@ history-storing baselines. Trajectory bookkeeping still grows O(time) (as any
 trajectory output must); full-graph relaxation is the one remaining O(t) compute
 term, with windowed relax + seq-edge marginalization the designed-but-optional
 fix (merged, verified, opt-in via `windowed=True`).
+
+**Two measurement caveats, stated plainly** (surfaced by an adversarial full-code
+review, 2026-07). (1) **"Bounded-memory" is really bounded-*map*-memory.** The
+O(area) bound and every reported map-MB figure (1.9–27 MB) are the segment
+vectors + derivatives *only* (`memory_kb()` counts nothing else); the anchor
+poses, per-keyframe relative poses, and edge list all grow O(time), and in the
+shipped real-log config (`windowed=False`) the relax solves over all anchors, so
+compute is O(t) too. The honest headline is *bounded-map-memory, history-free*.
+(2) **All accuracy is measured against an RBPF/GMapping reference, not surveyed
+ground truth.** Every ATE in this repo — ours *and* the ICP/CSM baselines — is a
+distance to GMapping's own trajectory estimate (`*.gfs.log`); no dataset here has
+surveyed GT. The eval itself is fair (nearest-timestamp ≤0.3 s, Horn `align_se2`,
+RMSE; the anti-oracle discipline keeps GT out of the shipped pipeline), but the
+entire numeric ledger measures *agreement-with-GMapping*, not truth. The single
+highest-value future validation is an independent, non-RBPF-derived reference
+(one log with surveyed/fiducial GT) to decouple "2.44 m" from "2.44 m from
+GMapping".
 
 **What is defensible.** The three properties are the bound, the absence of
 history, and the algebra — each verified: Intel plateaus at 698 segments (84% of
