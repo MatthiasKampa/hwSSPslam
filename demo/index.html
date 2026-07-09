@@ -149,6 +149,15 @@ a{color:var(--blue)}
       <span class="val" id="vSpeed">1.1 m/s</span>
     </div>
     <div class="row" style="margin-top:4px">
+      <label>environment
+        <select id="worldSel">
+          <option value="room" selected>room (occluder + doorway)</option>
+          <option value="corridor">corridor (aperture)</option>
+          <option value="office">office (clutter)</option>
+          <option value="sparse">sparse (weak observability)</option>
+        </select></label>
+    </div>
+    <div class="row" style="margin-top:4px">
       <button id="bPause">Pause</button>
       <button id="bReset">Reset map</button>
     </div>
@@ -398,6 +407,43 @@ function makeWorld(){
   segs.push(13.0, 1.0, 15.0, 3.0);// diagonal corner cut
   return new Float64Array(segs);
 }
+
+/* --- additional sandbox environments (walls only; worlds.py analogues) --- */
+function makeWorld_corridor(){
+  // aperture / degeneracy case: two long parallel walls, faint notches.
+  const segs = []; const P = (...a) => segs.push(...a);
+  const rect = (x0,y0,x1,y1) => P(x0,y0,x1,y0, x1,y0,x1,y1, x1,y1,x0,y1, x0,y1,x0,y0);
+  rect(0,0,16,10);
+  P(0,3.7, 11.5,3.7);           // lower wall (gap near right)
+  P(4.5,6.3, 16,6.3);           // upper wall (gap near left)
+  P(2,3.7,2,4.0); P(6,3.7,6,4.0); P(9,6.0,9,6.3);   // faint notches
+  return new Float64Array(segs);
+}
+function makeWorld_office(){
+  // flat outer room + scattered boxes at mixed positions (clutter).
+  const segs = [];
+  const rect = (x0,y0,x1,y1) => segs.push(x0,y0,x1,y0, x1,y0,x1,y1, x1,y1,x0,y1, x0,y1,x0,y0);
+  rect(0,0,16,10);
+  rect(2.5,2,3.9,3.4); rect(11,6.4,12.6,8); rect(6,7.2,7.1,8.6);
+  rect(12,2,13.4,3.1); rect(7.3,3.8,8.4,4.9); rect(3.8,5.6,4.8,6.6);
+  return new Float64Array(segs);
+}
+function makeWorld_sparse(){
+  // sparse widely-spaced features (few returns, weak observability).
+  const segs = [];
+  const rect = (x0,y0,x1,y1) => segs.push(x0,y0,x1,y0, x1,y0,x1,y1, x1,y1,x0,y1, x0,y1,x0,y0);
+  rect(0,0,16,10);
+  segs.push(3,3, 5,3);  segs.push(11.5,7, 13.5,7);
+  segs.push(8,2, 8,3.6); segs.push(12,4, 12,5.5);
+  return new Float64Array(segs);
+}
+// name -> {generator, patrol ellipse [cx,cy,a,b]}
+const WORLDS = {
+  room:     { fn: makeWorld,          ell: [8,5,4.8,1.9] },
+  corridor: { fn: makeWorld_corridor, ell: [8,5,6.6,1.0] },
+  office:   { fn: makeWorld_office,   ell: [8,5,5.2,3.0] },
+  sparse:   { fn: makeWorld_sparse,   ell: [8,5,5.6,3.4] },
+};
 
 /* min-range ray/segment intersection, one beam */
 function castRay(walls, ox, oy, dx, dy){
@@ -1618,9 +1664,9 @@ const SIM = { nBeams: 144, maxRange: 12, sigma: 0.02, dropout: 0.02,
 const DTH_SB = TAU / SIM.nBeams;
 const KF_DIST = 0.15, KF_ROT = 3 * Math.PI / 180, MAP_EPS = 0.005;
 const cfg = { mode: "intel", gate: true, beta: 3, occ: true, ladder: "oct",
-              nAng: 24, auto: true, speed: 1.1, paused: false };
+              nAng: 24, auto: true, speed: 1.1, paused: false, world: "room" };
 
-const walls = makeWorld();
+let walls = makeWorld();
 const rng = mulberry32(7);
 
 /* --------------------------------------------------------------- lattices */
@@ -1898,10 +1944,13 @@ let pathN = 0, pathHead = 0, lastPush = [1e9, 1e9];
 
 /* pure-pursuit autopilot around the ssp_slam.py ellipse (a=4.8 b=1.9 c=(8,5)) */
 const EPTS = 160, ell = new Float64Array(2 * EPTS);
-for (let i = 0; i < EPTS; i++){
-  const s = i * TAU / EPTS;
-  ell[2*i] = 8 + 4.8 * Math.cos(s); ell[2*i+1] = 5 + 1.9 * Math.sin(s);
+function buildEll(cx, cy, a, b){
+  for (let i = 0; i < EPTS; i++){
+    const s = i * TAU / EPTS;
+    ell[2*i] = cx + a * Math.cos(s); ell[2*i+1] = cy + b * Math.sin(s);
+  }
 }
+buildEll(8, 5, 4.8, 1.9);
 function drive(dt){
   const gt = SB.gt;
   if (cfg.auto){
@@ -1939,6 +1988,17 @@ function resetSandbox(){
   pathN = 0; pathHead = 0; lastPush = [1e9, 1e9];
   decSB.row = 0; decSB.max = 0; decSB.scale = 1e-6;
   decSB.img.data.fill(0);
+}
+
+function setWorld(name){
+  if (!WORLDS[name]) return;
+  cfg.world = name;
+  walls = WORLDS[name].fn();
+  const e = WORLDS[name].ell;
+  buildEll(e[0], e[1], e[2], e[3]);
+  SB.gt = [e[0] + e[2], e[1], Math.PI / 2];   // start on the patrol loop
+  SB.vel = 0; SB.om = 0;
+  resetSandbox();
 }
 
 function sandboxStep(dt){
@@ -2503,6 +2563,7 @@ $("cAng").addEventListener("change", e => {   // sandbox-only knob
   cfg.nAng = +e.target.value; buildLattice(); resetSandbox();
 });
 $("bReset").addEventListener("click", resetSandbox);
+$("worldSel").addEventListener("change", e => setWorld(e.target.value));
 $("bResetIn").addEventListener("click", () => { resetIntel(); IN.playing = true; $("pPlay").textContent = "Pause"; });
 $("bPause").addEventListener("click", () => {
   cfg.paused = !cfg.paused;
