@@ -3325,3 +3325,42 @@ best via GTSAM ISAM2 if a dependency is acceptable. This is a substantial rework
 whose payoff is ASYMPTOTIC (unbounded runs where O(t) full-relax dominates) -- the
 current bounded logs are fine with full relax at 15-26 ms/kf. Scoped as a future
 engineering task, not a quick win. Full relax stays the default.
+
+---
+
+## ROVER-style trajectory-deformation loop verifier (untried lever) — redundant with the innovation gate, not a wall-breaker
+
+The alternative-paradigms scout flagged two constraint-legal levers we hadn't
+tried; the passive-compatible one is ROVER (Yu et al. 2024): verify a candidate
+closure by ADDING it to the pose graph, re-optimizing, and scoring the trajectory
+DEFORMATION -- a correct loop deforms gracefully, a false one catastrophically.
+Prototyped on a synthetic drifting loop (`scratch_rover.py`; minimal SE(2)
+pose-graph relax; SE(2)-aligned pre/post deformation + post-relax residual),
+compared head-to-head with the pre-relax innovation residual the shipped gate
+already uses:
+
+  candidate               | innov(m) | ROVER rms | postRes
+  GENUINE (last=first)    |   3.26   |   0.823   |    38.75
+  twin coincide w/ 1/4    |   7.89   |   4.115   |  1905.62
+  twin coincide w/ 1/2    |  13.37   |   4.285   |  4140.99
+  twin coincide w/ 3/4    |   9.65   |   2.237   |  1879.45
+  DANGEROUS twin innov~0  |   0.00   |   0.000   |     0.00   <- ROVER passes it too
+
+**Finding: for a SINGLE closure, ROVER adds no new discriminating axis over the
+innovation gate we already ship.** (1) Geometrically-INCONSISTENT twins are caught
+by BOTH -- the innovation residual already separates them (genuine 3.26 vs twins
+7.9-13.4), and ROVER's post-relax residual separates them more sharply (39 vs
+1900-4100) but redundantly. (2) A DANGEROUS twin whose Z AGREES with the drifted
+estimate (innov ~ 0 -- the only kind that passes the innovation gate) produces
+ZERO deformation and ZERO post-relax residual: **ROVER passes it exactly where the
+innovation gate does.** ROVER's post-relax residual is a sharper proxy for the same
+cycle-consistency signal; it cannot see a twin that is consistent with the current
+estimate, which is precisely the dangerous case and the info-theoretic twin. Its
+one genuinely distinct value (per the scout) is SET-level -- catching a *group* of
+pairwise-consistent closures that jointly deform the trajectory -- an incremental
+improvement over pairwise PCM, but it too passes a globally-consistent (symmetric)
+twin. VERDICT: ROVER is a sharper, global-consistency verifier, NOT a new
+verification axis and NOT a wall-breaker -- consistent with the campaign
+conclusion. Not worth a real-log build for the single-closure case; the only part
+worth revisiting is set-level global consistency, and only if pairwise PCM is
+observed to admit a jointly-inconsistent cluster.
