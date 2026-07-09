@@ -545,6 +545,24 @@ SotA/spectral_registration.md; "Related work" in RESULTS).
   window/cell-cap sizes instead of hand-tuning; Olson-style correlation-peak
   curvature as edge information matrices.
 
+- **External SotA independently validates the shipped design's key choices**
+  (targeted literature scouts, 2026-07). Two design questions that were pushed
+  hard this cycle both resolved *toward* the shipped architecture: (i) *submap vs
+  temporal-segment closure* — Cartographer (Hess 2016) and Kimera never co-mingle
+  passes; they freeze a short single-burst unit before drift smears it and link
+  revisits with prunable edges, and VSA superposition theory (Frady/Kleyko/Sommer
+  2018) gives the mechanistic reason (bundling is lossy, a summed-in closure is
+  only approximately prunable) — exactly the shipped frozen-5-kf-segment +
+  prunable-loop-edge design, reached from three independent directions. (ii)
+  *per-environment lattice resolution* — the coarse-helps-dense-revisit /
+  fine-needed-for-aliased effect is the generalization-vs-discrimination /
+  matched-filter-bandwidth tradeoff (BoW quantization FAB-MAP 2008; Scan-Context
+  resolution; SSP kernel-width Komer 2019 / Frady-Kanerva-Sommer 2021; radar
+  ambiguity theory), and the shipped fixed lattice sits at a robust operating
+  point (the one coarser-is-better datapoint, fr101 0.67 m, audited to a fragile
+  knife-edge, §7). The convergence is corroboration, not novelty — but it is the
+  strongest evidence that the design is principled rather than over-fit.
+
 ---
 
 ## 9. Limits, honest framing, and open questions
