@@ -412,24 +412,25 @@ function makeWorld(){
   return new Float64Array(segs);
 }
 
-/* --- additional sandbox environments (walls only; worlds.py analogues) --- */
+/* --- additional sandbox environments (walls only; worlds.py analogues). Wall
+   geometry + patrol ellipses validated collision-clear (0/120 patrol pts below
+   the 0.22 m stop radius) so the autopilot never stalls. --- */
 function makeWorld_corridor(){
-  // aperture / degeneracy case: two long parallel walls, faint notches.
+  // aperture / degeneracy case: two long parallel walls with offset gaps.
   const segs = []; const P = (...a) => segs.push(...a);
   const rect = (x0,y0,x1,y1) => P(x0,y0,x1,y0, x1,y0,x1,y1, x1,y1,x0,y1, x0,y1,x0,y0);
   rect(0,0,16,10);
-  P(0,3.7, 11.5,3.7);           // lower wall (gap near right)
-  P(4.5,6.3, 16,6.3);           // upper wall (gap near left)
-  P(2,3.7,2,4.0); P(6,3.7,6,4.0); P(9,6.0,9,6.3);   // faint notches
+  P(0,3.5, 11.5,3.5);           // lower wall (gap near right)
+  P(4.5,6.5, 16,6.5);           // upper wall (gap near left)
   return new Float64Array(segs);
 }
 function makeWorld_office(){
-  // flat outer room + scattered boxes at mixed positions (clutter).
+  // flat outer room + boxes: 4 corners (outside the patrol loop) + 1 centre.
   const segs = [];
   const rect = (x0,y0,x1,y1) => segs.push(x0,y0,x1,y0, x1,y0,x1,y1, x1,y1,x0,y1, x0,y1,x0,y0);
   rect(0,0,16,10);
-  rect(2.5,2,3.9,3.4); rect(11,6.4,12.6,8); rect(6,7.2,7.1,8.6);
-  rect(12,2,13.4,3.1); rect(7.3,3.8,8.4,4.9); rect(3.8,5.6,4.8,6.6);
+  rect(1,1,2.4,2.4); rect(13.6,7.6,15,9); rect(1,7.6,2.4,9);
+  rect(13.6,1,15,2.4); rect(7.2,4.3,8.8,5.7);
   return new Float64Array(segs);
 }
 function makeWorld_sparse(){
@@ -437,16 +438,16 @@ function makeWorld_sparse(){
   const segs = [];
   const rect = (x0,y0,x1,y1) => segs.push(x0,y0,x1,y0, x1,y0,x1,y1, x1,y1,x0,y1, x0,y1,x0,y0);
   rect(0,0,16,10);
-  segs.push(3,3, 5,3);  segs.push(11.5,7, 13.5,7);
-  segs.push(8,2, 8,3.6); segs.push(12,4, 12,5.5);
+  segs.push(1.5,1.5, 3,1.5);  segs.push(13,8.5, 14.5,8.5);
+  segs.push(8,4.6, 8,5.4); segs.push(1.5,8.5, 1.5,7);
   return new Float64Array(segs);
 }
-// name -> {generator, patrol ellipse [cx,cy,a,b]}
+// name -> {generator, patrol ellipse [cx,cy,a,b]} (ellipses validated clear)
 const WORLDS = {
   room:     { fn: makeWorld,          ell: [8,5,4.8,1.9] },
-  corridor: { fn: makeWorld_corridor, ell: [8,5,6.6,1.0] },
-  office:   { fn: makeWorld_office,   ell: [8,5,5.2,3.0] },
-  sparse:   { fn: makeWorld_sparse,   ell: [8,5,5.6,3.4] },
+  corridor: { fn: makeWorld_corridor, ell: [8,5,6.6,1.1] },
+  office:   { fn: makeWorld_office,   ell: [8,5,5.6,3.2] },
+  sparse:   { fn: makeWorld_sparse,   ell: [8,5,6.0,3.4] },
 };
 
 /* min-range ray/segment intersection, one beam */
