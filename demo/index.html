@@ -161,7 +161,17 @@ a{color:var(--blue)}
       <button id="bPause">Pause</button>
       <button id="bReset">Reset map</button>
     </div>
-    <div class="hint">Arrow keys steer (switches to manual). The estimator only sees the lidar — constant-velocity guess + correlation search, as in <code>ssp_slam.py</code>.</div>
+    <div class="row" style="margin-top:6px">
+      <label>odom prior &gamma;
+        <input type="range" id="cOdoG" min="0" max="1.2" step="0.1" value="0">
+        <span class="val" id="vOdoG">off</span></label>
+    </div>
+    <div class="row">
+      <label>odom noise
+        <input type="range" id="cOdoN" min="0" max="1.0" step="0.05" value="0.3">
+        <span class="val" id="vOdoN">0.30</span></label>
+    </div>
+    <div class="hint" title="MAP fusion at the matcher: gamma>0 makes the guess the odometry prediction and penalises the lidar correlation by distance-squared from it (accepted pose = argmax [ lidar likelihood - gamma*peak*d^2/win^2 ] = lidar x odometry prior). A STRONG lidar peak still overrides it; a weak/ambiguous match defers to odometry. Turn odom NOISE up to enter the drift regime: a fixed gamma then drags the estimate onto the bad odometry — the regime-dependence measured on the real logs (helps good odometry, hurts drifting odometry).">Arrow keys steer (switches to manual). <b>Odometry fusion</b>: &gamma; pulls the match toward the gray odometry prediction (likelihood &times; prior). Low noise + &gamma; &rarr; tight; high noise + &gamma; &rarr; the estimate follows the drift — the do-no-harm tradeoff, live.</div>
   </div>
   <div class="ctl in-only">
     <h3>Replay (Intel log)</h3>
@@ -575,6 +585,11 @@ function makeMatcher(L, opts){
   const rotHalf = (opts.rotHalfDeg || 6) * Math.PI / 180;
   const fineRotStep = 0.375 * Math.PI / 180;
   const lat = Math.PI / L.nAng;
+  // odometry prior (distance-weighted search): score -= gamma*peak*d^2/win^2,
+  // d = distance of the candidate from the odometry prediction (= match guess).
+  // gamma=0 -> pure lidar (shipped). Set via setOdoGamma; centre set in match().
+  let odoGamma = 0, odoPriorX = 0, odoPriorY = 0;
+  const odoWin = tHalf;
   // fine theta span must cover the half-step coarse grid's quantization (lat/4)
   const nSide = Math.max(4, Math.ceil((lat / 4) / fineRotStep) + 1);
   const co = gridOffsets(tHalf, tStep), fo = gridOffsets(fHalf, fStep);
@@ -612,11 +627,24 @@ function makeMatcher(L, opts){
       cim[f] = a*shim[f] + b*shre[f];
     }
     const Ere = E.re, Eim = E.im;
-    let best = -Infinity, bi = 0;
+    let raw = -Infinity;
     for (let o = 0; o < g.n; o++){
       let s = 0; const base = o * D;
       for (let f = 0; f < D; f++) s += Ere[base+f]*cre[f] - Eim[base+f]*cim[f];
       scores[o] = s;
+      if (s > raw) raw = s;
+    }
+    // odometry-prior penalty: pull the accepted pose toward the prediction,
+    // scaled by the raw peak so a STRONG lidar peak can still override it.
+    let best = -Infinity, bi = 0;
+    const gp = (odoGamma > 0) ? odoGamma * Math.abs(raw) / (odoWin * odoWin) : 0;
+    for (let o = 0; o < g.n; o++){
+      let s = scores[o];
+      if (gp > 0){
+        const px = cx + g.off[2*o] - odoPriorX, py = cy + g.off[2*o+1] - odoPriorY;
+        s -= gp * (px*px + py*py);
+        scores[o] = s;
+      }
       if (s > best){ best = s; bi = o; }
     }
     return bi;
@@ -630,6 +658,7 @@ function makeMatcher(L, opts){
   }
 
   function match(Mre, Mim, smp, guess){
+    odoPriorX = guess[0]; odoPriorY = guess[1];   // odometry prediction = prior centre
     // NOTE: the scan encodes used for MATCHING are UNGATED — range gating is a
     // map-WRITE rule (cross-pass aliasing in world-frame sums, R1 law); gating
     // the matched band costs accuracy (RESULTS.md R2: fine fold gated 9.2->14 cm).
@@ -690,7 +719,7 @@ function makeMatcher(L, opts){
     }
     return [bfx + dx, bfy + dy, wrapAng(thF)];
   }
-  return { match, viz, lat, co, fo };
+  return { match, viz, lat, co, fo, setOdoGamma: (g) => { odoGamma = g; } };
 }
 
 /* ----------------------------------------------------------- self tests */
@@ -1673,7 +1702,7 @@ const DTH_SB = TAU / SIM.nBeams;
 const KF_DIST = 0.15, KF_ROT = 3 * Math.PI / 180, MAP_EPS = 0.005;
 const cfg = { mode: "intel", gate: true, beta: 3, occ: true, ladder: "oct",
               nAng: 24, auto: true, speed: 1.1, paused: false, world: "room",
-              der: true };
+              der: true, odoGamma: 0, odoNoise: 0.3 };
 
 let walls = makeWorld();
 const rng = mulberry32(7);
@@ -1940,6 +1969,7 @@ function redrawCloud(){
 const SB = {
   gt: [8 + 4.8, 5, Math.PI / 2],
   est: null, estPrev: null,
+  odo: [8 + 4.8, 5, Math.PI / 2], odoPrev: [8 + 4.8, 5, Math.PI / 2],
   vel: 0, om: 0,
   lastKF: null, nKF: 0,
   ranges: new Float64Array(SIM.nBeams),
@@ -1949,6 +1979,7 @@ const SB = {
 const keys = {};
 const PATH_CAP = 4096;
 const pGT = new Float32Array(2*PATH_CAP), pES = new Float32Array(2*PATH_CAP);
+const pOD = new Float32Array(2*PATH_CAP);        // odometry dead-reckoning track
 let pathN = 0, pathHead = 0, lastPush = [1e9, 1e9];
 
 /* pure-pursuit autopilot around the ssp_slam.py ellipse (a=4.8 b=1.9 c=(8,5)) */
@@ -1992,6 +2023,7 @@ function resetSandbox(){
   sbMre.fill(0); sbMim.fill(0);
   SB.est = [SB.gt[0], SB.gt[1], SB.gt[2]];
   SB.estPrev = SB.est.slice();
+  SB.odo = SB.gt.slice(); SB.odoPrev = SB.odo.slice();
   SB.lastKF = null; SB.nKF = 0;
   SB.stats = { sum: 0, n: 0 };
   pathN = 0; pathHead = 0; lastPush = [1e9, 1e9];
@@ -2011,15 +2043,34 @@ function setWorld(name){
 }
 
 function sandboxStep(dt){
+  const gtPrev = SB.gt.slice();
   drive(dt);
+  // simulated odometry: the TRUE relative motion corrupted by noise
+  // (cfg.odoNoise: scale error + heading bias + jitter), accumulated into a
+  // drifting dead-reckoning track SB.odo.
+  const dtru = se2Mul(se2Inv(gtPrev), SB.gt);
+  const nz = cfg.odoNoise || 0;
+  const dn = [ dtru[0] * (1 + nz) + gauss(rng) * nz * 0.03,
+               dtru[1] + gauss(rng) * nz * 0.03,
+               dtru[2] + dtru[0] * nz * 0.2 + gauss(rng) * nz * 0.02 ];
+  SB.odoPrev = SB.odo; SB.odo = se2Mul(SB.odo, dn);
   simulateScan(walls, SB.gt, rng, SIM, SB.ranges);
   const smp = scanToSamples(SB.ranges, SIM.nBeams, cfg.occ, null);
   SB.lastSmp = smp;
   const beta = cfg.gate ? cfg.beta : Infinity;
   const t0 = performance.now();
-  const guess = [ SB.est[0] + (SB.est[0] - SB.estPrev[0]),
-                  SB.est[1] + (SB.est[1] - SB.estPrev[1]),
-                  SB.est[2] + wrapAng(SB.est[2] - SB.estPrev[2]) ];
+  // odometry-prior fusion: gamma>0 -> guess is the ODOMETRY prediction and the
+  // matcher penalises distance from it (MAP = lidar likelihood x odom prior);
+  // gamma=0 -> lidar-only constant-velocity guess (shipped behaviour).
+  matcherSB.setOdoGamma(cfg.odoGamma || 0);
+  let guess;
+  if ((cfg.odoGamma || 0) > 0 && SB.nKF > 0){
+    guess = se2Mul(SB.est, se2Mul(se2Inv(SB.odoPrev), SB.odo));
+  } else {
+    guess = [ SB.est[0] + (SB.est[0] - SB.estPrev[0]),
+              SB.est[1] + (SB.est[1] - SB.estPrev[1]),
+              SB.est[2] + wrapAng(SB.est[2] - SB.estPrev[2]) ];
+  }
   let newEst;
   if (SB.nKF === 0 || smp.n < 20){
     newEst = SB.nKF === 0 ? [SB.gt[0], SB.gt[1], SB.gt[2]] : guess;
@@ -2052,6 +2103,7 @@ function sandboxStep(dt){
   if (Math.hypot(SB.gt[0]-lastPush[0], SB.gt[1]-lastPush[1]) > 0.05){
     pGT[2*pathHead] = SB.gt[0]; pGT[2*pathHead+1] = SB.gt[1];
     pES[2*pathHead] = SB.est[0]; pES[2*pathHead+1] = SB.est[1];
+    pOD[2*pathHead] = SB.odo[0]; pOD[2*pathHead+1] = SB.odo[1];
     pathHead = (pathHead + 1) % PATH_CAP;
     pathN = Math.min(pathN + 1, PATH_CAP);
     lastPush = [SB.gt[0], SB.gt[1]];
@@ -2301,6 +2353,7 @@ function drawWorldSB(){
     }
     wctx.stroke(); wctx.setLineDash([]);
   };
+  if (cfg.odoNoise > 0 || cfg.odoGamma > 0) drawPath(pOD, "#8a8f98", false);  // gray odometry
   drawPath(pGT, "#199e70", false);
   drawPath(pES, "#c98500", true);
   drawTri(est, s, null, "#c98500", w2pSB);
@@ -2554,6 +2607,10 @@ $("cSpeed").addEventListener("input", e => {
 });
 $("cGate").addEventListener("change", e => cfg.gate = e.target.checked);
 $("cDer").addEventListener("change", e => { cfg.der = e.target.checked; if (cfg.mode === "intel") resetIntel(); });
+$("cOdoG").addEventListener("input", e => { cfg.odoGamma = +e.target.value;
+  $("vOdoG").textContent = cfg.odoGamma === 0 ? "off" : cfg.odoGamma.toFixed(1); });
+$("cOdoN").addEventListener("input", e => { cfg.odoNoise = +e.target.value;
+  $("vOdoN").textContent = cfg.odoNoise.toFixed(2); });
 $("cBeta").addEventListener("input", e => {
   cfg.beta = +e.target.value; $("vBeta").textContent = cfg.beta.toFixed(1);
 });
