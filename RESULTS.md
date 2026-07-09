@@ -3252,3 +3252,38 @@ for a benefit (noise-averaging) that only holds intra-pass, where shipped alread
 gets it. The genuinely open lever the research leaves is narrow: whether LARGER
 frozen single-burst patches + hex spatial indexing improve retrieval over 5-kf
 segments -- but that does not touch the verification wall and is close to shipped.
+
+---
+
+## fr101 lattice-headroom audit: FRAGILE knife-edge, NOT banked (PROTOCOL sec 4)
+
+Audited the per-dataset-sweep positive (fr101 1.881 -> 0.668 at coarse lam8/N36/
+D144). GT used only to label loop edges / score (anti-oracle). `scratch_fr101_audit.py`:
+
+  config                 |  ATE   loops genuine twin (labeled subset)
+  shipped lam2/N60/D240  | 1.869    53     4     0
+  winner  lam8/N36/D144  | 0.664    61     5     1
+  lam8/N36 (rerun)       | 0.664    61     5     1     <- deterministic
+  lam6/N36/D144          | 4.817    14     -     -     <- nearby, CATASTROPHIC
+  lam8/N48/D192          | 2.248     5     -     -     <- nearby, BAD
+
+**VERDICT: the win is a knife-edge artifact, not a robust improvement.** It
+reproduces bit-exact (deterministic), but the two NEAREST configs are 2.5x-7x
+WORSE and admit wildly different closure counts (5 / 14 / 61) -- so 0.664 is one
+config hitting a lucky closure set, not a generalizable "coarse-is-better-for-
+fr101" law. Confirms the sweep's own caveat (no single better fixed config) and
+vindicates audit-before-trust. fr101's honest ATE stays the zero-shot 1.881.
+
+**SotA mechanism (research agent):** the coarse-helps-dense-revisit / fine-needed-
+for-aliased effect is the generalization-vs-discrimination (matched-filter
+BANDWIDTH <-> main-lobe-width) tradeoff -- coarse = wide capture range = more
+closures (recall) but aliasing sidelobes; fine = sharp/discriminative but narrow,
+fragile basin. Same tradeoff in BoW quantization (FAB-MAP, Cummins&Newman 2008),
+Scan-Context resolution (Kim 2018), SSP kernel-width (Komer 2019; Frady/Kanerva/
+Sommer 2021), radar ambiguity theory. The knife-edge fragility fits a wide-shallow
+coarse basin: which closures lock is hypersensitive to config. Principled rule =
+set finest resolved wavelength to the smallest scale at which distinct places stay
+distinguishable; GT-FREE run-time proxy = descriptor-database self-similarity
+(off-diagonal confusion mass) + top-1/top-2 score margin. Under-explored as an
+ADAPTIVE-resolution method (most SLAM adapts the threshold, not the descriptor
+scale) -- a genuine open direction, tested next.
