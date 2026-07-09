@@ -3193,3 +3193,62 @@ zero-shot ATE stays 1.881; and (b) a POSITIVE result that needs an independent
 audit (closure-correctness: are the extra coarse-lattice closures genuine or
 lucky twins?) before it is trusted as deployable headroom. Recorded as promising,
 not banked.
+
+---
+
+## Submap SLAM (align-then-bundle hex patches) for loop closure — triangulated negative
+
+User hypothesis: replace temporal 5-kf segments with persistent, area-indexed
+HEXAGONAL patches; each scan soft-assigned to the 3 nearest hex centres
+(barycentric), matched per-patch, position = weighted-average of the per-patch
+matches, then bundled into the 3 at that pose (align-then-bundle). Repeated
+aligned observations REINFORCE (signal ~N, noise ~sqrt N) instead of the
+raw-pose SMEAR that killed ssp_scale_arrays. Revisits match into old-pass patch
+content = closure. The premise: reinforcement makes submaps viable for closure.
+
+Investigated end-to-end (scratch_submap_slam.py V1 frontend, scratch_patch_slam.py
+redo with map/graph decoupled + prunable backend, scratch_submap_rearrange.py +
+real-multipass mechanism tests) and cross-checked by a SotA-research agent and an
+independent design-review agent. VERDICT: the reinforcement-across-passes premise
+is architecturally unsound; it converges back to the shipped segment design.
+
+**What is TRUE (mechanism tests, real Intel):** align-then-bundle at the CORRECT
+pose reinforces (coherence +0.05..+0.12 vs raw-bundle -0.04..-0.10); a rigid
+transform is a unit-magnitude phase multiply so it CANNOT restore magnitude lost
+to destructive interference (best closure-rearrange recovery falls 0.999 -> 0.795
+as per-cell drift grows 0.1 -> 1.0 m; fine 0.25 m ring survival 0.86 -> 0.19).
+Real intra-cell write-pose disagreement on Intel: 1.24 m within-pass, 8.14 m
+cross-pass -> both large enough to destroy the fine (cm-Z) rings.
+
+**Why it fails for CLOSURE (triangulated):**
+1. VSA theory (Frady/Kleyko/Sommer 2018; VSA-OGM 2024): bundling is LOSSY
+   superposition -- crosstalk grows with item count, capacity ~D/log, and
+   normalization makes a summed-in contribution only APPROXIMATELY subtractable.
+   A loop closure fused into a patch HV is not cleanly prunable.
+2. SotA (Cartographer, Hess 2016; Kimera): mature submap SLAM NEVER co-mingles
+   passes -- a submap is built by short-window insertion, FROZEN at a fixed scan
+   count (before drift smears it), never rewritten; a revisit makes a NEW submap
+   + a PRUNABLE loop edge between frozen frames. Reinforcement is intra-pass;
+   cross-pass linkage is edges. The freeze rule IS the write-drift-smear defense.
+3. Independent design review of the redo: cross-pass patches ride only their
+   FIRST-writer anchor, so later-pass content moves by the wrong correction --
+   error maximal exactly when a loop closes (compounding); no pass-segregation;
+   dropped LOO pruning; dead derivative-rotation term. "This is the scale_arrays
+   negative in a new costume." The prescribed fix (per-pass frozen layers matched
+   one-at-a-time) "converges toward ephemeral per-segment vectors" = shipped.
+
+**Correction to an earlier note in this session:** the claim that the submap
+frontend "beats the shipped frontend on fr101 (2.60 vs 3.16)" was apples-to-
+oranges -- the submap 2.60 includes implicit revisit-closure while shipped 3.16
+is frontend-ONLY. Fair comparison is submap 2.60 vs shipped-FULL 1.88 (worse),
+and Intel submap 11.4 vs shipped 2.44 (far worse). The submap approach does NOT
+beat shipped on either log.
+
+**Net:** the shipped design (frozen single-burst 5-kf segments + prunable,
+coherence/innovation-gated loop closures) already sits at the SotA-convergent
+point that Cartographer/Kimera and VSA capacity theory independently prescribe.
+Cross-pass reinforcement trades away prunability and re-incurs write-drift smear
+for a benefit (noise-averaging) that only holds intra-pass, where shipped already
+gets it. The genuinely open lever the research leaves is narrow: whether LARGER
+frozen single-burst patches + hex spatial indexing improve retrieval over 5-kf
+segments -- but that does not touch the verification wall and is close to shipped.
