@@ -371,6 +371,37 @@ achievable frontier; more aggressive relocalization (seq-only) snaps twins and i
 strictly worse (56.23 m).** The right move under an irreducible ambiguity is to
 decline it, which is what ships.
 
+**This is the established information-theoretic limit, not an engineering gap**
+(confirmed by a targeted SotA exhaustion scout, 2026-07). Distinguish two cases:
+*local degeneracy* — a smooth featureless corridor has a **singular range-finder
+Fisher Information Matrix**, its kernel the corridor axis, so along-axis position
+is unobservable and the Cramér-Rao bound blocks *every* unbiased estimator (Censi,
+ICRA 2007; operationalized as the degeneracy factor in Zhang, Kaess & Singh, ICRA
+2016; "geometric constraints along the axis of symmetry are indistinguishable from
+noise," X-ICP, Tuna et al. T-RO 2024) — and *discrete perceptual aliasing* —
+repeated identical bays give a **multimodal** global likelihood (a data-
+association ambiguity). The MIT twin is the second. The decisive structural fact:
+a genuine twin's false closures are **mutually consistent by construction**
+(Lajoie, Hu, Beltrame & Carlone, RA-L 2019: "perceptual aliasing creates a large
+number of *mutually-consistent* outliers"), so every robust back-end that rejects
+outliers *via* inconsistency — max-mixtures (Olson & Agarwal 2013), switchable
+constraints (Sünderhauf 2012), DCS (Agarwal 2013), GNC (Yang 2020), and PCM/max-
+clique (Mangelson 2018), the ones we tested — cannot prefer the true branch, and
+multi-hypothesis / topological SLAM (Ranganathan & Dellaert, T-RO 2006; lazy data
+association, Hähnel 2003) correctly *defers* rather than resolving a twin that
+never becomes inconsistent. Range-only itself resolves geometry only up to a
+reflection/translation (Boots & Gordon, ICML 2013), and for any bounded local
+match a false positive is constructible — only a **globally-unique** place rescues
+it (Kuipers & Byun, 1991). Breaking the symmetry needs a bit from *outside* it: a
+non-range modality ("two rooms may look identical for a 2-D laser scanner, while a
+camera may discern them," Cadena et al. T-RO 2016), a globally-unique landmark, or
+physically exiting the corridor. No constraint-respecting (2D-range-only, no
+learning, no external cue, bounded-memory) method escapes this — the "oct mode
+wins" frontend is doing geometric *sequence* disambiguation, the best such a method
+can, and it too fails on a genuine twin. (A clean impossibility theorem for range-
+only verification of internally-consistent aliased places is an open citation gap
+this work sits in.)
+
 ### 5.6 The wall bounds the refinement layer and the cross-session case too
 
 Three further paradigms — each a detection-free or refinement-based attempt to
