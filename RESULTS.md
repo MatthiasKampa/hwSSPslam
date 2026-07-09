@@ -3144,3 +3144,52 @@ no signal (below chance). Consistent with every prior thread: genuine-vs-twin
 discrimination is the irreducible wall; where drift is low the pose already
 discriminates, and where drift is high (the case that needs it) appearance --
 content OR viewpoint -- cannot. (`ssp_viewpoint.py`; logs scratch_viewpoint_*.log.)
+
+---
+
+## Per-dataset lattice (scaling) + phasor-count re-evaluation (scratch_lattice_sweep.py)
+
+Question raised in review: the shipped encoder lattice (oct4 = [0.25,0.5,1,2] m
+matched rings x N_ANG=60 = D 240, + relo rings 5.3/12.8) is a FIXED module
+constant applied to every log (never re-evaluated per dataset — deliberately, so
+the held-out claims are zero-shot). Is some of the non-Intel accuracy gap an
+UNMATCHED-ENCODER artifact? Swept scaling lam_max in {2,4,8} (4 matched rings =
+geomspace(0.25,lam_max,4)) x phasors N_ANG in {36,60,90} on the SHIPPED pipeline
+(`set_lattice` patches the ssp_slam_loop globals at runtime, no module edit;
+harness reproduces shipped fr101 1.881 and Intel 2.440 BIT-EXACT at baseline).
+
+ATE rmse (m), best per log in **bold**, (=shipped) marks lam2/N60/D240:
+
+| log | lam2/N36 | **lam2/N60** | lam2/N90 | lam4/N36 | lam8/N36 | verdict |
+|---|---|---|---|---|---|---|
+| intel | 2.93 | **2.44 (=shipped)** | 3.09 | 9.93 | 13.03 | shipped optimal |
+| fr079 | 11.66 | **5.52 (=shipped)** | 13.25 | 16.15 | 14.74 | shipped optimal |
+| aces  | 10.26 | **6.21 (=shipped)** | 8.05 | 21.75 | 8.87 | shipped optimal |
+| fr101 | 0.905 | 1.881 (=shipped) | 4.29 | 1.152 | **0.668** | COARSER wins 2.8x |
+
+**Findings.**
+1. For **Intel / fr079 / ACES the shipped lattice IS the per-dataset optimum** —
+   every alternative is worse. MORE phasors hurt on Intel (N90 -> 3.09; loop edges
+   80->136: extra angles admit more aliased closures), WIDER scaling is
+   catastrophic (lam_max=4/8 -> 10-22 m: stretching past octaves loses mid-band
+   wall structure and starves genuine closures, loops -> 1-3). So fr079's 5.52 and
+   ACES's 6.21 are NOT unmatched-encoder artifacts; they are intrinsic (fr079
+   floppy graph; ACES do-no-harm frontend gap, see section 6). The fixed choice
+   was well-placed, not lucky.
+2. **fr101 is the exception and has real headroom**: it improves MONOTONE with a
+   coarser, lower-D lattice — lam2/N36/D144 -> 0.905, lam8/N36/D144 -> **0.668**
+   (2.8x better than the 1.881 shipped; median 0.466 vs 1.551, a BROAD improvement
+   not an outlier). Mechanism (plausible, AUDIT-PENDING): fr101 is a dense GENUINE-
+   revisit building with little aliasing, so a coarser encoder that admits more
+   closures (61 vs 53) helps — the opposite of Intel/MIT, which need the finer
+   lattice to SUPPRESS aliased twins. Lower D is also ~cheaper (faster ms/kf).
+3. **No single better fixed config exists** — the optimum is environment-dependent
+   (Intel wants fine to suppress aliasing; fr101 wants coarse to admit revisits).
+   This VALIDATES shipping one robust zero-shot lattice rather than tuning per log.
+
+**Honest framing (PROTOCOL sec 4, sec 6).** The fr101 0.668 is (a) a per-dataset-
+TUNED number, NOT comparable to the zero-shot held-out claim — fr101's honest
+zero-shot ATE stays 1.881; and (b) a POSITIVE result that needs an independent
+audit (closure-correctness: are the extra coarse-lattice closures genuine or
+lucky twins?) before it is trusted as deployable headroom. Recorded as promising,
+not banked.
