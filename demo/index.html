@@ -166,6 +166,10 @@ a{color:var(--blue)}
   <div class="ctl in-only">
     <h3>Replay (Intel log)</h3>
     <div class="row"><button id="bResetIn">Restart replay</button></div>
+    <div class="row" style="margin-top:4px">
+      <label><input type="checkbox" id="cDer" checked> d/&theta; derivative correction</label>
+    </div>
+    <div class="hint" title="FINDINGS section 3: the analytic first-order Lie correction is load-bearing — 60 angles + derivative beats 120 angles without it (Intel 2.44 vs 7.93 m) at half the matcher compute. Off: query rotation falls back to nearest-3-deg lattice permutation only; watch the estimate degrade as sub-grid headings are absorbed by matcher slack.">Ablation: OFF drops the sub-grid rotation term (permutation-only). Derivative is load-bearing — expect the yellow estimate to degrade.</div>
     <div class="hint"><b>NO ODOMETRY</b>: the matcher guess is constant-velocity prediction from previous <i>estimates</i> only (odometry integration comes later); gate-rejected frames coast on that prediction with inflated seq-edge sigma. Otherwise the full <b>bounded-memory stack</b> (<code>ssp_bounded.py</code>, shipped config at the dense 0.05 m/2.5&deg; stride): rigid anchor-frame segment vectors + d/d&theta; derivatives (query rotation = exact permutation + first-order correction), recency-windowed frontend (24 anchors / 8 m; rotation window widened 9&rarr;12&deg; for the odometry-free guess), pass-segregated loop constraints (gap 600 kf, radius 5 m), session-relative soft coherence response (target 0.55), drift-scaled innovation gate (&chi;&sup2;&gt;9), Cauchy IRLS + leave-one-out pruning, damped Gauss-Newton with analytic SE(2) Jacobian capped at ~30 evaluations — the early stop IS the regularizer. Relaxations are amortized across frames ("relaxing graph…").</div>
   </div>
   <div class="ctl">
@@ -1035,7 +1039,10 @@ function makeBounded(L, opts){
     const seg = S.seg.get(aid);
     if (!seg) return;
     const a = S.anchors[aid];
-    const m = Math.round(a[2] / lat), delta = a[2] - m * lat;
+    const m = Math.round(a[2] / lat);
+    // derivative correction ablation: cfg.der=false zeroes the first-order
+    // d/dtheta term, leaving only nearest-3-deg lattice-permutation rotation.
+    const delta = (cfg.der === false) ? 0 : (a[2] - m * lat);
     rotPermute(L, seg.vre, seg.vim, m, t1re, t1im);
     rotPermute(L, seg.dre, seg.dim, m, t2re, t2im);
     for (let f = 0; f < D; f++){
@@ -1664,7 +1671,8 @@ const SIM = { nBeams: 144, maxRange: 12, sigma: 0.02, dropout: 0.02,
 const DTH_SB = TAU / SIM.nBeams;
 const KF_DIST = 0.15, KF_ROT = 3 * Math.PI / 180, MAP_EPS = 0.005;
 const cfg = { mode: "intel", gate: true, beta: 3, occ: true, ladder: "oct",
-              nAng: 24, auto: true, speed: 1.1, paused: false, world: "room" };
+              nAng: 24, auto: true, speed: 1.1, paused: false, world: "room",
+              der: true };
 
 let walls = makeWorld();
 const rng = mulberry32(7);
@@ -2544,6 +2552,7 @@ $("cSpeed").addEventListener("input", e => {
   cfg.speed = +e.target.value; $("vSpeed").textContent = cfg.speed.toFixed(1) + " m/s";
 });
 $("cGate").addEventListener("change", e => cfg.gate = e.target.checked);
+$("cDer").addEventListener("change", e => { cfg.der = e.target.checked; if (cfg.mode === "intel") resetIntel(); });
 $("cBeta").addEventListener("input", e => {
   cfg.beta = +e.target.value; $("vBeta").textContent = cfg.beta.toFixed(1);
 });
