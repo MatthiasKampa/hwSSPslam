@@ -3287,3 +3287,41 @@ distinguishable; GT-FREE run-time proxy = descriptor-database self-similarity
 (off-diagonal confusion mass) + top-1/top-2 score margin. Under-explored as an
 ADAPTIVE-resolution method (most SLAM adapts the threshold, not the descriptor
 scale) -- a genuine open direction, tested next.
+
+---
+
+## Windowed-relax marginalization: quick-fix falsified, real cause is solve-locality (scoped)
+
+The O(t) full-graph relax is the shipped system's one remaining scalability
+bottleneck (FINDINGS sec 9). Benchmarked the opt-in windowed marginalization mode
+(slam.windowed) vs full relax (scratch_windowed_bench.py):
+
+  log    | full ATE / ms/kf | windowed ATE / ms/kf | retired
+  intel  | 2.440 / 15.2     | 6.196 / 14.5         | 320
+  fr079  | 5.523 / 26.4     | 7.057 / 25.3         | 93
+  fr101  | 1.881 / 25.8     | 1.878 / 25.1         | 27
+
+Two findings: (1) windowed is barely faster (~5%) -- at bounded scale (hundreds of
+anchors) full relax is already cheap, so O(t) has not kicked in on these logs;
+(2) windowed badly hurts accuracy on drift-heavy logs (Intel 2.44->6.20, fr079
+5.52->7.06), scaling with retirement count; low-drift fr101 unaffected. Confirms
+windowed is correctly opt-in-OFF.
+
+SotA scout (Schur/GLC/iSAM2 marginalization) named the class of bug: hard-freeze
+!= marginalization. HYPOTHESIS: retired anchors are frozen at stale poses, so their
+keyframes are frozen islands that never follow a later correction; fix = rigidly
+attach each retired anchor to its bypass-parent and back-substitute its pose from
+the corrected parent after each relax (scratch_windowed_fix.py, WFix subclass).
+FALSIFIED: win+fix == windowed to <2 cm on all three logs (Intel 6.196->6.180). The
+shipped _maybe_retire already emits a SOFT covariance-weighted bypass edge, so
+graph-level propagation was never the issue. REAL CAUSE localized: the windowed
+SOLVE itself is local -- _relax_solve(Sw) optimizes only the window of anchors
+around a new closure and freezes the rest, so a loop correction that should shift
+the whole trajectory only shifts the window; the full_every=20 global bleed catches
+up periodically but error accumulates between bleeds. PROPER FIX (SotA rank 2):
+iSAM2-style affected-subtree resolve (Kaess 2012) -- re-solve exactly the region a
+loop perturbs (endpoint-to-common-ancestor), globally consistent, no freezing;
+best via GTSAM ISAM2 if a dependency is acceptable. This is a substantial rework
+whose payoff is ASYMPTOTIC (unbounded runs where O(t) full-relax dominates) -- the
+current bounded logs are fine with full relax at 15-26 ms/kf. Scoped as a future
+engineering task, not a quick win. Full relax stays the default.
