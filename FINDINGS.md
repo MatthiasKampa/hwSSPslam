@@ -469,6 +469,39 @@ verification is the single irreducible limit, on both the corridor (§5.5) and t
 cross-session axis. (Depth: RESULTS.md "Continual gradient-flow", "Hybrid …
 single-session", "Hybrid multi-session", "Viewpoint-tagged dual-channel".)
 
+### 5.7 Extended-overlap consensus — and the wall quantified on real appearance
+
+A fourth verification paradigm reaches the same wall, and en route the wall is
+measured directly on real Intel appearance.
+
+- **Extended-overlap consensus** (`scratch_overlapslam.py`). The user's "close only
+  after a significant *overlap* of the two ends, match them n-to-n, joint-solve, then
+  lerp." In isolation the n-to-n consensus is a *perfect* point-twin discriminator: a
+  genuine revisit and a point-twin that alias at a single spot have IDENTICAL single-
+  point coherence (0.962) yet consensus separates them 1.00 vs 0.00. But no full-SLAM
+  integration helps (sanity: the null gate reproduces shipped bit-exact). A brief
+  genuine revisit has too little overlap to corroborate — indistinguishable from a
+  point-twin — so dense-revisit fr101 regresses; and in a real aliased environment the
+  closures that *do* corroborate are the extended-symmetry aliases, so corroboration
+  becomes **anti-correlated with correctness** (the soft variant up-weights the twins).
+  Temporal holding also fights the bounded-memory architecture — a held closure can
+  never be re-measured, so it enters as a stale constraint. The bundle-to-bundle
+  registration primitive it required (a stored anchor-frame segment plugs straight into
+  the matcher's rotate/translate path) is sound and reusable; the closure paradigm is
+  not.
+- **The wall on real appearance** (`scratch_components.py`, verification rung; a
+  dependency-ordered component ladder that climbs each component from easy-synthetic to
+  a real benchmark subset). As a synthetic twin is morphed toward a geometric copy the
+  coherence discriminator does not merely go blind — its AUC *inverts below 0.5*: a
+  geometric twin out-coheres a genuine revisit, because the real revisit carries the
+  viewpoint change the twin does not. Viewpoint-invariance and twin-rejection are in
+  direct tension. On a real Intel subset this is concrete: genuine revisits (204 pairs,
+  median coherence 0.238) sit above different-place pairs (median 0.093) on average
+  (AUC 0.82), but a **4.6% aliased tail** of different-place pairs out-coheres the
+  median genuine revisit, and those twins **outnumber the genuine revisits ~7:1** — no
+  coherence threshold admits the revisits without admitting the twins. The corridor /
+  cross-session wall, measured directly from the appearance side.
+
 ---
 
 ## 6. The frontend do-no-harm gap (a second irreducible limit)

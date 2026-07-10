@@ -3364,3 +3364,130 @@ verification axis and NOT a wall-breaker -- consistent with the campaign
 conclusion. Not worth a real-log build for the single-closure case; the only part
 worth revisiting is set-level global consistency, and only if pairwise PCM is
 observed to admit a jointly-inconsistent cluster.
+
+
+## 2026-07-09 — Extended-overlap consensus closure (negative) + dependency-ordered component ladder (synthetic→real)
+
+### Extended-overlap consensus closure — TESTED, CLEAN NEGATIVE
+User idea: close only after generating a significant *overlap* of the two loop
+ends, match them n-to-n, joint-solve the alignment, then lerp the correction.
+`scratch_overlap.py` / `scratch_overlapslam.py` (no shipped module edited; the
+subclass intercepts the parent's full-confidence admission).
+
+- **Core discriminator VALID in isolation** (`scratch_overlap.py`): genuine vs a
+  POINT-TWIN — single-point coherence is IDENTICAL (0.962/0.962, provably blind)
+  while n-to-n consensus separates them 1.00 vs 0.00.
+- **Every full-SLAM integration HURTS BOTH regimes** (sanity: min_agree=0 ==
+  shipped 1.881 EXACT, so not a bug):
+  - temporal-hold: fr101 1.88→3.0 — STALE constraints (bounded memory can't
+    re-measure a held closure; batch-release jerks the graph);
+  - spatial hard-gate (bundle-to-bundle registration, staleness-free): fr101 3.0,
+    intel 2.44→4.94 — rejection rolls back the drift clock → loosens the
+    innovation gate → FLOODS 80→136 loops;
+  - spatial soft-weight: fr101 3.14, intel 5.83.
+- **Two principled walls.** (1) a brief GENUINE revisit has few overlapping recent
+  anchors → low corroboration → indistinguishable from a point-twin (hurts dense-
+  revisit fr101); (2) in real aliased envs the closures that DO corroborate are the
+  EXTENDED-symmetry aliases (corridors) while brief-genuine don't → corroboration
+  is ANTI-correlated with correctness (soft up-weights the twins). The verification
+  wall from a new angle. The bundle-to-bundle registration primitive (segvec is
+  anchor-frame → plugs straight into the Matcher's rotate/translate path; segder =
+  coarse half-step) works and is reusable.
+
+### Dependency-ordered component ladder, synthetic→real
+User directive: every component by dependence, in synthetic envs with increasing +
+component-specific complications, progressing to REAL benchmark subsets at the top
+rung. `scratch_components.py` (roots/mid/upper/real/interp) + `scratch_realbench.py`
+(real-lidar frontend registration bench: gfs poses as GT, register each scan vs its
+gfs-posed neighbourhood — isolates the frontend from the closure-admission confound
+that dominates ATE; anti-oracle: gfs only places the submap / seeds the offset /
+scores).
+
+- **Roots.** encoding robust to noise ~½ the finest λ (real margin 0.89, diff-place
+  floor higher 0.106 vs synth 0.053 = real is more self-similar); translation
+  capture = `t_half`=0.48 exactly; rotation derivative is N_ANG-dependent and
+  CROSSES OVER (hurts coarse −0.075@N30, helps fine +0.020@113, marginal on real
+  where noise erodes it); bundling FHRR capacity synth ~4-8 (repetitive room is
+  pessimistic) but real ~8-16 → validates `ANCHOR=5`.
+- **Mid.** multi-scale: the fixed lattice is scale-robust (cm precision across
+  3–96 m extent); registration robust to 50% partial-overlap + 20% clutter (clutter
+  is the one frontend weakness — the correlation sums all points, no outlier
+  rejection).
+- **Upper.** verification WALL quantified: synth AUC *inverts* below 0.5 for twin-
+  similarity s≥0.5 (a geometric twin out-coheres a genuine revisit, which carries
+  viewpoint change the twin doesn't → viewpoint-invariance and twin-rejection in
+  direct tension); real intel AUC 0.82 average BUT a 4.6% aliased tail out-coheres
+  the median genuine revisit and OUTNUMBERS the 204 genuine revisits ~7:1 — no
+  coherence threshold separates them. backend relax absorbs ≤10% aliased outliers
+  flat (ATE 6.8→6.5 cm, IRLS downweight, 0 hard-prune).
+- **Per-component synthetic→real (frontend elements).** N_ANG 113 CONFIRMS (real
+  registration 19–32% better than 60, saturates ~89–113); scales REVERSED (real
+  prefers 3–4 octaves; more scales add clutter noise and HURT: intel 3/4/5-oct →
+  0.044/0.053/0.059); thermometer DOESN'T transfer (real off best — local reg
+  doesn't exercise range-gating); capture `t_half`=0.48 adequate.
+- **META-FINDING (the payoff):** synthetic misleads DIFFERENTLY per component —
+  OPTIMISTIC on richness (scales/thermo/derivative), PESSIMISTIC on capacity
+  (bundling), and UNDERSTATES the discrimination floor (verification is worse on
+  real). No single "synth easier/harder" rule; each component needs its own real
+  validation. Real-validated LEAN frontend: **N_ANG=113, 3–4 oct, thermo off,
+  t_half 0.48, segder marginal at 113 (droppable candidate)**. Frontend is
+  registration-saturated (2–5 cm); the remaining real-ATE lever is closure
+  admission — which the coherence gate re-tuning test below probes.
+
+### N_ANG=113 end-to-end: the frontend gain is NON-deployable (coherence gate has zero purchase)
+`scratch_cohsweep113.py` — sweep `coh_target` at 113 on fr101 vs shipped 60/0.55:
+
+    fr101 SHIPPED 60/0.55 : ATE 1.881  med 1.551  53 loops
+    fr101 113/0.45        : ATE 4.227  med 1.589  83 loops
+    fr101 113/0.55        : ATE 4.227  med 1.588  85 loops
+    fr101 113/0.65        : ATE 4.227  med 1.587  85 loops
+    fr101 113/0.80        : ATE 4.228  med 1.593  83 loops
+
+ATE is FLAT at 4.227 across *every* coh_target — the gate has zero effect. The
+median (1.59) matches shipped (1.55), so 113's FRONTEND is healthy; the RMSE blowup
+is the ~30 extra closures the finer angular sampling admits, and they are COHERENT
+ALIASED TWINS (the 4.6% tail from the verification rung) that sit *above* any
+coherence threshold — the verification wall, invariant to the gate. **Verdict:
+113's real registration gain does NOT deploy to ATE.** The coarser shipped 60-lattice
+is ATE-optimal precisely because coarser angular sampling forms fewer spurious
+coherent matches — it is a natural twin-suppressor. There is a FRONTEND-PRECISION vs
+TWIN-ADMISSION tradeoff, and 60 favors the ATE-dominant closure robustness. So 113
+is a representation / quantization improvement (better registration, leaner, more
+rotationally smooth), NOT an ATE improvement — adopt it only where the goal is the
+representation, not the deployed benchmark. This is the whole synthetic→real
+campaign's end-to-end closure: the frontend is real-validated and improvable, but
+ATE is closure-wall-limited and *invariant to frontend quality*.
+
+### Quantization headroom + segder-drop at N_ANG=113 (`scratch_quant.py`)
+Representation-track work (the lean 113 config exists to be quantized).
+
+- **segder-drop is free / better at 113.** Storage-path rotation registration
+  (store a scan in anchor frame, reconstruct the world map at the anchor's sub-grid
+  heading, register a query): permute-only med 0.0001 vs permute+derivative 0.0046.
+  At the fine 113 lattice the matcher's own rotation search covers the ≤0.8° sub-grid
+  offset exactly, so the first-order derivative only injects O(d²) noise into the
+  stored map. The N_ANG crossover from the component ladder, cashed out: the
+  derivative earns its keep at coarse 60 (3°/step) but is dead weight at 113 →
+  **drop `segder`, half the phasor count** (needs an end-to-end relax-time check to
+  bank; static evidence is strong).
+- **Polar multi-bin phasor beats Cartesian at every bit budget** (real intel subset,
+  3-oct 113; reg median / coh-fidelity):
+
+      full complex128        128b  0.0036 / 1.000
+      cartesian 3+3            6b  0.0045 / 0.955
+      polar 16phase x 4mag     6b  0.0040 / 0.972   <- best
+      cartesian 2+2            4b  0.0058 / 0.863
+      polar 8phase x 2mag      4b  0.0046 / 0.906
+      phase-only 8             3b  0.0045 / 0.768
+
+  Quantizing PHASE (bins) + MAGNITUDE (levels) — "mag instead of sin/cos" — beats
+  quantizing (real, imag) at matched bits on BOTH registration and coherence, because
+  the SSP correlation is a phase inner product so polar aligns with the native
+  structure while Cartesian spends bits fighting it. Sweet spot **16phase x 4mag =
+  6 bits/phasor** = near-full registration + 0.97 coherence. Phase-only (2-3 b) is
+  excellent for registration but sheds the magnitude closure coherence needs.
+- **Combined:** segder-drop (2x) x polar-6-bit (~10x vs the shipped complex64's 64
+  b/phasor) ≈ **20x smaller map** than the current deliverable, at cm registration
+  and 0.97 coherence fidelity — a concrete advance on the bounded-memory thesis.
+  NEXT: end-to-end confirm (segder-drop + polar-6bit map through the full pipeline —
+  ATE + closure recall vs shipped).
