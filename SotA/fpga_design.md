@@ -30,6 +30,15 @@ SPOT-mounted custom head: **360° × 1024 beams @ 20 rotations/s**
   smear/rev): de-skew each revolution against the odometry twist before
   encoding (host-side, cheap). Untested here — flag for the integration
   session.
+- **FIRST CONTACT (Telluride workshop set, 2026-07-10)**: lidar-only (CV
+  guesses, odometry withheld as reference), 78 s / 36.5 m / 7×7 m room:
+  **float 0.039 ≡ lean 2-bit+int8 0.039 ATE (med 3.3–3.5 cm) at 14 KB
+  map** — the full binary datapath reproduces float on the platform's own
+  data at the reference's noise floor. Frontend window can shrink
+  0.48→0.12 m with bit-identical outcomes at this motion regime (compute
+  knob, not accuracy). Adapter lesson for the integration session: sort
+  and hygiene-check the odometry stream (the workshop parquet carried a
+  ~62 s out-of-order block).
 
 ## System split
 

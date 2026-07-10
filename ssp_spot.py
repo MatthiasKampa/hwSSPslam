@@ -94,15 +94,29 @@ def make_bundle(stride=STRIDE):
     ots = np.array(o["timestamp_ns"])
     oxy = np.stack([np.array(o["x"]), np.array(o["y"])], 1)
     oyaw = _yaw(*(np.array(o[k]) for k in ("qx", "qy", "qz", "qw")))
+    # the parquet is NOT time-sorted (a ~62 s block sits out of order and
+    # teleported 3 keyframes' GT by 3.6 m) — sort before any lookup
+    srt = np.argsort(ots, kind="stable")
+    ots, oxy, oyaw = ots[srt], oxy[srt], oyaw[srt]
     j = np.clip(np.searchsorted(ots, ts[keys_idx]), 0, len(ots) - 1)
     gt = np.stack([oxy[j, 0], oxy[j, 1], oyaw[j]], 1)
+    # belt-and-suspenders GT hygiene: mask physically impossible reference
+    # steps (> 0.5 m between ~0.2 s keyframes) from eval + display
+    step = np.linalg.norm(np.diff(gt[:, :2], axis=0), axis=1)
+    gt_ok = np.ones(len(gt), bool)
+    bad = np.flatnonzero(step > 0.5)
+    for i in bad:
+        gt_ok[max(0, i):i + 2] = False
+    if not gt_ok.all():
+        print(f"  spot GT hygiene: masked {int((~gt_ok).sum())} keyframes "
+              f"(impossible reference steps)", flush=True)
     beam = -np.pi + np.arange(N_BEAM) * (2 * np.pi / N_BEAM)
     keys = [(ranges[i], gt[k].copy(), ts[i] / 1e9)
             for k, i in enumerate(keys_idx)]
     return dict(name="spot", kind="spot", eval="exact", path=str(CACHE),
                 keys=keys, beam=beam, odom=gt.copy(),
                 kts=ts[keys_idx] / 1e9, rmin=R_MIN, rmax=R_MAX, gt=gt,
-                guess_mode="cv")
+                gt_ok=gt_ok, guess_mode="cv")
 
 
 def run_cv(cls=F.BandSLAM, sample="point", stride=STRIDE, use_odom=False,

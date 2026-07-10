@@ -87,21 +87,26 @@ ATE rmse vs RBPF-corrected references; `ssp_bounded_carmen.py <log>`:
 
 | log | ours | raw odometry | map memory | speed |
 |---|---|---|---|---|
+| **SPOT Telluride (target platform, 1024 beams @ 20 Hz, lidar-only¹)** | **0.039 m** (median 3.3 cm; **binary 2-bit+int8: 0.039 at 14 KB**) | — (withheld) | 354 KB / **14 KB** | — |
 | **MIT Stata (floorplan GT, 260° × 1040 beams)** | **0.202 m** (median 0.12; bridged sampler 0.196) | 3.21 m | 1.2 MB | 88 ms/kf |
 | FHW exhibition hall | **0.98 m** (median 0.84) | — | 5.2 MB | 33 ms/kf |
 | Freiburg 101 (held-out) | **1.88 m** (median 1.55) | 8.56 m | 1.9 MB | 27 ms/kf |
 | Freiburg 079 (no retune) | 5.52 m | 14.4 m | 3.5 MB | 30 ms/kf |
 | Belgioioso Castle (held-out) | 2.64 m (hex lattice 2.07) | 1.72 m | 1.6 MB | 27 ms/kf |
 | ACES3 Austin (no retune) | 6.21 m | 5.41 m | 5.3 MB | 13 ms/kf |
-| Intel Research Lab (historical¹) | 2.44 m (median 1.55) | 24.2 m | 5–8 MB | 15–17 ms/kf |
+| Intel Research Lab (historical²) | 2.44 m (median 1.55) | 24.2 m | 5–8 MB | 15–17 ms/kf |
 | MIT Infinite Corridor, 1.9 km (held-out) | 42.66 m (38–58 band) | 189 m | 27 MB | 12–21 ms/kf |
 
-¹ intel was removed from the acceptance suite 2026-07-10 (knife-edge
+¹ SPOT protocol: the pipeline runs **lidar-only** (constant-velocity
+guesses from its own estimates); the robot's 528-Hz kinematic odometry is
+withheld from the system and used as the reference — the reported 0.039 m
+is agreement with that reference at its own noise floor (78 s / 36.5 m
+first workshop session; longer sessions to come).
+² intel was removed from the acceptance suite 2026-07-10 (knife-edge
 perturbation band, GMapping-referenced GT, 180° FOV vs the 360° target
-platform); the number is kept for history. **Stata is the flagship: its
-ground truth is floorplan-anchored (~2–3 cm), independent of any SLAM
-family, and its 1040-beam 260° sensor is the closest proxy to the SPOT
-target head.**
+platform); the number is kept for history. Stata's ground truth is
+floorplan-anchored (~2–3 cm), independent of any SLAM family, and its
+1040-beam 260° sensor is the closest public proxy to the target head.
 
 *Transfer caveat:* Intel/fr079/ACES are **not** held out — the shipped config was
 selected by minimizing the worst-of-three ATE ratio over those three, so they are

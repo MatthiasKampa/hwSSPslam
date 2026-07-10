@@ -4531,3 +4531,27 @@ the sampler/lattice/search knobs don't bind at 7×7 m). The RMSE tail
 with-odom diagnostic bounds it at 0.041). Config for the demo: shipped
 lattice, bridged pairs, stride 4. Webvis: spot float + FPGA-lean replays
 exported into the pack (reference track = the withheld odometry).
+
+### SPOT jumps diagnosed: a GT artifact (unsorted odometry parquet), not the estimator; window hypothesis tested and refuted
+User observed "long jumps/jitters" in the spot replay and proposed the
+local search space as the cause. Census (worst |est-step − gt-step|
+frames): kf 79–82 show the REFERENCE teleporting 3.5–3.8 m away and back
+in ~0.6 s while the estimate steps 4–12 cm — and the odometry stream's
+file order carries a ~62 s block with out-of-order timestamps (file-order
+sample dt +62,614 ms at t=15.8 s, −66,884 ms at t=82.7 s); the adapter's
+searchsorted assumed sorted times and pulled poses from the misplaced
+block for 3 keyframes. Those 3 frames were the entire RMSE gap
+(√(3·3.7²/414) ≈ 0.31 of the 0.315). Fix: sort odometry by timestamp in
+make_bundle + a physical-step hygiene mask (>0.5 m per ~0.2 s keyframe →
+masked from eval and the webvis reference track; after sorting the mask
+fires zero times). Window sweep (t_half 0.48→0.12, rot 9→3°): ALL
+IDENTICAL pre-fix (max err 3.79 in every row) — the matcher never used
+the extra room; windows can be shrunk freely for compute, they were not
+the jump source.
+
+**Post-fix (lidar-only, GT = withheld sorted odometry): float 0.039 /
+LEAN 2-bit+int8 0.039 ATE — medians 3.3/3.5 cm, max 12–13 cm, 22 loops,
+14 KB binary map.** The lidar-only estimate now agrees with SPOT's own
+kinematic odometry at the level of the earlier with-odometry diagnostic
+(0.041) — i.e., at the reference's own noise floor. Remaining "jitters"
+are the cm-scale frame noise (p99 ~0.10–0.12).

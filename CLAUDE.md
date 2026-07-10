@@ -52,10 +52,11 @@ re-litigate this without new information — see `FINDINGS.md` §5–§6.
 python3 ssp_bounded_carmen.py data/fr101.log        # build + ATE vs .gfs.log
 python3 ssp_datasets.py run stata                   # flagship (floorplan GT)
 ```
-**Acceptance suite (2026-07-10 redirect; see PROTOCOL):** stata 0.202
-(floorplan GT — the target proxy; platform = SPOT, 360° × 1024-beam head @
-20 Hz), fr101 1.88, fhw 0.98, fr079 5.52 (read as a band), belg 2.64, plus
-the synthetic 360° bench (`ssp_synth.py`). **intel was REMOVED from the
+**Acceptance suite (2026-07-10 redirect; see PROTOCOL):** spot 0.039
+(TARGET PLATFORM, lidar-only vs withheld odometry — `ssp_spot.py`), stata
+0.202 (floorplan GT — the public proxy; platform = SPOT, 360° ×
+1024-beam head @ 20 Hz), fr101 1.88, fhw 0.98, fr079 5.52 (read as a
+band), belg 2.64, plus the synthetic 360° bench (`ssp_synth.py`). **intel was REMOVED from the
 suite** (knife-edge band, GMapping-referenced GT, 180° FOV) — do not tune
 or accept against it; its historical numbers stay in the ledger. Baselines
 (same harness): ICP 1.70 / CSM 3.27 / RBPF 0.12* (intel-era). Encoder
