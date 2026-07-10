@@ -144,7 +144,7 @@ a{color:var(--blue)}
   <div class="ctl sb-only">
     <h3>Drive (sandbox)</h3>
     <div class="row">
-      <label><input type="checkbox" id="cAuto" checked> autopilot</label>
+      <label><input type="checkbox" id="cAuto"> autopilot</label>
       <input type="range" id="cSpeed" min="0.4" max="2.0" step="0.1" value="1.1">
       <span class="val" id="vSpeed">1.1 m/s</span>
     </div>
@@ -159,7 +159,12 @@ a{color:var(--blue)}
     </div>
     <div class="row" style="margin-top:4px">
       <button id="bPause">Pause</button>
-      <button id="bReset">Reset map</button>
+      <button id="bReset">Reset</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label title="Range-gate the encoding: short rays write all 6 scales (full), long rays (larger relative noise) write only the coarse scales, down to a floor of 3. Off = every ray writes all 6 scales regardless of range."><input type="checkbox" id="cGate" checked> distance thermometer</label>
+      <label title="One phasor per raw beam return, weight = r*dtheta (scaled by distance), instead of dense arc-length resampling of the wall segments. Off = surface integral."><input type="checkbox" id="cPoint"> point encoding</label>
+      <label title="Hexagonal SSP: ~same total dimension as polar, but each scale is a prime~nAng/3 (=37) set of hexagonal triplets (3 waves 120deg apart) spread over the FULL circle = isotropic grid-cell coverage, instead of the polar half-circle + conjugate. Prime base = no rotational moire; rotation stays an exact permutation."><input type="checkbox" id="cHex"> hex SSP</label>
     </div>
     <div class="row" style="margin-top:6px">
       <label>odom prior &gamma;
@@ -171,7 +176,7 @@ a{color:var(--blue)}
         <input type="range" id="cOdoN" min="0" max="1.0" step="0.05" value="0.3">
         <span class="val" id="vOdoN">0.30</span></label>
     </div>
-    <div class="hint" title="MAP fusion at the matcher: gamma>0 makes the guess the odometry prediction and penalises the lidar correlation by distance-squared from it (accepted pose = argmax [ lidar likelihood - gamma*peak*d^2/win^2 ] = lidar x odometry prior). A STRONG lidar peak still overrides it; a weak/ambiguous match defers to odometry. Turn odom NOISE up to enter the drift regime: a fixed gamma then drags the estimate onto the bad odometry — the regime-dependence measured on the real logs (helps good odometry, hurts drifting odometry).">Arrow keys steer (switches to manual). <b>Odometry fusion</b>: &gamma; pulls the match toward the gray odometry prediction (likelihood &times; prior). Low noise + &gamma; &rarr; tight; high noise + &gamma; &rarr; the estimate follows the drift — the do-no-harm tradeoff, live.</div>
+    <div class="hint" title="MAP fusion at the matcher: gamma>0 makes the guess the odometry prediction and penalises the lidar correlation by distance-squared from it (accepted pose = argmax [ lidar likelihood - gamma*peak*d^2/win^2 ] = lidar x odometry prior). A STRONG lidar peak still overrides it; a weak/ambiguous match defers to odometry. Turn odom NOISE up to enter the drift regime: a fixed gamma then drags the estimate onto the bad odometry — the regime-dependence measured on the real logs (helps good odometry, hurts drifting odometry)."><kbd>Space</kbd> takes over the robot (autopilot &harr; manual); <kbd>WASD</kbd> to drive. <b>Odometry fusion</b>: &gamma; pulls the match toward the gray odometry prediction (likelihood &times; prior). Low noise + &gamma; &rarr; tight; high noise + &gamma; &rarr; the estimate follows the drift — the do-no-harm tradeoff, live.</div>
   </div>
   <div class="ctl in-only">
     <h3>Replay (Intel log)</h3>
@@ -182,78 +187,12 @@ a{color:var(--blue)}
     <div class="hint" title="FINDINGS section 3: the analytic first-order Lie correction is load-bearing — 60 angles + derivative beats 120 angles without it (Intel 2.44 vs 7.93 m) at half the matcher compute. Off: query rotation falls back to nearest-3-deg lattice permutation only; watch the estimate degrade as sub-grid headings are absorbed by matcher slack.">Ablation: OFF drops the sub-grid rotation term (permutation-only). Derivative is load-bearing — expect the yellow estimate to degrade.</div>
     <div class="hint"><b>NO ODOMETRY</b>: the matcher guess is constant-velocity prediction from previous <i>estimates</i> only (odometry integration comes later); gate-rejected frames coast on that prediction with inflated seq-edge sigma. Otherwise the full <b>bounded-memory stack</b> (<code>ssp_bounded.py</code>, shipped config at the dense 0.05 m/2.5&deg; stride): rigid anchor-frame segment vectors + d/d&theta; derivatives (query rotation = exact permutation + first-order correction), recency-windowed frontend (24 anchors / 8 m; rotation window widened 9&rarr;12&deg; for the odometry-free guess), pass-segregated loop constraints (gap 600 kf, radius 5 m), session-relative soft coherence response (target 0.55), drift-scaled innovation gate (&chi;&sup2;&gt;9), Cauchy IRLS + leave-one-out pruning, damped Gauss-Newton with analytic SE(2) Jacobian capped at ~30 evaluations — the early stop IS the regularizer. Relaxations are amortized across frames ("relaxing graph…").</div>
   </div>
-  <div class="ctl">
-    <h3>Range gating</h3>
-    <div class="row">
-      <label><input type="checkbox" id="cGate" checked> gate</label>
-      <span style="color:var(--muted)">&beta;</span>
-      <input type="range" id="cBeta" min="1" max="6" step="0.5" value="3">
-      <span class="val" id="vBeta">3.0</span>
-    </div>
-    <div class="hint">A sample at range r writes ring &lambda; only if &lambda; &ge; &beta;&middot;r&middot;&Delta;&theta;. This is a rule for <i>world-frame map sums</i> (R1 law) — live in the <b>sandbox</b> map writes. On the Intel tab the shipped segment folds are deliberately UNGATED (rigid anchor-frame segments have no cross-pass aliasing; gating the fold costs 9.2&rarr;14 cm, R2), so there the toggle drives the ray coloring + write-disc visualization of what a tiered world-frame map would receive.</div>
-  </div>
-  <div class="ctl">
-    <h3>Scale ladder</h3>
-    <div class="row">
-      <select id="cLadder">
-        <option value="oct" selected>octaves — 0.25 / 0.5 / 1 / 2 m</option>
-        <option value="phi">golden ratio — 0.25·&phi;<sup>k</sup></option>
-      </select>
-    </div>
-    <div class="hint">Finding 7: &phi; is the <i>additive</i>-resonance ratio (&phi;&sup2;=&phi;+1) — ring-magnitude difference-beats (|w<sub>i</sub>|&minus;|w<sub>j</sub>|=|w<sub>m</sub>|) put sidelobes in the radial correlation kernel. The hazard is <i>environment-coupled</i>: flat walls (sandbox) expose the beats along wall normals — watch drift jump — while on cluttered Intel geometry the extra scale density can even win (measured on this subset: octaves 2.0 m ATE vs &phi; 0.14 m with 2.3&times; the closures); both halves are in finding 7. Ladder = 0.25&middot;&phi;<sup>k</sup>, same [0.25, 2] band, 5 rings. Octaves sit on the safe r&asymp;1.4–2.8 plateau. Switching resets the map.</div>
-  </div>
-  <div class="ctl">
-    <h3>Occlusion filter</h3>
-    <div class="row">
-      <label><input type="checkbox" id="cOcc" checked> reject |&Delta;r| &gt; 2&times;tangential gap</label>
-    </div>
-    <div class="hint">Finding 8: kills phantom bridges across depth discontinuities (red segments). Off: the bridges are encoded — phantom walls grow in the decoded map. (The naive |&Delta;r|&gt;2|&Delta;p| can never fire — reverse triangle inequality.)</div>
-  </div>
-  <div class="ctl sb-only">
-    <h3>Sensor noise (sandbox)</h3>
-    <div class="row">
-      <span style="color:var(--muted)">&sigma;</span>
-      <input type="range" id="cSigma" min="0" max="0.08" step="0.005" value="0.02">
-      <span class="val" id="vSigma">2.0 cm</span>
-    </div>
-    <div class="row">
-      <span style="color:var(--muted)">drop</span>
-      <input type="range" id="cDrop" min="0" max="0.20" step="0.01" value="0.02">
-      <span class="val" id="vDrop">2%</span>
-    </div>
-    <div class="hint">Shipped sim: &sigma;=2 cm, 2% dropout. Finding 5: &lambda;<sub>min</sub> ~ noise scale — crank &sigma; past the 0.25 m ring's usefulness and fine registration degrades.</div>
-  </div>
-  <div class="ctl">
-    <h3>Lattice angles</h3>
-    <div class="row">
-      <select id="cAng">
-        <option value="12">12 angles / ring (D=48)</option>
-        <option value="24" selected>24 angles / ring (D=96)</option>
-        <option value="36">36 angles / ring (D=144)</option>
-      </select>
-    </div>
-    <div class="hint">Sandbox only — the Intel pipeline runs the shipped 4&times;60 lattice (D=240) throughout. Finding 6: angle density is environment-coupled — long flat walls only excite frequencies near their normals; 24 (7.5&deg; spacing) is the knee in rotated worlds. Switching resets the sandbox map.</div>
-  </div>
 </div>
 
-<div class="why">
-  <details>
-    <summary>What am I looking at?</summary>
-    <ul>
-      <li><b>The map is a handful of complex vectors</b> (D=96 features by default), not an occupancy grid. Each lidar sample point p contributes a phasor bundle &phi;(p)=exp(i&thinsp;W&thinsp;p); a map vector is the weighted sum of many of them. W is a deterministic <b>polar lattice</b>: wavelength rings (0.25/0.5/1/2 m octaves) &times; 24 equally spaced angles — the winning recipe of the encoder sweep in <code>RESULTS.md</code> (0.9 cm mean error at 1/21 the dimensions of random Fourier features).</li>
-      <li><b>Translation is phase multiplication</b>: &phi;(p+d) = e<sup>iWd</sup>&middot;&phi;(p). Scan-to-map registration is the correlation Re&lt;M, e<sup>iWd</sup>S<sub>&theta;</sub>&gt; on a coarse-to-fine grid of (&theta;, d) around a motion-prior guess — the small heatmap is that surface, live, with parabolic sub-cell refinement.</li>
-      <li><b>Rotation is an exact permutation</b> of the lattice's angle index (conjugate on the 180&deg; sector wrap), so coarse &theta; candidates cost two encodes total instead of one per angle — the trick shipped as the "perm matcher" in <code>ssp_bounded.py</code>.</li>
-      <li><b>Intel replay</b>: the classic Intel Research Lab log (13,631 SICK scans, 180 beams / 180&deg;) keyframed densely at 0.05 m / 2.5&deg; and run <b>without odometry</b> — the matcher guess is constant-velocity prediction from previous estimates, so the yellow trajectory is lidar-only — through the full <b>bounded-memory SLAM stack</b> (<code>ssp_bounded.py</code>): each keyframe folds immediately into a rigid anchor-frame <b>segment vector + d/d&theta; derivative vector</b> (5-kf segments; query-time anchor rotation = nearest-3&deg; lattice permutation + first-order derivative correction — HY4 matched-band semantics, D=240); the frontend matches recent segments only; old passes act through gated loop constraints; an anchor pose graph (sequential edges 0.03 m/0.3&deg;, 0.10/1.5 on coasted spans) is relaxed by damped Gauss-Newton with an analytic SE(2) Jacobian, Cauchy IRLS and leave-one-out pruning, capped at ~30 evaluations per solve — the truncation is the audited load-bearing regularizer. Gray = raw odometry (drift comparison only, never used), yellow = graph-corrected SSP estimate, green = RBPF-corrected reference, magenta = accepted closures. The "ate rmse" tile is Horn-aligned against the reference, matching the Python eval (<code>align_se2</code>); the green overlay and the instantaneous "est err"/"odom err" tiles use the same alignment (the export's first-pose anchoring carries a ~7&deg; heading error that would rotate the overlay misleadingly).</li>
-      <li><b>Range gating</b>: at range r the beam spacing &Delta;&theta; under-samples wavelengths finer than &asymp;r&middot;&Delta;&theta;, so far samples only write the coarse rings (&lambda; &ge; &beta;r&Delta;&theta;) of the map. The disc panel shows each frame's write pattern — fine (outer) rings blank out for far geometry. Matching stays ungated (R2: gating the matched band costs accuracy).</li>
-      <li><b>Occlusion filter</b>: consecutive-beam hits are bridged into wall segments unless the range jump exceeds 2&times; the tangential gap — near-radial "bridges" (red) are phantom walls across depth edges, not surfaces.</li>
-      <li><b>Decode panel</b>: a map vector is decoded by correlating M with &phi;(x) on a grid — the map "emerging" is literally interference of the stored phasors.</li>
-    </ul>
-  </details>
-</div>
 
 <footer>
   Controls — Intel tab: <kbd>Space</kbd> play/pause &middot; scrub bar seeks (backward seek replays from the start) &middot; speed = keyframes per rendered frame.
-  Sandbox tab: <kbd>&uarr;</kbd><kbd>&darr;</kbd> speed, <kbd>&larr;</kbd><kbd>&rarr;</kbd> steer (switches to manual) &middot; <kbd>A</kbd> autopilot &middot; <kbd>Space</kbd> pause &middot; <kbd>R</kbd> reset map.
+  Sandbox tab: <kbd>Space</kbd> take over &harr; autopilot &middot; <kbd>W</kbd><kbd>S</kbd> drive, <kbd>A</kbd><kbd>D</kbd> steer &middot; <kbd>P</kbd> pause &middot; <kbd>R</kbd> reset.
   Append <code>?test=1</code> to run the built-in self-tests (shift = phase multiply, rotation = lattice permutation, occlusion identity, range gating, end-to-end matcher, SE(2) composition, pose-graph solver, segment fold + derivative correction, embedded-data integrity).
   Faithful JS port of <code>ssp_slam.py</code> (encoder/matcher) + <code>ssp_slam_loop.py</code> (ring-major lattice, rot_permute) + <code>ssp_bounded.py</code>/<code>ssp_bounded_carmen.py</code> (segments, coherence response, innovation gate, IRLS/LOO backend, shipped config); findings cited from <code>RESULTS.md</code>.
   Data: <code>data/intel.log</code> (Radish / StachnissLab, D. Haehnel), embedded by <code>demo/export_data.py</code>.
@@ -308,55 +247,78 @@ for (let i = 0; i <= TABN; i++){ CT[i] = Math.cos(i * TAU / TABN); ST[i] = Math.
 
 /* ---------------------------------------------------------------- lattice */
 const LADDERS = {
-  oct: [0.25, 0.5, 1.0, 2.0],                    // shipped octaves
-  // finding-7 hazard: ratio = phi inside the same [0.25, 2] band as the
-  // ring-ratio study (0.25 * phi^k, k=0..4 -> coarsest 1.71 m)
-  phi: [0.25, 0.25 * PHI, 0.25 * PHI ** 2, 0.25 * PHI ** 3, 0.25 * PHI ** 4],
+  oct: [0.05, 0.1, 0.2, 0.4, 0.8, 1.6],          // 6 fixed octave scales, 5 cm .. 1.6 m
 };
 
-function makeLattice(lams, nAng){
-  // ring-major, angles j*pi/nAng per ring — exactly build_W in ssp_slam_loop.py
-  const nRing = lams.length, D = nRing * nAng;
-  const ux = new Float64Array(nAng), uy = new Float64Array(nAng);
-  for (let j = 0; j < nAng; j++){
-    const a = j * Math.PI / nAng; ux[j] = Math.cos(a); uy[j] = Math.sin(a);
+function nearestPrime(x){
+  const isP = n => { if (n < 2) return false;
+    for (let i = 2; i*i <= n; i++) if (n % i === 0) return false; return true; };
+  x = Math.round(x);
+  for (let d = 0; ; d++){ if (isP(x - d)) return x - d; if (isP(x + d)) return x + d; }
+}
+// HEX SSP: a STRUCTURED isotropic lattice at ~the SAME TOTAL size as the polar one.
+// Each scale is hexagonal TRIPLETS: a prime ~ nAng/3 base orientations (e.g. 37 for
+// nAng=113), each expanded to 3 waves 120deg apart (the grid-cell generators), giving
+// 3*prime ~ nAng directions spread EQUALLY over the FULL circle [0, 2pi) — vs the polar
+// lattice's nAng directions over the half-circle [0, pi) plus a conjugate wrap. ~Same
+// dimension (nRing*nA ~ polar D), prime base => incommensurate (no rotational moire),
+// 120deg triplets => hexagonal (grid-cell) symmetry. Rotation is still an EXACT index
+// permutation (shift by 2pi/nA). hex=false reproduces the polar lattice bit-for-bit.
+function makeLattice(lams, nAng, hex){
+  const nA = hex ? 3 * nearestPrime(nAng / 3) : nAng;   // 3 waves x (prime ~ nAng/3)
+  const span = hex ? TAU : Math.PI;                 // full circle vs half circle
+  const nRing = lams.length, D = nRing * nA;
+  const ux = new Float64Array(nA), uy = new Float64Array(nA);
+  for (let j = 0; j < nA; j++){
+    const a = j * span / nA; ux[j] = Math.cos(a); uy[j] = Math.sin(a);
   }
   const freq = new Float64Array(nRing);
   for (let k = 0; k < nRing; k++) freq[k] = TAU / lams[k];
   const wx = new Float64Array(D), wy = new Float64Array(D);
   for (let k = 0; k < nRing; k++)
-    for (let j = 0; j < nAng; j++){ wx[k*nAng+j] = freq[k]*ux[j]; wy[k*nAng+j] = freq[k]*uy[j]; }
-  return { lams: lams.slice(), nAng, nRing, D, ux, uy, freq, wx, wy };
+    for (let j = 0; j < nA; j++){ wx[k*nA+j] = freq[k]*ux[j]; wy[k*nA+j] = freq[k]*uy[j]; }
+  return { lams: lams.slice(), nAng: nA, nRing, D, ux, uy, freq, wx, wy, hex: !!hex };
 }
 
-/* number of rings a sample at range r writes (gating rule: lam >= beta*r*dth) */
+/* Distance-based thermometer (SMOOTH). Instead of a hard in/out, each ring's write
+   weight FADES linearly with range: weight = clamp(2 - beta*r*dtheta / lambda, 0, 1)
+   — fully written (=1) while the beam spacing r*dtheta still resolves lambda, then a
+   linear fade to 0 over one octave (lambda .. 2*lambda) as the threshold crosses it
+   and it would start to alias. Short rays keep every ring; the MIN_SCALES coarsest
+   never fade, so far geometry always keeps its coarse structure. ringsWritten returns
+   the (now fractional) effective ring count. */
+const MIN_SCALES = 3;
+function ringGate(lam, thr){ return Math.max(0, Math.min(1, 2 - thr / lam)); }
 function ringsWritten(L, r, beta, dth){
   if (!(beta < Infinity)) return L.nRing;
-  const thr = beta * r * dth;
-  let kmin = 0;
-  while (kmin < L.nRing && L.lams[kmin] < thr) kmin++;
-  return L.nRing - kmin;
+  const thr = beta * r * dth, kfloor = Math.max(0, L.nRing - MIN_SCALES);
+  let s = 0;
+  for (let k = 0; k < L.nRing; k++) s += (k >= kfloor) ? 1 : ringGate(L.lams[k], thr);
+  return s;
 }
 
-/* weighted phasor bundle: out = sum_i w_i exp(i W p_i), rings gated by range */
+/* weighted phasor bundle: out = sum_i w_i exp(i W p_i), rings SOFT-gated by range */
 function encodeGated(L, xs, ys, ws, rs, n, beta, dth, outRe, outIm){
   outRe.fill(0, 0, L.D); outIm.fill(0, 0, L.D);
   const nAng = L.nAng, nRing = L.nRing, ux = L.ux, uy = L.uy, freq = L.freq, lams = L.lams;
   const gate = (beta < Infinity) && rs != null;
+  const kfloor = Math.max(0, nRing - MIN_SCALES);   // rings >= kfloor never fade
+  const gk = new Float64Array(nRing);
   for (let i = 0; i < n; i++){
     const x = xs[i], y = ys[i], w = ws[i];
-    let kmin = 0;
     if (gate){
-      const thr = beta * rs[i] * dth;
-      while (kmin < nRing && lams[kmin] < thr) kmin++;
-      if (kmin === nRing) continue;
-    }
+      const thr = beta * rs[i] * dth;               // smooth per-ring fade weight
+      for (let k = 0; k < nRing; k++) gk[k] = (k >= kfloor) ? 1 : ringGate(lams[k], thr);
+    } else { gk.fill(1); }
     for (let j = 0; j < nAng; j++){
       const dot = ux[j] * x + uy[j] * y;
-      for (let k = kmin; k < nRing; k++){
+      for (let k = 0; k < nRing; k++){
+        const g = gk[k];
+        if (g <= 0) continue;
         let t = freq[k] * dot * INV_TAU; t -= Math.floor(t);
         const ii = (t * TABN) | 0, idx = k * nAng + j;
-        outRe[idx] += w * CT[ii]; outIm[idx] += w * ST[ii];
+        const wg = w * g;
+        outRe[idx] += wg * CT[ii]; outIm[idx] += wg * ST[ii];
       }
     }
   }
@@ -365,7 +327,15 @@ function encodeGated(L, xs, ys, ws, rs, n, beta, dth, outRe, outIm){
 /* exact rotation by m*pi/nAng: circular shift of the angle index, conjugate on
    sector wrap (rot_permute in ssp_slam_loop.py) */
 function rotPermute(L, sre, sim, m, outRe, outIm){
-  const n = L.nAng, twoN = 2 * n, nRing = L.nRing;
+  const n = L.nAng, nRing = L.nRing;
+  if (L.hex){                                  // full circle: plain index shift, no conjugate
+    for (let j = 0; j < n; j++){
+      let jj = (j - m) % n; if (jj < 0) jj += n;
+      for (let k = 0; k < nRing; k++){ outRe[k*n+j] = sre[k*n+jj]; outIm[k*n+j] = sim[k*n+jj]; }
+    }
+    return;
+  }
+  const twoN = 2 * n;
   for (let j = 0; j < n; j++){
     let jj = (j - m) % twoN; if (jj < 0) jj += twoN;
     const cj = jj >= n, js = cj ? jj - n : jj;
@@ -497,7 +467,7 @@ function simulateScan(walls, pose, rng, p, outRanges){
   for (let b = 0; b < n; b++){
     const a = pose[2] + b * dth + p.jitter * gauss(rng);
     let r = castRay(walls, pose[0], pose[1], Math.cos(a), Math.sin(a));
-    if (r <= p.maxRange) r += p.sigma * gauss(rng); else r = Infinity;
+    if (r <= p.maxRange) r += p.sigma * r * gauss(rng); else r = Infinity;   // RELATIVE noise: sigma is a fraction of range, so error grows with r (matching the range gate's assumption)
     if (rng() < p.dropout) r = Infinity;
     outRanges[b] = r;
   }
@@ -508,7 +478,7 @@ function simulateScan(walls, pose, rng, p, outRanges){
    scan_to_samples: consecutive-hit segments, |dr| > OCC_RATIO * tangential gap
    rejection, midpoint-rule uniform spatial sampling, isolated-hit fallback).
    beamAng: per-beam robot-frame angles; null = full circle b*2pi/nBeams. */
-const SAMPLE_DS = 0.12, MAX_CHORD = 1.5, OCC_RATIO = 2.0;
+const SAMPLE_DS = 0.12, MAX_CHORD = 1.5, OCC_RATIO = 5.0;
 const SMP_CAP = 4096;
 const _sx = new Float64Array(SMP_CAP), _sy = new Float64Array(SMP_CAP),
       _sw = new Float64Array(SMP_CAP), _sr = new Float64Array(SMP_CAP);
@@ -517,7 +487,7 @@ const _hidx = new Int32Array(1024), _hx = new Float64Array(1024),
       _hy = new Float64Array(1024), _hr = new Float64Array(1024);
 const _used = new Uint8Array(1024);
 
-function scanToSamples(ranges, nBeams, occOn, beamAng){
+function scanToSamples(ranges, nBeams, occOn, beamAng, pointMode){
   const dth = TAU / nBeams;
   let nh = 0;
   for (let b = 0; b < nBeams; b++){
@@ -530,6 +500,18 @@ function scanToSamples(ranges, nBeams, occOn, beamAng){
     }
   }
   let n = 0, nRej = 0;
+  if (pointMode){
+    // POINT encoding: one phasor per raw beam return, no segment resampling.
+    // Weight = the beam's tangential footprint r*dtheta (SCALED BY DISTANCE), so a
+    // far return — one of fewer per unit surface length — carries proportionally
+    // MORE weight. That recovers the arc-length surface integral as a
+    // one-point-per-beam Riemann sum instead of dense midpoint resampling.
+    for (let i = 0; i < nh && n < SMP_CAP; i++){
+      _sx[n] = _hx[i]; _sy[n] = _hy[i]; _sw[n] = _hr[i] * dth; _sr[n] = _hr[i];
+      n++;
+    }
+    return { n, xs: _sx, ys: _sy, ws: _sw, rs: _sr, nRej: 0, rej: _rej };
+  }
   _used.fill(0, 0, nh);
   if (nh >= 2){
     for (let i = 0; i + 1 < nh; i++){
@@ -581,10 +563,10 @@ function parabolic(sm1, s0, sp1, h){
 
 function makeMatcher(L, opts){
   opts = opts || {};
-  const tHalf = opts.tHalf || 0.36, tStep = 0.06, fHalf = 0.06, fStep = 0.02;
+  const tHalf = opts.tHalf || 0.36, tStep = opts.tStep || 0.06, fHalf = 0.06, fStep = 0.02;
   const rotHalf = (opts.rotHalfDeg || 6) * Math.PI / 180;
   const fineRotStep = 0.375 * Math.PI / 180;
-  const lat = Math.PI / L.nAng;
+  const lat = (L.hex ? TAU : Math.PI) / L.nAng;   // hex spans the full circle
   // odometry prior (distance-weighted search): score -= gamma*peak*d^2/win^2,
   // d = distance of the candidate from the odometry prediction (= match guess).
   // gamma=0 -> pure lidar (shipped). Set via setOdoGamma; centre set in match().
@@ -832,33 +814,37 @@ function runSelfTests(){
     T("occlusion: tangential form rejects streak, keeps wall", streakRejected && wallKept);
   }
 
-  // T4: range gating blanks exactly the under-sampled fine rings
+  // T4: SMOOTH distance thermometer — the finest ring fades LINEARLY with range
+  // (soft, not hard), the MIN_SCALES coarsest never fade, and the effective ring
+  // count glides monotonically from nRing down to the floor. Ladder-independent:
+  // ranges are keyed to u = the finest ring's cutoff range lam0/(beta*dtheta).
   {
-    const dth = TAU / 144, beta = 3;
-    const px = new Float64Array([8]), py = new Float64Array([0]),
-          pw = new Float64Array([1]), prr = new Float64Array([8]);
+    const dth = TAU / 180, beta = 3, u = L.lams[0] / (beta * dth);
+    const rw = (r, b) => ringsWritten(L, r, b === undefined ? beta : b, dth);
+    const full    = rw(0.1 * u) > L.nRing - 0.05;              // short ray: all rings
+    const floor   = Math.abs(rw(1e4) - MIN_SCALES) < 1e-6;     // far ray: exactly the floor
+    const mono    = rw(0.1*u) > rw(1.5*u) && rw(1.5*u) > rw(1e4) - 1e-9;
+    const smooth  = Math.abs(rw(1.5*u) - Math.round(rw(1.5*u))) > 0.05;  // fractional => soft
+    const ungated = rw(1, Infinity) === L.nRing;
+    // single point where the finest ring is MID-fade: it is partially written (~0.5),
+    // while the coarsest (floor) ring is full.
+    const rp = 1.5 * u;
+    const px = new Float64Array([rp]), py = new Float64Array([0]),
+          pw = new Float64Array([1]), prr = new Float64Array([rp]);
     encodeGated(L, px, py, pw, prr, 1, beta, dth, are, aim);
-    // thr = 3*8*0.04363 = 1.047 -> only lam=2 survives (rings 0,1,2 blank)
-    let blanked = true, wrote = false;
-    for (let k = 0; k < 3; k++)
-      for (let j = 0; j < L.nAng; j++)
-        if (are[k*L.nAng+j] !== 0 || aim[k*L.nAng+j] !== 0) blanked = false;
-    for (let j = 0; j < L.nAng; j++)
-      if (are[3*L.nAng+j] !== 0 || aim[3*L.nAng+j] !== 0) wrote = true;
-    // thresholds at beta=3, dth=2.5 deg: ring lam is written for r <= lam/(beta*dth)
-    // = 1.91 / 3.82 / 7.64 / 15.3 m for lam 0.25 / 0.5 / 1 / 2
-    const mono = ringsWritten(L, 0.5, beta, dth) === 4 &&
-                 ringsWritten(L, 3.0, beta, dth) === 3 &&
-                 ringsWritten(L, 5.0, beta, dth) === 2 &&
-                 ringsWritten(L, 8.0, beta, dth) === 1 &&
-                 ringsWritten(L, 0.5, Infinity, dth) === 4;
-    T("range gating: r=8 m writes only lam=2 (beta=3)", blanked && wrote && mono);
+    const mFine   = Math.hypot(are[0], aim[0]);
+    const mCoarse = Math.hypot(are[(L.nRing-1)*L.nAng], aim[(L.nRing-1)*L.nAng]);
+    const partial = mFine > 0.3 && mFine < 0.7 && mCoarse > 0.95;
+    T("smooth range gating: finest ring fades, coarsest floor stays full",
+      full && floor && mono && smooth && ungated && partial,
+      "finest mag mid-fade " + mFine.toFixed(2) + ", eff " + rw(0.1*u).toFixed(2) +
+      " -> " + rw(1.5*u).toFixed(2) + " -> " + rw(1e4).toFixed(2));
   }
 
   // T5: end-to-end — map one scan, match a displaced scan, recover the pose
   {
     const walls = makeWorld();
-    const p = { nBeams: 144, maxRange: 12, sigma: 0.01, dropout: 0, jitter: 0 };
+    const p = { nBeams: 180, maxRange: 12, sigma: 0.004, dropout: 0, jitter: 0 };  // relative noise now; keep mild for the matcher-correctness check
     const dth = TAU / p.nBeams;
     const ranges = new Float64Array(p.nBeams);
     const A = [5.0, 3.0, 0.4];
@@ -1026,7 +1012,7 @@ function hornInv(T, px, py){
 function makeBounded(L, opts){
   opts = opts || {};
   const ANCHOR_N = 5, CELL = 2.0, CELL_CAP = 6;
-  const nAng = L.nAng, nRing = L.nRing, D = L.D, lat = Math.PI / nAng;
+  const nAng = L.nAng, nRing = L.nRing, D = L.D, lat = (L.hex ? TAU : Math.PI) / nAng;
   const gapKf = opts.gapKf ?? 300, recentAids = opts.recentAids ?? 12;
   const attemptEvery = opts.attemptEvery ?? 4, relaxEvery = opts.relaxEvery ?? 25;
   const robust = opts.robust !== false;
@@ -1696,13 +1682,19 @@ const jsErrors = [];
 window.addEventListener("error", ev => jsErrors.push(String(ev.message)));
 
 /* ------------------------------------------------------------- parameters */
-const SIM = { nBeams: 144, maxRange: 12, sigma: 0.02, dropout: 0.02,
+// sigma = RELATIVE range noise (fraction of range): 1-sigma error = sigma*r, so a
+// point at 2 m has ~2 cm noise and one at 10 m ~10 cm — error grows with range, the
+// assumption the distance thermometer is built on. Because both the noise (sigma*r)
+// and the finest gated wavelength (beta*r*dtheta) scale with r, the finest ring's
+// SNR is range-INVARIANT. jitter is angular (its positional effect r*jitter is
+// relative too).
+const SIM = { nBeams: 180, maxRange: 12, sigma: 0.01, dropout: 0.02,
               jitter: 0.05 * Math.PI / 180 };
 const DTH_SB = TAU / SIM.nBeams;
 const KF_DIST = 0.15, KF_ROT = 3 * Math.PI / 180, MAP_EPS = 0.005;
-const cfg = { mode: "intel", gate: true, beta: 3, occ: true, ladder: "oct",
-              nAng: 24, auto: true, speed: 1.1, paused: false, world: "room",
-              der: true, odoGamma: 0, odoNoise: 0.3 };
+const cfg = { mode: "sandbox", gate: true, beta: 3, occ: true, ladder: "oct",
+              nAng: 113, auto: false, speed: 1.1, paused: false, world: "room",
+              der: true, odoGamma: 0, odoNoise: 0.3, pointEnc: false, hex: false };
 
 let walls = makeWorld();
 const rng = mulberry32(7);
@@ -1710,7 +1702,7 @@ const rng = mulberry32(7);
 /* --------------------------------------------------------------- lattices */
 // L: sandbox lattice (angle count selectable). LIN: Intel lattice, fixed at
 // the SHIPPED matched band 4 rings x 60 angles (D=240) — ssp_bounded.py.
-let L, matcherSB, wsre, wsim, wre, wim;
+let L, matcherSB, wsre, wsim, wre, wim, wsSBre, wsSBim;
 let sbMre, sbMim;             // sandbox global map vector
 let LIN = null, wsINre = null, wsINim = null;
 const _wrx = new Float64Array(SMP_CAP), _wry = new Float64Array(SMP_CAP);
@@ -1757,7 +1749,7 @@ function loadIntel(){
 
 function buildIntelLattice(){
   if (!IN.ready) return;
-  LIN = makeLattice(LADDERS[cfg.ladder], 60);   // shipped matched band: D = 240
+  LIN = makeLattice(LADDERS[cfg.ladder], 60, cfg.hex);   // shipped matched band (polar): D = 240
   wsINre = new Float64Array(LIN.D); wsINim = new Float64Array(LIN.D);
 }
 
@@ -1814,7 +1806,7 @@ function intelProcessKF(){
     const r = IN.rangesCm[base + b] / 100;
     IN.rr[b] = (r < 0.1 || r >= IN.validMax) ? Infinity : r;
   }
-  const smp = scanToSamples(IN.rr, nB, cfg.occ, IN.beamAng);
+  const smp = scanToSamples(IN.rr, nB, cfg.occ, IN.beamAng, cfg.pointEnc);
   IN.lastSmp = smp;
   const o = IN.odom, e = IN.est;
   const guess = noOdomGuess(e, k);
@@ -2005,11 +1997,11 @@ function drive(dt){
     SB.om = Math.max(-1.8, Math.min(1.8, 2.5 * err));
     SB.vel = cfg.speed * Math.max(0.25, 1 - 0.8 * Math.abs(err));
   } else {
-    if (keys.ArrowUp) SB.vel += 2.5 * dt;
-    else if (keys.ArrowDown) SB.vel -= 3.0 * dt;
+    if (keys.w) SB.vel += 2.5 * dt;
+    else if (keys.s) SB.vel -= 3.0 * dt;
     else SB.vel *= Math.max(0, 1 - 1.5 * dt);
     SB.vel = Math.max(-0.8, Math.min(2.0, SB.vel));
-    const tgt = (keys.ArrowLeft ? 1.8 : 0) + (keys.ArrowRight ? -1.8 : 0);
+    const tgt = (keys.a ? 1.8 : 0) + (keys.d ? -1.8 : 0);
     SB.om += (tgt - SB.om) * Math.min(1, 10 * dt);
   }
   gt[2] = wrapAng(gt[2] + SB.om * dt);
@@ -2055,7 +2047,7 @@ function sandboxStep(dt){
                dtru[2] + dtru[0] * nz * 0.2 + gauss(rng) * nz * 0.02 ];
   SB.odoPrev = SB.odo; SB.odo = se2Mul(SB.odo, dn);
   simulateScan(walls, SB.gt, rng, SIM, SB.ranges);
-  const smp = scanToSamples(SB.ranges, SIM.nBeams, cfg.occ, null);
+  const smp = scanToSamples(SB.ranges, SIM.nBeams, cfg.occ, null, cfg.pointEnc);
   SB.lastSmp = smp;
   const beta = cfg.gate ? cfg.beta : Infinity;
   const t0 = performance.now();
@@ -2087,6 +2079,10 @@ function sandboxStep(dt){
     _wry[i] = s*smp.xs[i] + c*smp.ys[i];
   }
   encodeGated(L, _wrx, _wry, smp.ws, smp.rs, smp.n, beta, DTH_SB, wsre, wsim);
+  // sensor-frame scan encoding for the write disc: rotates WITH the robot
+  // (visualises rotation = angle-index permutation). wsre above is world-frame
+  // for the actual map accumulation.
+  encodeGated(L, smp.xs, smp.ys, smp.ws, smp.rs, smp.n, beta, DTH_SB, wsSBre, wsSBim);
 
   const needKF = SB.lastKF === null ||
     Math.hypot(SB.est[0]-SB.lastKF[0], SB.est[1]-SB.lastKF[1]) > KF_DIST ||
@@ -2145,9 +2141,11 @@ const LUT_DIV = makeLUT([[0,"#e66767"],[0.30,"#7a3535"],[0.46,"#232322"],[0.54,"
                          [0.70,"#1c5cab"],[0.86,"#3987e5"],[1,"#cde2fb"]]);
 const LUT_BLUE = makeLUT([[0,"#1a1a19"],[0.35,"#184f95"],[0.7,"#3987e5"],[1,"#cde2fb"]]);
 const LUT_AQUA = makeLUT([[0,"#1a1a19"],[0.4,"#0f5a40"],[0.75,"#199e70"],[1,"#7fe0bb"]]);
-// bucket = number of rings the sample writes, clamped to 4 steps
-const RAY_COL = ["#52514e", "#1c5cab", "#3987e5", "#86b6ef", "#cde2fb"];
-const rayBucket = (nw) => Math.max(1, Math.min(4, nw));
+// thermometer palette, indexed by #scales the ray writes (nw): few (far, gated
+// to the MIN_SCALES coarsest) = dim, many (short ray, full encoding) = bright.
+// One entry per possible nw = 0..nRing so the gradient spans the whole lattice.
+const RAY_COL = ["#52514e", "#26405f", "#305680", "#3f7cb2", "#5fa1da", "#8dc4f2", "#c3e4ff"];
+const rayBucket = (nw) => Math.max(1, Math.min(RAY_COL.length - 1, Math.round(nw)));
 
 /* decode states (progressive row sweeps) */
 function mkDecode(W, H, cell){
@@ -2227,11 +2225,13 @@ function drawLattice(Lx, re, im){
     if (m > mx) mx = m;
   }
   latNorm = Math.max(mx, latNorm * 0.97, 1e-9);
-  const nA = Lx.nAng, sect = Math.PI / nA;
+  const nA = Lx.nAng, hex = Lx.hex;
+  const nSec = hex ? nA : 2 * nA, sect = (hex ? TAU : Math.PI) / nA;
   for (let k = 0; k < Lx.nRing; k++){
     const r1 = bands[k] * R, r0 = bands[k+1] * R;
-    for (let j = 0; j < 2 * nA; j++){
-      const v = Math.hypot(re[k*nA + (j % nA)], im[k*nA + (j % nA)]) / latNorm;
+    for (let j = 0; j < nSec; j++){
+      const jj = hex ? j : (j % nA);
+      const v = Math.hypot(re[k*nA + jj], im[k*nA + jj]) / latNorm;
       const ci = Math.min(255, Math.round(Math.sqrt(Math.min(v, 1)) * 255));
       lctx.fillStyle = `rgb(${LUT_AQUA[3*ci]},${LUT_AQUA[3*ci+1]},${LUT_AQUA[3*ci+2]})`;
       const a0 = j * sect - sect/2, a1 = a0 + sect;
@@ -2298,7 +2298,7 @@ function drawWorldSB(){
   wctx.clearRect(0, 0, worldCv.width, worldCv.height);
   if (!smp) return;
   const gt = SB.gt, est = SB.est;
-  const paths = [null, new Path2D(), new Path2D(), new Path2D(), new Path2D()];
+  const paths = RAY_COL.map(() => new Path2D());
   const [rx, ry] = w2pSB(gt[0], gt[1], s);
   for (let b = 0; b < SIM.nBeams; b++){
     const r = SB.ranges[b];
@@ -2311,17 +2311,18 @@ function drawWorldSB(){
     }
   }
   wctx.lineWidth = 1; wctx.globalAlpha = 0.30;
-  for (let k = 1; k <= 4; k++){ wctx.strokeStyle = RAY_COL[k]; wctx.stroke(paths[k]); }
+  for (let k = 1; k < RAY_COL.length; k++){ wctx.strokeStyle = RAY_COL[k]; wctx.stroke(paths[k]); }
   wctx.globalAlpha = 1;
-  wctx.strokeStyle = "#8a8781"; wctx.lineWidth = Math.max(1.5, 0.03 * s);
+  // walls as crisp single-pixel lines (traces every segment cleanly)
+  wctx.strokeStyle = "#9d9a93"; wctx.lineWidth = 1;
   wctx.beginPath();
   for (let i = 0; i < walls.length; i += 4){
-    const [ax, ay] = w2pSB(walls[i], walls[i+1], s), [bx, by] = w2pSB(walls[i+2], walls[i+3], s);
-    wctx.moveTo(ax, ay); wctx.lineTo(bx, by);
+    const a = w2pSB(walls[i], walls[i+1], s), b = w2pSB(walls[i+2], walls[i+3], s);
+    wctx.moveTo(a[0], a[1]); wctx.lineTo(b[0], b[1]);
   }
   wctx.stroke();
   const cth = Math.cos(gt[2]), sth = Math.sin(gt[2]);
-  const dots = [null, new Path2D(), new Path2D(), new Path2D(), new Path2D()];
+  const dots = RAY_COL.map(() => new Path2D());
   for (let i = 0; i < smp.n; i++){
     const wx = gt[0] + cth*smp.xs[i] - sth*smp.ys[i];
     const wy = gt[1] + sth*smp.xs[i] + cth*smp.ys[i];
@@ -2329,7 +2330,7 @@ function drawWorldSB(){
     const [px, py] = w2pSB(wx, wy, s);
     dots[rayBucket(nw)].rect(px - 1.2, py - 1.2, 2.4, 2.4);
   }
-  for (let k = 1; k <= 4; k++){ wctx.fillStyle = RAY_COL[k]; wctx.fill(dots[k]); }
+  for (let k = 1; k < RAY_COL.length; k++){ wctx.fillStyle = RAY_COL[k]; wctx.fill(dots[k]); }
   wctx.strokeStyle = "#e66767"; wctx.lineWidth = Math.max(1.5, 0.02 * s);
   wctx.beginPath();
   for (let i = 0; i < smp.nRej; i++){
@@ -2432,7 +2433,7 @@ function drawWorldIN(){
   const kk = k - 1;
   const pose = [IN.poses[3*kk], IN.poses[3*kk+1], IN.poses[3*kk+2]];
   const [rx0, ry0] = w2p(pose[0], pose[1]);
-  const paths = [null, new Path2D(), new Path2D(), new Path2D(), new Path2D()];
+  const paths = RAY_COL.map(() => new Path2D());
   for (let b = 0; b < IN.nBeams; b++){
     const r = IN.rr[b];
     if (!isFinite(r)) continue;
@@ -2443,7 +2444,7 @@ function drawWorldIN(){
     p.moveTo(rx0, ry0); p.lineTo(hx, hy);
   }
   wctx.lineWidth = 1; wctx.globalAlpha = 0.4;
-  for (let c = 1; c <= 4; c++){ wctx.strokeStyle = RAY_COL[c]; wctx.stroke(paths[c]); }
+  for (let c = 1; c < RAY_COL.length; c++){ wctx.strokeStyle = RAY_COL[c]; wctx.stroke(paths[c]); }
   wctx.globalAlpha = 1;
   // rejected phantom bridges
   const smp = IN.lastSmp;
@@ -2487,7 +2488,7 @@ function tick(now){
       drawWorldSB();
       stepDecode(decSB, L, sbMre, sbMim, null);
       drawDecode();
-      drawLattice(L, wsre, wsim);
+      drawLattice(L, wsSBre, wsSBim);
       drawCorr(matcherSB);
     }
   } else if (IN.ready){
@@ -2507,12 +2508,9 @@ function tick(now){
     // shipped segment folds are UNGATED — see the gating hint)
     if (IN.lastSmp && IN.k > 0){
       const smp = IN.lastSmp, kk = IN.k - 1;
-      const c = Math.cos(IN.poses[3*kk+2]), s = Math.sin(IN.poses[3*kk+2]);
-      for (let i = 0; i < smp.n; i++){
-        _wrx[i] = c*smp.xs[i] - s*smp.ys[i] + IN.poses[3*kk];
-        _wry[i] = s*smp.xs[i] + c*smp.ys[i] + IN.poses[3*kk+1];
-      }
-      encodeGated(LIN, _wrx, _wry, smp.ws, smp.rs, smp.n,
+      // sensor-frame scan encoding for the disc: rotates with the robot heading
+      // (visualises rotation = angle-index permutation).
+      encodeGated(LIN, smp.xs, smp.ys, smp.ws, smp.rs, smp.n,
                   cfg.gate ? cfg.beta : Infinity, IN.DTH, wsINre, wsINim);
       stepDecode(decIN, LIN, IN.slam.bRe, IN.slam.bIm,
                  [IN.poses[3*kk], IN.poses[3*kk+1]]);
@@ -2590,10 +2588,11 @@ function setMode(m){
 }
 
 function buildLattice(){       // sandbox lattice (angle count selectable)
-  L = makeLattice(LADDERS[cfg.ladder], cfg.nAng);
-  matcherSB = makeMatcher(L, { tHalf: 0.36, rotHalfDeg: 6 });
+  L = makeLattice(LADDERS[cfg.ladder], cfg.nAng, cfg.hex);
+  matcherSB = makeMatcher(L, { tHalf: 0.10, tStep: 0.01, rotHalfDeg: 9 });  // 20 cm search box (+-0.10 m), 21x21 candidates at 1 cm resolution
   wsre = new Float64Array(L.D); wsim = new Float64Array(L.D);
   wre = new Float64Array(L.D); wim = new Float64Array(L.D);
+  wsSBre = new Float64Array(L.D); wsSBim = new Float64Array(L.D);
   sbMre = new Float64Array(L.D); sbMim = new Float64Array(L.D);
   $("latLam").textContent = "λ: " + L.lams.map(v => v.toFixed(2)).join(" / ") + " m.";
 }
@@ -2602,34 +2601,22 @@ function buildLattice(){       // sandbox lattice (angle count selectable)
 $("tabIntel").addEventListener("click", () => { if (IN.ready) setMode("intel"); });
 $("tabSand").addEventListener("click", () => setMode("sandbox"));
 $("cAuto").addEventListener("change", e => cfg.auto = e.target.checked);
+$("cGate").addEventListener("change", e => cfg.gate = e.target.checked);
+$("cPoint").addEventListener("change", e => cfg.pointEnc = e.target.checked);
+$("cHex").addEventListener("change", e => {
+  cfg.hex = e.target.checked;
+  buildLattice(); resetSandbox();
+  if (IN.ready){ buildIntelLattice(); resetIntel(); }
+});
 $("cSpeed").addEventListener("input", e => {
   cfg.speed = +e.target.value; $("vSpeed").textContent = cfg.speed.toFixed(1) + " m/s";
 });
-$("cGate").addEventListener("change", e => cfg.gate = e.target.checked);
 $("cDer").addEventListener("change", e => { cfg.der = e.target.checked; if (cfg.mode === "intel") resetIntel(); });
 $("cOdoG").addEventListener("input", e => { cfg.odoGamma = +e.target.value;
   $("vOdoG").textContent = cfg.odoGamma === 0 ? "off" : cfg.odoGamma.toFixed(1); });
 $("cOdoN").addEventListener("input", e => { cfg.odoNoise = +e.target.value;
   $("vOdoN").textContent = cfg.odoNoise.toFixed(2); });
-$("cBeta").addEventListener("input", e => {
-  cfg.beta = +e.target.value; $("vBeta").textContent = cfg.beta.toFixed(1);
-});
-$("cOcc").addEventListener("change", e => cfg.occ = e.target.checked);
-$("cSigma").addEventListener("input", e => {
-  SIM.sigma = +e.target.value; $("vSigma").textContent = (SIM.sigma*100).toFixed(1) + " cm";
-});
-$("cDrop").addEventListener("input", e => {
-  SIM.dropout = +e.target.value; $("vDrop").textContent = Math.round(SIM.dropout*100) + "%";
-});
-$("cLadder").addEventListener("change", e => {
-  cfg.ladder = e.target.value;
-  buildLattice(); resetSandbox();
-  buildIntelLattice(); resetIntel();
-});
-$("cAng").addEventListener("change", e => {   // sandbox-only knob
-  cfg.nAng = +e.target.value; buildLattice(); resetSandbox();
-});
-$("bReset").addEventListener("click", resetSandbox);
+$("bReset").addEventListener("click", () => { cfg.auto = false; $("cAuto").checked = false; resetSandbox(); });
 $("worldSel").addEventListener("change", e => setWorld(e.target.value));
 $("bResetIn").addEventListener("click", () => { resetIntel(); IN.playing = true; $("pPlay").textContent = "Pause"; });
 $("bPause").addEventListener("click", () => {
@@ -2649,18 +2636,24 @@ $("pScrub").addEventListener("input", e => {
 });
 window.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-  if (cfg.mode === "sandbox" && e.key.startsWith("Arrow")){
-    keys[e.key] = true;
-    if (cfg.auto){ cfg.auto = false; $("cAuto").checked = false; }
+  const k = e.key.toLowerCase();
+  if (cfg.mode === "sandbox" && (k === "w" || k === "a" || k === "s" || k === "d")){
+    keys[k] = true;
+    if (cfg.auto){ cfg.auto = false; $("cAuto").checked = false; }   // WASD takes over
     e.preventDefault();
   } else if (e.key === " "){
-    (cfg.mode === "intel" ? $("pPlay") : $("bPause")).click();
+    if (cfg.mode === "sandbox"){          // SPACE = take over the robot / hand back to autopilot
+      cfg.auto = !cfg.auto; $("cAuto").checked = cfg.auto;
+    } else {
+      $("pPlay").click();                 // Intel replay: play/pause
+    }
     e.preventDefault();
   }
-  else if (e.key === "a" || e.key === "A"){ cfg.auto = !cfg.auto; $("cAuto").checked = cfg.auto; }
-  else if (e.key === "r" || e.key === "R"){ cfg.mode === "intel" ? $("bResetIn").click() : resetSandbox(); }
+  else if (k === "p" && cfg.mode === "sandbox"){ $("bPause").click(); }
+  else if (k === "r"){ cfg.mode === "intel" ? $("bResetIn").click() : resetSandbox(); }
 });
-window.addEventListener("keyup", e => { if (e.key.startsWith("Arrow")) keys[e.key] = false; });
+window.addEventListener("keyup", e => { const k = e.key.toLowerCase();
+  if (k === "w" || k === "a" || k === "s" || k === "d") keys[k] = false; });
 
 /* ------------------------------------------------------------- self tests */
 function browserTests(){
@@ -2702,10 +2695,8 @@ if (IN.ready) resetIntel();
 if (!IN.ready){
   $("tabIntel").disabled = true;
   $("tabIntel").title = "run python3 demo/export_data.py to embed the Intel log";
-  setMode("sandbox");
-} else {
-  setMode("intel");
 }
+setMode("sandbox");   // start in the sandbox, manual (no-autopilot) mode
 if (/[?&]test=1/.test(location.search)) browserTests();
 
 /* ---------------------------------------------------- headless soak/verify
@@ -2822,7 +2813,7 @@ function startSoak(){
             const r = IN.rangesCm[b0+b]/100;
             rr2[b] = (r < 0.1 || r >= IN.validMax) ? Infinity : r;
           }
-          const smp2 = scanToSamples(rr2, IN.nBeams, true, IN.beamAng);
+          const smp2 = scanToSamples(rr2, IN.nBeams, true, IN.beamAng, cfg.pointEnc);
           let p = slam2.addKeyframe(smp2, noOdomGuess(e2, k));
           if (slam2.needRelax){ slam2.relaxNow(); p = slam2.poseOf(k); }
           e2[3*k] = p[0]; e2[3*k+1] = p[1]; e2[3*k+2] = p[2];
