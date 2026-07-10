@@ -288,3 +288,143 @@ CARMEN logs from the Radish repository via the StachnissLab mirrors — please
 credit the original recorders (see `data/README.md`). Built in an extended
 agentic research session (Claude Code); the ledger records which results
 were independently re-verified and which claims were corrected along the way.
+
+## Prior work & references (per novel component)
+
+Numbering follows the novel-components list above. Within each group the
+closest relatives come first, with a line on where this project departs.
+
+**0. Closest overall prior art (VSA + SLAM as a system).**
+- Dumont, Furlong, Orchard & Eliasmith — the *SSP-SLAM* line (2022–2023):
+  spiking/neural SSP maps with landmark-style features and path
+  integration in the Neural Engineering Framework. The same
+  representational substrate; this project differs in regime — dense lidar
+  registration against bundled map vectors, a pose-graph backend, a
+  bounded frozen-segment store, and hardware-numerics quantization.
+- Neubert, Schubert & Protzel, *An Introduction to Hyperdimensional
+  Computing for Robotics* (KI 2019); Neubert & Schubert (CVPR 2021 wksp)
+  descriptor aggregation: HDC for **place-recognition retrieval**. The
+  instructive contrast for component 1 — here nothing is retrieved; the
+  scan is registered against the map vector itself.
+- Mitrokhin, Sutor, Fermüller & Aloimonos, hyperdimensional active
+  perception (*Science Robotics* 2019): HD sensorimotor encoding,
+  no metric SLAM.
+
+**1. Dense scan-to-map registration on the map vector itself.**
+- Olson, *Real-Time Correlative Scan Matching* (ICRA 2009) — the dense
+  translation × rotation correlation search this frontend mirrors, over
+  occupancy grids; here the search runs over Fourier features with
+  rotation as index permutation and no grid ever built.
+- Reddy & Chatterji (IEEE TIP 1996) phase correlation / Fourier–Mellin;
+  Checchin et al. (2009) FMT radar registration; Bülow & Birk spectral
+  registration — spectral-domain SE(2) matching, frame-to-frame on dense
+  spectra rather than against an *accumulated, bounded* map vector.
+- Rahimi & Recht, *Random Features for Large-Scale Kernel Machines*
+  (NeurIPS 2007) — the encode-then-inner-product identity that makes
+  "matching = correlation of densities" exact in expectation.
+- Komer & Eliasmith (2019–2020), continuous-space SSPs via fractional
+  power encoding; Plate, *Holographic Reduced Representations* (IEEE TNN
+  1995) — bundling-as-addition and phase binding.
+
+**2. Group-closed lattice + stored d/dθ derivative.**
+- Freeman & Adelson, *The Design and Use of Steerable Filters* (PAMI
+  1991) — exact rotation via basis structure; the lattice permutation is
+  polar steering, and the stored derivative vector is first-order (Lie
+  generator) steering of *frozen* content — cf. Hel-Or & Teo's
+  Lie-generator approximations to transformation groups.
+- Frady, Kleyko & Sommer, *Computing on Functions with Compositional
+  Vector Architectures* (2021–22) — shift and derivative operators on
+  fractional-power function encodings; the closest VSA-side formalism to
+  the translate/rotate/derivative algebra used here.
+- Kleyko et al., VSA surveys Parts I & II (ACM Computing Surveys
+  2022–23) — the taxonomy these lattice tricks live in.
+
+**3. Segment-integral (sinc) encoding.**
+- Classical aperture theory (uniform linear aperture → sinc beam pattern)
+  and the Fourier-slice theorem (Bracewell; Kak & Slaney, *Principles of
+  Computerized Tomographic Imaging*) — the mathematics is textbook; the
+  claim here is only its use as a lidar *encoding / blanking / decimation*
+  operator inside a VSA map.
+- Biber & Straßer, *The Normal Distributions Transform* (IROS 2003) —
+  surface elements as analytic densities (Gaussians); chords-with-sinc
+  are the Fourier-domain analogue with exact line integrals.
+- Zwicker et al., EWA splatting (IEEE TVCG 2002) — per-primitive
+  band-limiting against aliasing; the same spirit as the sinc factor
+  auto-blanking fine rings.
+- Hess et al., *Cartographer* (ICRA 2016) adaptive voxel filter —
+  pragmatic beam decimation; GROUP/k here is analytic and mass-exact.
+
+**4. Rigid temporal-segment bounded map.**
+- Hess et al., *Cartographer* (ICRA 2016) — short-lived rigid submaps,
+  never blended across drift states, plus branch-and-bound
+  relocalization: the strongest engineering precedent for the
+  drift-consistency law measured here (its violation is why persistent
+  spatial submaps failed).
+- Bosse, Newman, Leonard & Teller, *Atlas* (ICRA 2004); Konolige &
+  Agrawal, *FrameSLAM* (T-RO 2008); Sibley et al., sliding-window filters
+  (2008) — local-frame map decomposition and marginalization.
+- Kretzschmar & Stachniss (IJRR 2012) information-theoretic graph
+  compression; Walcott-Bryant et al., *Dynamic Pose Graph SLAM* (IROS
+  2012) — bounded memory by discarding; here the bound is an area
+  cell-cap over fixed-size hypervectors.
+- Milford & Wyeth, *RatSLAM* (ICRA 2004) — bio-inspired bounded
+  experience maps.
+
+**5. Binary/quantized VSA store.**
+- Kanerva, *Hyperdimensional Computing* (Cogn. Comput. 2009); Rachkovskij
+  & Kussul (Neural Computation 2001) sparse binary representations —
+  binary hypervector algebra and its robustness.
+- Frady & Sommer, phasor associative memories (PNAS 2019) — computation
+  with phase-quantized complex vectors; the direct ancestor of the
+  QPSK / per-ring polar-code store.
+- Schmuck, Benini & Rahimi, *Hardware Optimizations of Dense Binary
+  Hyperdimensional Computing* (JETC 2019) and the wider HDC-on-FPGA line;
+  Karunaratne et al., in-memory HDC (*Nature Electronics* 2020) — the
+  hardware bill-of-materials precedents.
+- Kleyko et al., *VSA as a Computing Framework for Emerging Hardware*
+  (Proc. IEEE 2022).
+
+**6. Perturbation-band acceptance methodology.**
+- Mur-Artal, Montiel & Tardós, *ORB-SLAM* (T-RO 2015) — medians over
+  repeated runs because of nondeterminism; Bujanca et al., *SLAMBench
+  3.0* (ICRA 2021) — explicit run-to-run variance measurement. Precedents
+  for distribution-not-point reporting; neither injects controlled map
+  perturbations, measures the amplification, or localizes the entry
+  channel.
+- Neira & Tardós, joint compatibility data association (IEEE TRA 2001);
+  Reid, multiple-hypothesis tracking (IEEE TAC 1979) — discrete
+  data-association decisions as the branch points that make estimation
+  cascades non-smooth.
+- Demmel & Nguyen, reproducible floating-point summation (2013–15) — the
+  numerical side of the ULP-amplification finding.
+
+**7. Aperture-failure admission classifier.**
+- Zhang, Kaess & Singh, *On Degeneracy of Optimization-based State
+  Estimation Problems* (ICRA 2016) — eigenvalue-direction degeneracy
+  tests; the translation-Hessian anisotropy check is this family, applied
+  before admission rather than inside the solver.
+- Censi, closed-form ICP covariance (ICRA 2007); Olson's score-surface
+  covariance (2009) — curvature/ridge-derived match confidence.
+- Agarwal et al., *Dynamic Covariance Scaling* (ICRA 2013); Sünderhauf &
+  Protzel, switchable constraints (IROS 2012); Yang et al., graduated
+  non-convexity (RA-L 2020); Mangelson et al., pairwise consistency
+  maximization (ICRA 2018) — robust loop gating in the back-end; the
+  session-relative coherence EMA + soft σ-inflation here sits in front of
+  the graph instead.
+- Hanke (Numer. Funct. Anal. Optim. 1997) — semiconvergence /
+  early-stopping as regularization (the deliberate TRF evaluation cap).
+
+**8. Encoder lattice results.**
+- Stensola et al. (Nature 2012) — grid-cell module scale ratios ~1.4–1.7;
+  Wei, Prentice & Balasubramanian (eLife 2015) — optimality of ≈octave
+  nested codes; Mathis, Herz & Stemmler (Neural Comput. 2012) —
+  resolution of nested population codes.
+- Fiete, Burak & Brookings (J. Neurosci 2008) — exponential capacity from
+  incommensurate moduli (the relocalization-ring / vernier idea).
+- Dumont & Eliasmith (2021) — hexagonal SSP triplets for grid-cell
+  representations; the hex lattice here is its SLAM-side descendant, with
+  the real-data verdict that hex pays off only on non-Manhattan geometry.
+- Winkelmann et al. (IEEE TMI 2007) golden-angle radial MRI and Fibonacci
+  lattices — the *positive* golden-ratio sampling tradition that the
+  ladder-catastrophe result (φ² = φ + 1 additive resonance) cuts against;
+  the longer scouted list lives in `SotA/golden_dithering.md`.
