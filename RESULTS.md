@@ -3964,3 +3964,24 @@ band-equal accuracy), and a Python-fed two-source webvis replay (shipped +
 FPGA8) that defaults the real-data tab to the true pipeline. The corridor /
 verification walls were not re-litigated; nothing shipped was edited; every
 neutralised subclass is bit-exact to its parent.
+
+Audit-gap closures: (a) sub-grid rotation THROUGH the quantized derivative
+(permute + δ·segder_q): 6 b median cos 0.9858 — identical to the plain
+transform fidelity, so the derivative path adds no extra quantization damage
+(2 b: 0.795, consistent); (b) TRUE one-level 2-bit store (hardware clamp, no
+mid-tread top-coding): fr101 e2e ATE 1.820 (med 0.851, 52 loops, 76 KB) —
+inside the lean band; the "2 b/phasor" memory figures survive the honest
+encoding.
+
+### Silhouette emphasis: an intel-specific frontend lever (from the audit's E4a insight)
+Adding the depth-jump silhouette hits a SECOND time at r·dθ weight on top of
+shipped chord sampling (~2.4× silhouette up-weighting): intel frontend-only
+**5.07 → 3.109** — the best intel frontend of the session (better than E2's
+4.39) — while fr101 3.16→3.61, aces 6.38→6.92, fr079 11.6→13.0 (neutral to
+worse: those logs want the full r·dθ reweighting instead). Full-system on
+intel: 4.41 / 3.86 / 6.52 across ε — in the band, so like every intel
+frontend gain (cf. the N_ANG=113 precedent) it does NOT deploy to ATE.
+Completed sampling map per log: fr079/aces/belg (+fr101 median) → E2;
+intel frontend → silhouette-emphasized chords (frontend-level only). The
+sampling recipe is a per-environment knob, exactly like the occlusion
+filter it modulates.
