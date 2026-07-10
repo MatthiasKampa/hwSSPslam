@@ -124,3 +124,27 @@ discriminator — Intel AUC 0.896 < 0.909 proximity confound, MIT below chance).
 
 **Bench** — `bench_loop.py` synthetic multiloop world with GT edge labels
 (precision/recall on closures without a real dataset).
+
+**FPGA track (2026-07-10)** — `ssp_fpga.py` (subclass-only; neutralised paths
+asserted bit-exact): `QuantStoreSLAM` write-time per-ring polar-quantized
+store; `NoiseStoreSLAM` freeze-noise chaos control; `DerFineMatcher` E1
+(negative); `points_from_scan` E2 per-beam point encoding (frontend win on
+every log, audited); `IntSpec`/`IntSLAM` integer front-path arithmetic model;
+`BandSLAM` + `band_table` the perturbation-band acceptance harness (PROTOCOL
+§6). Run recipes:
+```bash
+python3 ssp_fpga.py selftest          # neutralised == parent, bit-exact
+python3 ssp_fpga.py ops               # hot-path MAC / map-bit sizing
+python3 ssp_fpga.py sweep --ring intel  # write-time quant ladder
+python3 ssp_fpga.py front fr101 intel   # E1/E2 frontend variants
+python3 ssp_fpga.py int fr101           # integer arithmetic ladder
+python3 ssp_fpga.py chaos intel         # freeze-noise response curve
+python3 ssp_fpga.py band fr079          # config x perturbation band table
+python3 demo/export_replay.py data/intel.log --embed   # Python-fed webvis
+```
+Verdicts in RESULTS.md "2026-07-10 — FPGA track opened" (+ the consolidation
+section that follows it): quantized store needs PER-RING scales; ≥6-bit quant
+deltas on Intel are not attributable (perturbation band); E2 = frontend
+registration win 5/5 logs, closure-layer per-log; arithmetic knee = 8-bit ROM
+cis; 2-bit phase-only store viable on robust logs (fr101 band [1.1–2.7] at
+75 KB); QPSK arithmetic = median-only.

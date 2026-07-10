@@ -494,6 +494,111 @@ def ops_report(n_pts=200):
 
 # ---------------------------------------------------------------------------
 
+class BandSLAM(IntSLAM):
+    """Any pipeline config + freeze-time relative map noise, for perturbation
+    BAND probes. Lesson that forced this harness (combo-aces): a single run's
+    ATE on a perturbation-sensitive log is a basin draw — the combo scored
+    2.149 on aces at eps=0 but 8.65 at eps=1e-6 — so every claimed config is
+    reported as its band over {0, 1e-6, 1e-3 x 2 seeds}, not a point."""
+
+    def __init__(self, eps=0.0, seed=1, **kw):
+        super().__init__(**kw)
+        self.eps = eps
+        self._brng = np.random.default_rng(seed)
+        self._active2 = -1
+
+    def _noise(self, a):
+        for d in (self.segvec, self.segder):
+            if a in d:
+                v = d[a]
+                s = float(np.abs(v).mean())
+                d[a] = (v + self.eps * s * (
+                    self._brng.standard_normal(len(v))
+                    + 1j * self._brng.standard_normal(len(v)))
+                ).astype(self.store_dtype)
+
+    def _freeze(self, a):            # noise BEFORE quantization
+        if self.eps:
+            self._noise(a)
+        super()._freeze(a)
+
+    def add_keyframe(self, pts, w, guess):
+        est = super().add_keyframe(pts, w, guess)
+        if self.eps and not self.nph:            # noise-only (unquantized)
+            aid = len(self.anchors) - 1
+            if aid != self._active2:
+                for a in list(self.segvec):
+                    if a < aid and a not in self._frozen:
+                        self._noise(a)
+                        self._frozen.add(a)
+                self._active2 = aid
+        return est
+
+
+BAND_EPS = ((0.0, 1), (1e-6, 1), (1e-3, 1), (1e-3, 2))
+
+BAND_CONFIGS = (
+    ("shipped ", dict(spec=None, nph=0), "seg"),
+    ("E2 point", dict(spec=None, nph=0), "point"),
+    ("FPGA8   ", dict(spec="i8", nph=16, nmag=4, ring_scales=True), "point"),
+    ("BINARY  ", dict(spec="qpsk", nph=4, nmag=1, ring_scales=True), "point"),
+)
+
+
+def band_table(logs):
+    """The session deliverable: config x log perturbation bands."""
+    for lg in logs:
+        for name, kw0, sm in BAND_CONFIGS:
+            kw = dict(kw0)
+            if kw["spec"] == "i8":
+                kw["spec"] = IntSpec(8, 7, 7)
+            elif kw["spec"] == "qpsk":
+                kw["spec"] = IntSpec(2, 2, 0, unit_w=True)
+            vals = []
+            for eps, seed in BAND_EPS:
+                r = run_log(LOGS[lg], BandSLAM, sample=sm, eps=eps,
+                            seed=seed, **kw)
+                vals.append(r["ate"])
+                print(f"  {lg} {name} eps{eps:7.0e}/s{seed}  "
+                      f"ATE {r['ate']:.3f}  med {r['med']:.3f}  "
+                      f"loops {r['loops']}  mem {r['mem_kb']:.0f}", flush=True)
+            v = np.array(vals)
+            print(f"  {lg} {name} BAND [{v.min():.2f} .. {v.max():.2f}] "
+                  f"median {np.median(v):.2f}", flush=True)
+        print(flush=True)
+
+
+def ops_report_binary():
+    """Datapath sketch + resource budget for the quantized/binary system.
+
+    Store: per-ring polar codes — nph phase bins (log2 nph bits) x nmag mag
+    levels (log2 nmag bits) + 6 per-ring f32 scales/vector. Arithmetic: cis
+    ROM at 2^addr entries x 2 x val bits; correlation banks are ROMs of the
+    same format; a map-x-scan product needs (phase add mod nph) -> cos LUT
+    (nph entries) x (mag x mag -> product LUT, nmag^2 entries) -> signed
+    accumulate. At the QPSK extreme the cos LUT degenerates to {+1, 0, -1}:
+    the correlate is a masked signed popcount over mag codes — the classic
+    binary-VSA datapath."""
+    for tag, n_seg, bits in (("Intel 6b store", 698, 6),
+                             ("Intel 4b (16ph phase-only)", 698, 4),
+                             ("MIT 6b store", 2401, 6),
+                             ("MIT 4b phase-only", 2401, 4)):
+        kb = n_seg * L.W.shape[0] * 2 * bits / 8 / 1024 \
+            + n_seg * 2 * L.N_RING * 4 / 1024
+        print(f"  map {tag:>28}: {kb:7.0f} KB "
+              f"(+ per-ring scales included)")
+    # per-keyframe fabric work at the shipped operating point (n_pts=200)
+    n_pts = 200
+    D = 4 * L.N_ANG
+    enc = n_pts * D                       # phase MAC + ROM lookup + acc
+    banks = 14 * (D + 289 * D) + 9 * (D + 49 * D)
+    print(f"  fabric/kf: {2 * enc + 9 * enc:,} encode ops + {banks:,} "
+          f"correlate MACs -> int8/int4 LUT-adds (no DSP needed at QPSK)")
+    print("  BRAM fit: Artix-7 100T ~607 KB BRAM -> the Intel 6b map "
+          "(368 KB + scales) fits on-chip with headroom; MIT needs 1.3 MB "
+          "-> Zynq US+ BRAM/URAM or DDR streaming of cold cells")
+
+
 def selftest():
     """Neutralised subclass must be bit-exact to the parent (PROTOCOL sec 1)."""
     cap = 1200
@@ -589,3 +694,7 @@ if __name__ == "__main__":
         chaos_sweep(sys.argv[2:] or ["intel"])
     elif what == "ops":
         ops_report()
+    elif what == "opsbin":
+        ops_report_binary()
+    elif what == "band":
+        band_table(sys.argv[2:] or ["fr101"])

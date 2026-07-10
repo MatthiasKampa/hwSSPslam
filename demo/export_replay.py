@@ -47,8 +47,56 @@ class RecordingSLAM(B.BoundedSLAM):
         self.snaps.append((self.k, np.array(self.anchors, np.float32)))
 
 
+# --config variants: run a NON-shipped pipeline (e.g. the FPGA/binary config
+# from ssp_fpga) and export it as replay slot 2 so the demo can show shipped
+# vs quantized side by side. Sampling per config; label lands in the player.
+CONFIGS = {
+    "shipped": dict(label="shipped replay (Python)", sample="seg", kw={}),
+    "fpga8": dict(label="FPGA replay: point+6b store+int8", sample="point",
+                  kw=dict(spec=("i", 8, 7, 7), nph=16, nmag=4,
+                          ring_scales=True)),
+    "binary": dict(label="BINARY replay: point+2b store+QPSK", sample="point",
+                   kw=dict(spec=("q",), nph=4, nmag=1, ring_scales=True)),
+    # the session's lean winner: 2-bit phase-only ring store + 8-bit integer
+    # arithmetic + point encoding (fr101 1.13 @ 75 KB vs shipped 1.88 @ 1.9 MB)
+    "lean": dict(label="FPGA-lean replay: point+2b store+int8", sample="point",
+                 kw=dict(spec=("i", 8, 7, 7), nph=4, nmag=1,
+                         ring_scales=True)),
+}
+
+
+def make_slam(cfg):
+    if not cfg["kw"]:
+        return RecordingSLAM(robust=True, attempt_every=4, relax_every=25,
+                             gap_kf=300, recent_aids=12)
+    import ssp_fpga as F
+
+    class RecFPGA(F.BandSLAM):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.snaps = []
+
+        def relax(self):
+            super().relax()
+            self.snaps.append((self.k, np.array(self.anchors, np.float32)))
+
+    kw = dict(cfg["kw"])
+    kw["spec"] = F.IntSpec(2, 2, 0, unit_w=True) if kw["spec"][0] == "q" \
+        else F.IntSpec(*kw["spec"][1:])
+    return RecFPGA(robust=True, attempt_every=4, relax_every=25,
+                   gap_kf=300, recent_aids=12, eps=0.0, **kw)
+
+
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else "data/intel.log"
+    cfg_name = "shipped"
+    slot = 1
+    for a in sys.argv[2:]:
+        if a.startswith("--config="):
+            cfg_name = a.split("=", 1)[1]
+        elif a.startswith("--slot="):
+            slot = int(a.split("=", 1)[1])
+    cfg = CONFIGS[cfg_name]
     keys = C.keyframes(C.parse_flaser(path))
     if len(sys.argv) > 2 and sys.argv[2].isdigit():
         keys = keys[:int(sys.argv[2])]
@@ -58,15 +106,18 @@ def main():
     odom = np.stack([k[1] for k in keys])
     kts = np.array([t for _, _, t in keys])
 
-    slam = RecordingSLAM(robust=True, attempt_every=4, relax_every=25,
-                         gap_kf=300, recent_aids=12)
+    slam = make_slam(cfg)
     slam.store_dtype = np.complex64
     # est stays float64: float32 chaining of the guess alone perturbs the
     # chaotic closure cascade (measured: Intel 2.44 -> 3.97 m). Cast at pack.
     est = np.zeros((n, 3))
     for k, (r, opose, ts) in enumerate(keys):
         rr = np.where(r < VALID_MAX, r, np.inf)
-        pts, w, _ = S.scan_to_samples(rr, beam)
+        if cfg["sample"] == "point":
+            import ssp_fpga as F
+            pts, w = F.points_from_scan(rr, beam)
+        else:
+            pts, w, _ = S.scan_to_samples(rr, beam)
         guess = odom[0] if k == 0 else L.se2_mul(
             est[k - 1], L.se2_mul(L.se2_inv(odom[k - 1]), odom[k]))
         est[k] = slam.add_keyframe(pts, w, guess)
@@ -125,30 +176,35 @@ def main():
                 nLoops=int(len(loops)), nSnaps=len(slam.snaps),
                 anchorEvery=B.ANCHOR, ate=ate, nRefOk=int(ref_ok.sum()),
                 keyTrans=C.KEY_TRANS, keyRotDeg=float(np.degrees(C.KEY_ROT)),
-                log=path.rsplit("/", 1)[-1])
+                log=path.rsplit("/", 1)[-1], config=cfg_name,
+                label=cfg["label"])
     b64 = base64.b64encode(blob).decode()
-    out = ROOT / "demo" / ("replay_" + meta["log"].replace(".log", "") + ".json")
+    suffix = "" if slot == 1 else f"_{cfg_name}"
+    out = ROOT / "demo" / ("replay_" + meta["log"].replace(".log", "")
+                           + suffix + ".json")
     out.write_text(json.dumps(dict(meta=meta, b64=b64)))
     print(f"wrote {out} ({out.stat().st_size:,} bytes)")
 
     if "--embed" in sys.argv:
         import re
+        tag = "REPLAY" if slot == 1 else f"REPLAY{slot}"
         html_p = ROOT / "demo" / "index.html"
         html = html_p.read_text()
-        payload = ("/*__REPLAY_START__*/\n"
-                   f"const REPLAY_META = {json.dumps(meta)};\n"
-                   f'const REPLAY_B64 = "{b64}";\n'
-                   "/*__REPLAY_END__*/")
-        if "/*__REPLAY_START__*/" in html:
-            html2, ns = re.subn(r"/\*__REPLAY_START__\*/.*?/\*__REPLAY_END__\*/",
-                                lambda _: payload, html, flags=re.S)
+        payload = (f"/*__{tag}_START__*/\n"
+                   f"const {tag}_META = {json.dumps(meta)};\n"
+                   f'const {tag}_B64 = "{b64}";\n'
+                   f"/*__{tag}_END__*/")
+        if f"/*__{tag}_START__*/" in html:
+            html2, ns = re.subn(
+                rf"/\*__{tag}_START__\*/.*?/\*__{tag}_END__\*/",
+                lambda _: payload, html, flags=re.S)
         else:
             html2, ns = re.subn(r"/\*__DATA_END__\*/",
                                 lambda _: "/*__DATA_END__*/\n" + payload,
                                 html, count=1)
         assert ns == 1, "marker splice failed"
         html_p.write_text(html2)
-        print(f"embedded replay into {html_p} "
+        print(f"embedded {tag} into {html_p} "
               f"({html_p.stat().st_size:,} bytes)")
 
 

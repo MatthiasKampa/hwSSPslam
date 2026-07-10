@@ -79,6 +79,16 @@ an auditor reproduces bit-exact. Report reproduction explicitly ("reproduces
 - Accept a change only if it holds **across logs**. Single-log (Intel-only)
   acceptance hid a real fr079 regression (analytic-GN over-convergence on floppy
   graphs) that only surfaced on the transfer suite.
+- **Band-probe rule (2026-07-10).** A single-trajectory ATE on a
+  perturbation-sensitive log is a *basin draw*, not a measurement: the closure
+  cascade flips discrete decisions under freeze-time map perturbations as small
+  as 1e-4 relative (Intel bifurcates 2.44 → a non-monotone 3.5–5.5 m band;
+  fr079 5.5 → 13.5 at 1e-3; a combo config scored 2.15 on ACES at ε=0 and 8.65
+  at ε=1e-6). Therefore any config-level claim must report its **perturbation
+  band** — `ssp_fpga.BandSLAM` over ε ∈ {0, 1e-6, 1e-3 × 2 seeds} — and the
+  accepted quantity is the band (min/median/max), not the point. Exceptions:
+  logs demonstrated robust at 1e-2 (fr101) may cite points, with the band run
+  once as evidence of robustness.
 - **Do not tune the encoder/params per dataset** unless explicitly running a
   per-dataset study. The held-out claims (fr101, belgioioso, MIT: *zero* code or
   parameter changes) are load-bearing and depend on one fixed config. A

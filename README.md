@@ -114,13 +114,14 @@ Everything is deterministic: published numbers reproduce bit-exact.
 | `ssp_slam.py` | encoder, matcher, synthetic world/sim (the original study) |
 | `ssp_bounded.py` | **bounded-memory continual SLAM (deliverable)** + GT bench |
 | `ssp_bounded_carmen.py` | CARMEN-log driver (Intel/fr079/ACES/MIT) |
+| `ssp_fpga.py` | **FPGA track**: write-time quantized store (per-ring polar), integer front-path model, per-beam point encoding, perturbation-band harness, op/BRAM sizing |
 | `ssp_hier.py` | hierarchical/HY4 refinement + drought relocalization (R1–R4) |
 | `ssp_slam_loop.py`, `ssp_slam_carmen.py` | earlier unbounded pipeline (kept as stratigraphy) |
 | `ssp_scale_arrays.py` | WIP: spatially-anchored per-scale submap arrays |
 | `ssp_posefilter.py` | WIP: VSA pose-posterior (harmonic Bayes) filter |
 | `baseline_icp.py` / `baseline_csm.py` / `baseline_rbpf.py` | reference baselines, same harness |
 | `bench_loop.py`, `worlds.py`, `experiments.py`, `rpe.py` | benches, worlds, encoder sweeps, metrics |
-| `demo/` | self-contained browser demo replaying the real Intel log |
+| `demo/` | self-contained browser demo: synth sandbox + real Intel replay (the "shipped replay (Python)" source is exported by `demo/export_replay.py` from the real pipeline — Python is the source of truth) |
 | `SotA/` | literature scout notes (VSA/SSP theory, spectral registration, backends, golden-ratio sampling) |
 | `RESULTS.md` | **the ledger**: all findings, tables, negatives, audits |
 | `archive/` | superseded implementations kept for provenance |

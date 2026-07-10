@@ -42,6 +42,12 @@ deterministic, reproduced bit-exact by an independent auditor.
 | ACES3 Austin (zero-shot) | 6.212 m | **5.41 m** | 5.3 MB | 13 ms/kf |
 | MIT Infinite Corridor, 1.9 km (held-out) | 42.66 m (38–58 band) | 189.3 m | 27 MB | 12–21 ms/kf |
 
+*(These values are deterministic and reproduce bit-exact; note however that
+Intel/fr079/ACES are perturbation-sensitive — a ≥1e-4 relative map perturbation
+moves them into multi-meter bands — so config-to-config deltas below the band
+width are not attributable. See §9 measurement caveat 3 and the §3
+stability-boundary bullet; fr101 is the one point-stable log.)*
+
 In-repo reference baselines (identical parsing / keyframing / eval,
 `baseline_*.py`; see "Reference baselines"): ICP + pose graph **1.70 m** (15–35
 MB, retains all scans), correlative grids 3.27 m, RBPF/GMapping-lite **0.12 m**
@@ -571,6 +577,22 @@ from the available signal). The soft-veto column concentrates its win on Intel;
 hard-veto edges it on the odo-excellent logs, exactly as the coh-target sweep
 predicted — a small, known cost.
 
+**2026-07-10 addendum — the gap's *size* is conditional on sampling quality
+(the guard's impossibility is unchanged).** Swapping the segment-resampling /
+occlusion-filter preprocessing for per-beam point encoding (`ssp_fpga.py` "E2",
+one phasor per hit, weight = r·dθ) improves the *frontend* on every log tested
+— frontend-only ATE: fr079 11.62 → 2.75, ACES 6.38 → 4.33, Intel 5.07 → 4.39,
+fr101 3.16 → 3.00, belgioioso 2.45 → 2.17. On ACES the E2 frontend now **beats
+the excellent raw odometry** (4.33 vs 5.41) that the shipped frontend degraded
+— so a large share of the documented "frontend hurts when odometry is
+excellent" was *sampling-quality damage* (hallucinated chord interpolation
+feeding an outlier-blind correlation), not an intrinsic scan-matching limit;
+belgioioso narrows but does not flip (2.17 vs odo 1.72). The *detection*
+question — knowing when to leave good odometry alone — is untouched and still
+needs the independent signal above. (Audited; mechanism localized by
+frontend-only decomposition; the viewpoint-neutrality and beam-count/Nyquist
+explanations were both tested and refuted en route — see RESULTS 2026-07-10.)
+
 ---
 
 ## 7. The negatives (honest table)
@@ -675,8 +697,9 @@ trajectory output must); full-graph relaxation is the one remaining O(t) compute
 term, with windowed relax + seq-edge marginalization the designed-but-optional
 fix (merged, verified, opt-in via `windowed=True`).
 
-**Two measurement caveats, stated plainly** (surfaced by an adversarial full-code
-review, 2026-07). (1) **"Bounded-memory" is really bounded-*map*-memory.** The
+**Three measurement caveats, stated plainly** (1–2 surfaced by an adversarial
+full-code review, 2026-07; 3 by the perturbation-band study, 2026-07-10).
+(1) **"Bounded-memory" is really bounded-*map*-memory.** The
 O(area) bound and every reported map-MB figure (1.9–27 MB) are the segment
 vectors + derivatives *only* (`memory_kb()` counts nothing else); the anchor
 poses, per-keyframe relative poses, and edge list all grow O(time), and in the
@@ -691,6 +714,15 @@ entire numeric ledger measures *agreement-with-GMapping*, not truth. The single
 highest-value future validation is an independent, non-RBPF-derived reference
 (one log with surveyed/fiducial GT) to decouple "2.44 m" from "2.44 m from
 GMapping".
+(3) **Single-trajectory ATEs on the sensitive logs are exact but fragile —
+config comparisons need perturbation bands.** Every published point value is
+deterministic and reproduces bit-exact, but freeze-time map perturbations of
+1e-4–1e-3 relative move Intel 2.44 → a non-monotone [3.5, 5.5] band, fr079
+5.52 → [5.5, 12.4], ACES 6.21 → [6.2, 8.2] (closure-cascade decision flips;
+§3 stability-boundary bullet). fr101 is the one point-stable log (1.88 at 1%
+noise). Consequently a config delta smaller than the log's band width is a
+basin draw, not an effect; PROTOCOL §6 now requires the band probe
+(`ssp_fpga.BandSLAM`) for config-level claims on the sensitive logs.
 
 **What is defensible.** The three properties are the bound, the absence of
 history, and the algebra — each verified: Intel plateaus at 698 segments (84% of

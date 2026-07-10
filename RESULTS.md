@@ -3544,25 +3544,42 @@ bundle, loop candidates, coherence probes — sees quantized content.
 segment at freeze time (deterministic seed), isolating "any map perturbation"
 from "quantization structure":
 
-    intel:  ε=1e-6 → 2.440 BIT-IDENTICAL (loops 80, counters identical)
-            ε=1e-5 → 2.440 identical
+    intel:  ε=1e-6 → 2.440 (print-precision identical; loops/counters
+                            IDENTICAL 80/51/51/26; audit: d_ATE 7.4e-7,
+                            max|Δpose| 1.3e-5 — not strictly bit-identical)
+            ε=1e-5 → 2.440 (identical at print precision)
             ε=1e-4 → 3.999            ε=1e-3 → 4.168 / 3.596 / 3.866 (3 seeds)
             ε=1e-2 → 5.232            ε=3e-2 → 3.464
-    fr101:  ε=1e-3 → 1.883 (≈1.881 shipped; loops 56 vs 53)
+    fr101:  ε=1e-3 → 1.883   ε=1e-2 → 1.884   (robust; ≈1.881 shipped)
+    fr079:  ε=1e-3 → 13.547  ε=1e-2 → 15.294  (FRAGILE, 2.5–2.8×)
+    aces:   ε=1e-3 → 6.963   ε=1e-2 → 7.457   (mild, +12–20%)
 
-**Intel bifurcates between 1e-5 and 1e-4 relative map noise into a ~[3.5, 5.5]
-m band that does not widen with ε** — not progressive degradation but a
-solver-path bifurcation (early-stopped TRF relax + closure-admission cascade
-re-rolls; a float32 rounding of the frontend guess alone lands at 3.971, same
-band). All six write-time quant results on intel (3.7–5.9) lie inside the same
-band as every noise sample (12 perturbed samples all in [3.5, 6.0], none ≤2.6).
-Consequences: (1) preserving intel's 2.440 requires ≤1e-5 relative map
-fidelity (≈17+ bits) — no useful quantization keeps it, but the 2.440 itself
-is a knife-edge configuration, not a robust operating point; the honest
-perturbed-intel figure is the band, still ~5× under raw odometry (24.2). (2)
-fr101 is noise-robust at 1e-3 and quantization-FREE at 6–8 b (1.66–1.89 at
-183–246 KB vs 1.9 MB c64 — a real ~10× map-memory win where the log
-tolerates it). fr079/aces tolerance rungs in flight; verdict per log.
+**Intel's response is a multi-meter, NON-MONOTONE band for every tested
+sub-percent perturbation** (1e-4 → 4.0; 1e-2 → 5.2; 3e-2 → 3.5) — not
+progressive degradation. AUDITED MECHANISM (read-only audit, CONFIRMED WITH
+CAVEATS): the continuous channel alone predicts ~1 cm of pose change at
+ε=1e-3 (measured gain ~13 m pose per unit relative map perturbation at
+1e-6), yet the observed response is ~1.7 m with SHIFTED decision counters
+(veto 64 vs 51) — i.e. 100–1000× super-linear, driven by **flipped discrete
+decisions in the closure-admission cascade** (which then take different
+early-stopped TRF solve paths), not the solver path alone. A float32
+rounding of the frontend guess alone lands at 3.971, in the same band.
+Scope caveats (audit): the band rests on 6 noise samples, intel-only; and
+gross quantization damage IS still distinguishable — 4-bit per-vector quant
+(7.728) falls OUTSIDE it. Defensible statements: (1) sub-percent freeze-time
+perturbations move intel's ATE by multiple meters via closure-decision
+flips, so individual intel deltas for ≥6-bit quantizers are NOT attributable
+to quantization damage — intel verdicts must rest on the perturbation-
+response comparison, not single numbers; (2) holding 2.440 (at print
+precision) required ≤1e-5 relative map fidelity — no useful quantization
+provides that, and 2.440 is a knife-edge configuration, not a robust
+operating point (the robust perturbed-intel figure is the band, still ~5×
+under raw odometry 24.2); (3) per-log tolerance spans 3+ orders of
+magnitude — fr101 absorbs 1e-2 (and is quantization-FREE at 6–8 b:
+1.66–1.89 at 183–246 KB vs 1.9 MB c64, a real ~10× map-memory win) while
+fr079 degrades 2.5× at 1e-3 and aces +12–20%. Noise tolerance tracks
+closure redundancy (fr101's 53 dense closures ≫ fr079's 32 on a floppy
+graph).
 
 ### E1 — fine rotation via scan d/dθ derivative: CLEAN NEGATIVE
 `DerFineMatcher` replaces the fine stage's 9 re-encodes with one derivative
@@ -3581,14 +3598,33 @@ irregular-compute stage in the fabric path):
     fr079  5.523 → 2.210  (loops 32 → 66)   — best fr079 result in the repo
     aces   6.212 → 4.409  (11 → 39)         — beats shipped AND raw odo 5.41
     fr101  1.881 → 1.569  (53 → 64)
-    intel  2.440 → 5.126  (80 → 250, flooding — inside the perturbation band,
-                            but the loop-count flooding is a distinct signature)
+    intel  2.440 → 5.126  (80 → 250, loop-edge explosion)
 
-Positive result ⇒ read-only audit dispatched before banking (PROTOCOL §4):
-verifying no eval drift between harnesses, the beam-count mechanism story
-(intel = 180 beams/1° → far-wall point spacing 14–35 cm exceeds λ_min/2
-Nyquist; the winning logs have ~360 beams), and the weight-cap variant (E2b,
-w ≤ 0.25) as the intel-clutter probe. VERDICT TO BE FILLED FROM THE AUDIT.
+**AUDIT VERDICT (read-only, PROTOCOL §4): CONFIRMED WITH CAVEATS.** The
+auditor reproduced all three improvements end-to-end bit-consistently (fr079
+2.210134/66, aces 4.409/39, fr101 1.569/64), verified run_log is line-for-line
+the shipped recipe with GT touching only the score block, verified the
+neutralised subclass is empirically bit-exact to the parent (so E2 is a PURE
+sampling swap), verified identical eval populations between arms (fr079: 4286
+matched reference poses in both), and found no fake-win channel (no duplicate/
+self edges, no fallback asymmetry, determinism confirmed). Caveats that stand:
+(1) intel regresses with a 3× loop-edge explosion (80→250) — a structural
+change no noise perturbation produced (band loop counts stayed 51–183), so
+the regression is real E2 behavior; E2 FAILS the multi-log gate as a
+shipped-default replacement — it is a 3-of-4 result, adopt per sensor/log.
+(2) The beam-count/Nyquist mechanism story is REFUTED: aces has 180 beams
+like intel and MORE super-Nyquist hits (11.3% vs intel's 6.2%; intel's hits
+are mostly near, median 1.96 m) yet improves. Mechanism: UNKNOWN. What E2
+actually changes (audit-quantified): drops the occlusion filter, gives
+isolated far hits up to ~0.7 weight (~6× shipped's 0.12 lone-hit weight),
+underweights oblique surfaces by cos(incidence); per-scan weight sums stay
+comparable (8–20 both arms). (3) The intel delta's SIZE is confounded by the
+perturbation band; the loop explosion is the trustworthy regression signal.
+Weight-cap probe (E2b, w≤0.25): does NOT rescue intel (6.720, loops 150) and
+is ~neutral on fr079 (2.151) — far-hit leverage is not the intel mechanism.
+Also E2-fr079 is far OUTSIDE fr079's perturbation response in the GOOD
+direction (generic ε=1e-3 noise degrades fr079 to 13.5; E2 improves it to
+2.21) — the improvement is signal, not a basin re-roll.
 
 ### Integer front-path model (binary-VSA track opened)
 `IntSpec`/`cis_int`/`IntEncoder`/`IntMatcher`/`IntSLAM`: the fabric arithmetic
