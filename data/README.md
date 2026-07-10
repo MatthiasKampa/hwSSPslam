@@ -14,6 +14,8 @@ for Intel; see the StachnissLab page for the others).
 | mit.log | MIT Infinite Corridor (1.9 km) | 17,480 | 180 x 1 deg | held-out stress log |
 | fr101.log | Freiburg building 101 | 4,758 | 360 x 0.5 deg | held-out transfer (dense-revisit building) |
 | belgioioso.log | Belgioioso Castle | 4,047 | 361 x 0.5 deg | held-out transfer (non-Manhattan structure) |
+| fhw.log | exhibition hall (large open space) | 38,613 | 180 x 1 deg | suite growth 2026-07-10 (dense 483-pose ref; E2's best absolute result 0.35 m) |
+| stata/*.bag | MIT Stata Center (PR2, Hokuyo 1040 x 0.25 deg, 260 deg FOV) | — | rosbag | **independent-class reference**: floorplan-anchored GT (~2-3 cm, per scan) — decouples ATE from the GMapping reference family; adapter = `ssp_stata.py` |
 
 fr101 and belgioioso were added 2026-07 to fill two gaps in the transfer suite
 (a dense-revisit loopy building where loop closure should excel, and a

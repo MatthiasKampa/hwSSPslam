@@ -4077,3 +4077,62 @@ refuted as insufficient (BFC), frontend recurrence identified as the locus,
 consensus/envelope as the deployable mitigations. P1 (twin verification)
 unchanged — the isometry argument stands; embedding reshaping wins live on
 the retrieval/memory/smoothness axes only.
+
+## 2026-07-10 — better benchmarking datasets: the first independent-class reference (MIT Stata), suite growth, and the RAWSEEDS path
+
+User directive: find better datasets. The ledger's highest-value gap
+(FINDINGS §9 caveat 2): every ATE is agreement-with-GMapping. Targets, by
+value: independent GT > second reference family > same-family diversity.
+
+### MIT Stata Center — the caveat-2 counter-evidence (ssp_stata.py, NEW)
+The dataset's GT is anchored to AS-BUILT FLOORPLANS (160-scan batches aligned
+to the plan at both ends, iSAM-relaxed between; ~2-3 cm claimed) — a
+reference class independent of any particle-filter SLAM. Adapter:
+`ssp_stata.py` reads the PR2 bag's /base_scan (Hokuyo UTM-30LX, 1040 beams ×
+0.25° = 260° FOV — the encoder/matcher are FOV-agnostic; only the CARMEN
+harness assumed 180°, and the loader supplies the true beam array) +
+/base_odometry composed into the laser frame; scores against the per-scan
+`.gt.laser.poses` derivatives. Bag 2012-01-27-07-37-01 (7.1 GB, 6:48 min,
+8,142 scans → 1,369 keyframes; GT parts 1+3 = 3,996 poses, 819 matched
+keyframes):
+
+    raw odometry   ATE 3.214  med 2.086  max  7.68
+    shipped        ATE 0.202  med 0.123  max  0.49   (99 loops, 78 ms/kf)
+    E2 point       ATE 1.659  (9 loops — closures collapse)
+    FPGA-lean      ATE 2.122  (11 loops)
+    shipped ε=1e-3 (2 seeds): 0.202 / 0.203 — PERTURBATION-STABLE
+                              (fr101-class; dense closures = robustness)
+
+**Headline: against floorplan-anchored truth the shipped system is a
+0.202 m / 0.123 m-median system, and the number is perturbation-stable.**
+The agreement-with-GMapping caveat now has counter-evidence on an
+independent-class reference. Per-regime note: E2 REGRESSES here (1040-beam
+Hokuyo; loop count collapses 99→9) — with fhw below, the sampling verdict
+is confirmed per-log, not per-beam-count: shipped sampling for intel+stata,
+E2 for fr079/aces/belg/fhw(+fr101 median). Scope caveats: one 6:48-min
+session; GT covers 819/1369 keyframes; base→laser offset used PR2 nominal
+0.275 m (not in this bag's /tf); GT is floorplan-anchored but
+scanmatch-interpolated between anchors (weakest in long corridors, per its
+authors). Data + gdown recipe in data/fetch_datasets.sh; parsed-bag cache
+(.npz) written beside the bag.
+
+### Suite growth (zero-adapter Radish logs)
+- **fhw** (large open exhibition hall, 38,613 scans → 7,035 kf, dense
+  483-pose ref, clean timestamps): shipped **0.981** / E2 **0.350 (med
+  0.233)** / lean 1.108 @ 206 KB — E2's best absolute result in the repo,
+  on a 180-beam log (further burying the beam-count story).
+- **orebro**: DROPPED — frontend never engages (ATE 18.29 identical across
+  shipped/E2/lean, 1-2 loops; beam/FOV mismatch with the FLASER driver
+  assumptions). Noted in fetch script.
+
+### RAWSEEDS Bicocca — located, blocked at one manual click
+The genuinely independent camera-network GT + **published GMapping baseline
+vs that GT (ATE 2.04 ± 1.87 on Bicocca_2009-02-25b)** — a direct
+same-truth comparison target. rawseeds.org is alive (with per-file
+inventories and baseline solutions); the files now live in AIRLab's Dropbox
+folder, whose per-file addressing defeated headless access (subpath 200s are
+interstitials; legacy list endpoint 403; no mirrors; no archive.org copy).
+One manual download of Bicocca_2009-02-25b-{SICK_FRONT,ODOMETRY_XYT,
+GROUNDTRUTH}.csv.bz2 unblocks it — the adapter is a small CSV loader away
+(180° SICK = zero FOV work). Deutsches Museum (Cartographer bag, 493 MB,
+verified reachable) remains the second-reference-family option.
