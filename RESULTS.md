@@ -4241,3 +4241,36 @@ JS replay shim over every keyframe — max |shim − Python fin| ≤ 4e-6 m
 drawing resolution). Full-page JS re-run through jsc (core executes to the
 headless guard; UI parses); 46 referenced element ids all defined.
 index.html self-contained at 26.2 MB.
+
+### Loop-candidate radius sweep {4, 6, 8} vs shipped 5.0 (scratch_radius.py)
+The divergence trace located the band's first flip AT this constant's
+boundary; the value itself was never swept. RadiusBand = verbatim copied
+try_constraint with the one literal lifted (cand_rad=5.0 asserted bit-exact
+to parent). eps=0: intel 4.71 / 4.65 / 3.40 and fr079 10.38 / 8.57 / 10.29
+for rad 4/6/8 — ALL far worse than shipped (2.440 / 5.523); fr101 alone
+prefers 6.0 (1.648 med 1.005, +38 loops) but the gain does not transfer.
+Bands: fr079 medians are RADIUS-INVARIANT (8.37 / 8.91 / 8.57 / 8.30 for
+5/4/6/8 — the radius moves the eps=0 draw, not the distribution; the
+shipped point 5.52 sits at its band floor). intel: rad 8 NARROWS the band
+([3.37..4.86] vs [2.44..6.72]) at the cost of the floor — consistent with
+the chain-membership-flip mechanism (a farther boundary crosses sparser
+anchor shells), but its median 3.40 does not beat shipped 3.17. VERDICT:
+5.0 stands (best floor + best median on 2/3 logs); radius is not a
+cross-log tunable; the fr101-only 6.0 gain is the usual per-log trap.
+
+### Bench redirect (user call, mid-burst): intel REMOVED; target = SPOT/360°
+User: intel "doesn't work well in general (diverges) and the ground truth
+seems off"; deployment target is a SPOT with a 360° lidar (intel is 180°);
+"you can just remove that bench" — and the synthetic env joins the suite.
+Actions: acceptance suite = stata (260° FOV, floorplan GT — nearest the
+target) / fr101 / fhw / fr079(bands) / belg + the synthetic 360° bench;
+intel dropped from EXPERIMENTS/PROTOCOL acceptance language (loader kept in
+ssp_datasets only for historical ledger reproducibility — every pre-existing
+intel number in this file stays as history). Webvis: intel replay dropped
+from the pack (8 replays, stata first) and the LIVE-JS intel pipeline mode
+removed entirely (blob + loadIntel + live option + cDer control + the
+core-parity soak sub-check; the sandbox is the interactive toy; replays are
+the real-data view). demo/export_data.py → archive/. index.html 26.2 → 20.0
+MB; jsc + 8-replay parity re-verified. Consistent with this suite's own
+findings: intel was the knife-edge log AND the agreement-with-GMapping
+caveat's worst case.

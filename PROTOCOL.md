@@ -76,19 +76,26 @@ an auditor reproduces bit-exact. Report reproduction explicitly ("reproduces
 
 ## 6. Multi-log acceptance gates; held-out discipline
 
-- Accept a change only if it holds **across logs**. Single-log (Intel-only)
+- Accept a change only if it holds **across logs**. Single-log
   acceptance hid a real fr079 regression (analytic-GN over-convergence on floppy
   graphs) that only surfaced on the transfer suite.
+- **Acceptance suite (user call, 2026-07-10).** Primary: **stata**
+  (floorplan GT, 260° FOV — nearest to the deployment target), **fr101**,
+  **fhw**, **fr079** (as bands), **belg**, plus the **synthetic 360° bench**
+  (exact GT). **intel is REMOVED from the suite** — diverging behavior
+  class (knife-edge band), GMapping-referenced GT, and a 180° FOV that does
+  not match the target platform (SPOT, 360° lidar). Its loader stays in
+  `ssp_datasets` only so historical ledger entries remain reproducible.
 - **Band-probe rule (2026-07-10).** A single-trajectory ATE on a
   perturbation-sensitive log is a *basin draw*, not a measurement: the closure
   cascade flips discrete decisions under freeze-time map perturbations as small
-  as 1e-4 relative (Intel bifurcates 2.44 → a non-monotone 3.5–5.5 m band;
-  fr079 5.5 → 13.5 at 1e-3; a combo config scored 2.15 on ACES at ε=0 and 8.65
-  at ε=1e-6). Therefore any config-level claim must report its **perturbation
-  band** — `ssp_fpga.BandSLAM` over ε ∈ {0, 1e-6, 1e-3 × 2 seeds} — and the
-  accepted quantity is the band (min/median/max), not the point. Exceptions:
-  logs demonstrated robust at 1e-2 (fr101) may cite points, with the band run
-  once as evidence of robustness.
+  as 1e-4 relative (fr079 5.5 → 13.5 at 1e-3; a combo config scored 2.15 on
+  ACES at ε=0 and 8.65 at ε=1e-6; the removed intel log bifurcated 2.44 →
+  3.5–5.5). Therefore any config-level claim on a banded log must report its
+  **perturbation band** — `ssp_fpga.BandSLAM` over ε ∈ {0, 1e-6, 1e-3 × 2
+  seeds} — and the accepted quantity is the band (min/median/max), not the
+  point. Exceptions: logs demonstrated robust at 1e-2 (fr101) may cite
+  points, with the band run once as evidence of robustness.
 - **Do not tune the encoder/params per dataset** unless explicitly running a
   per-dataset study. The held-out claims (fr101, belgioioso, MIT: *zero* code or
   parameter changes) are load-bearing and depend on one fixed config. A

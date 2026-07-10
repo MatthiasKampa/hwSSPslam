@@ -192,7 +192,9 @@ def run(name, cls=F.BandSLAM, cap=None, sample="seg", slam=None, **kw):
     t0 = time.time()
     for k, (r, opose, ts) in enumerate(keys):
         rr = clean(bundle, r)
-        if sample == "point":
+        if callable(sample):
+            pts, w = sample(rr, beam)
+        elif sample == "point":
             pts, w = F.points_from_scan(rr, beam)
         elif sample == "pointcap":
             pts, w = F.points_from_scan(rr, beam, wcap=0.25)

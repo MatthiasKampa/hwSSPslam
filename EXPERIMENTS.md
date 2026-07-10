@@ -14,14 +14,22 @@ reference used **only** for scoring. Under `data/` (gitignored, fetched).
 
 | key | file | notes |
 |---|---|---|
-| intel | `data/intel.log` | Intel Research Lab, the tuning log (full 6205 kf) |
-| fr079 | `data/fr079.log` | Freiburg 079, zero-shot |
-| fr101 | `data/fr101.log` | Freiburg 101, held-out dense-revisit building |
-| aces | `data/aces_publicb.log` | ACES3 Austin, zero-shot, odo already good |
-| fhw | `data/fhw.log` | FHW Ravensburg exhibition hall |
-| belg | `data/belgioioso.log` | non-Manhattan castle; range-identity eval |
-| mit | `data/MIT_Infinite_Corridor_2002_09_11_same_floor.log` | 1.9 km held-out capstone; range-identity eval |
-| stata | `data/stata/2012-01-27-07-37-01.bag` | MIT Stata, floorplan-anchored GT (independent-class reference) |
+| key | file | role |
+|---|---|---|
+| stata | `data/stata/2012-01-27-07-37-01.bag` | **primary** — floorplan-anchored GT (independent-class reference); 260° FOV, nearest to the SPOT/360° target |
+| fr101 | `data/fr101.log` | **primary** — dense-revisit building, point-stable log |
+| fhw | `data/fhw.log` | **primary** — exhibition hall, 559 closures |
+| fr079 | `data/fr079.log` | **primary** — zero-shot; perturbation-banded (read as bands) |
+| belg | `data/belgioioso.log` | **primary** — non-Manhattan castle; range-identity eval |
+| aces | `data/aces_publicb.log` | secondary — banded, odo already good |
+| mit | `data/MIT_Infinite_Corridor_2002_09_11_same_floor.log` | stress-only — corridor capstone; range-identity eval |
+
+**intel was REMOVED from the suite (user call, 2026-07-10)**: diverging
+behavior class, GMapping-referenced GT, 180° FOV vs the deployment target
+(SPOT, 360° lidar). The `ssp_datasets` loader keeps the entry only so
+historical `RESULTS.md` numbers stay reproducible. The synthetic bench
+(`ssp_sampling.py synth`, 360° FOV, exact GT) joins the acceptance suite as
+the target-matched environment.
 
 **One registry for all of it: `ssp_datasets.py`** — `load(name)`,
 `evaluate(bundle, fin)`, `run(name, cls, sample=..., **kw)`. The run loop is
