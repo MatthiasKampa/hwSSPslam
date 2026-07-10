@@ -44,3 +44,9 @@ get "$BASE/fhw/fhw-rec-001.gfs.log.gz"  fhw.gfs.log.gz
 # https://airlab.deib.polimi.it/datasets-and-tools/); per-file headless
 # addressing defeated us — one manual download of
 # Bicocca_2009-02-25b-{SICK_FRONT,ODOMETRY_XYT,GROUNDTRUTH}.csv.bz2 suffices.
+
+# Deutsches Museum (Cartographer 270-deg backpack; SPOT-adjacent walking
+# regime; no odometry topic, no published GT relations — loop-stress set)
+mkdir -p data/museum
+curl -L -C - -o data/museum/cartographer_paper_deutsches_museum.bag \
+  https://storage.googleapis.com/cartographer-public-data/bags/backpack_2d/cartographer_paper_deutsches_museum.bag

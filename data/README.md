@@ -28,3 +28,14 @@ for ATE/RPE evaluation only (note: mit.gfs.log AND belgioioso.gfs.log have
 corrupt/low-precision timestamps upstream; evaluation matches scans by exact
 range-array identity instead — see RESULTS.md. Intel/fr079/aces/fr101 have
 clean shared-base timestamps.).
+
+## Deutsches Museum (Cartographer, 270-deg backpack — SPOT-adjacent regime)
+
+```bash
+mkdir -p data/museum && curl -L -C - -o data/museum/cartographer_paper_deutsches_museum.bag \
+  https://storage.googleapis.com/cartographer-public-data/bags/backpack_2d/cartographer_paper_deutsches_museum.bag
+```
+493 MB; topics: `horizontal_laser_2d` (MultiEchoLaserScan, 270°),
+`vertical_laser_2d`, `imu`. NO wheel odometry (walking backpack) and no
+published ground-truth relations (bucket probed 2026-07-10) — usable as a
+frontend/loop stress set; absolute eval TBD.

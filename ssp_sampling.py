@@ -170,6 +170,37 @@ def pack_segint(rr, beam, cut_deg=63.4, lone="point"):
         [np.atleast_1d(x) for x in W])
 
 
+def sample_decim(rr, beam, k=4):
+    """Plain decimation control: every k-th hit at k-fold mass."""
+    pts, w = F.points_from_scan(rr, beam)
+    return pts[::k], w[::k] * k
+
+
+def pack_group(rr, beam, k=4, cut_deg=63.4):
+    """DECIMATION BY INTEGRAL (dense-head mode, e.g. 1024-beam SPOT lidar):
+    fold runs of up to k consecutive bridged hits into ONE exact-integral
+    segment (chord = first->last hit, mass = trapezoid arc over the run) —
+    encode cost /k with the sinc factor preserving in-band content.
+    Occlusion breaks / gaps / lone hits fall back to point terms."""
+    idx, r, pts, dth = _hits(rr, beam)
+    if len(idx) < 2:
+        return np.zeros((0, 2)), np.zeros(0)
+    keep, chord_v, chord = _bridge(idx, r, pts, cut_deg)
+    foot = r * dth                    # per-hit arc footprint (E2 partition —
+    P0, P1, W = [], [], []            # every hit lands in exactly one term,
+    i, n = 0, len(idx)                # so total mass == the E2 point total)
+    while i < n:
+        j = i
+        while j < n - 1 and keep[j] and (j - i) < k - 1:
+            j += 1
+        P0.append(pts[i])
+        P1.append(pts[j])
+        W.append(float(foot[i:j + 1].sum()))
+        i = j + 1
+    return (np.vstack([np.stack(P0), np.stack(P1)]),
+            np.asarray(W, float))
+
+
 # ---------------------------------------------------------------------------
 # segment-integral encoder
 # ---------------------------------------------------------------------------
@@ -601,6 +632,56 @@ ARMS = (
 )
 
 
+def _terms(b, sm):
+    """Mean encode terms per scan — proxy for the FPGA encode budget."""
+    tot, cnt = 0, 0
+    for i in range(0, len(b["keys"]), 200):
+        rr = DS.clean(b, b["keys"][i][0])
+        if sm == "seg":
+            _, w, _ = S.scan_to_samples(rr, b["beam"])
+        elif sm == "point":
+            _, w = F.points_from_scan(rr, b["beam"])
+        else:
+            _, w = sm(rr, b["beam"])
+        tot += len(w)
+        cnt += 1
+    return tot / max(cnt, 1)
+
+
+SPOT_ARMS = (
+    ("shipped seg (0.12m) ", "seg", None, {}),
+    ("E2 point (all 1024) ", "point", None, {}),
+    ("interp n3 cut63.4   ",
+     lambda rr, b: sample_interp(rr, b, 3, 63.4), None, {}),
+    ("decim/4 point       ", lambda rr, b: sample_decim(rr, b, 4), None, {}),
+    ("decim/8 point       ", lambda rr, b: sample_decim(rr, b, 8), None, {}),
+    ("arcint (per beam)   ", pack_arcint, "seg", {}),
+    ("segint c63 lone=arc ",
+     lambda rr, b: pack_segint(rr, b, 63.4, "arc"), "seg", {}),
+    ("GROUP/4 integral    ", lambda rr, b: pack_group(rr, b, 4), "seg", {}),
+    ("GROUP/8 integral    ", lambda rr, b: pack_group(rr, b, 8), "seg", {}),
+    ("GROUP/16 integral   ", lambda rr, b: pack_group(rr, b, 16), "seg", {}),
+)
+
+
+def stage_spot(worlds=("mixed", "corridor"), seeds=(11,)):
+    """Target-sensor grid: 1024 beams x 360 deg (SPOT custom head, 20 Hz).
+    The question is the DECIMATION strategy: at 0.35 deg spacing the
+    encode budget (n_terms x D MACs) dominates, and grouping adjacent
+    beams into exact-integral segments is the candidate operator."""
+    import ssp_synth
+    for world in worlds:
+        for seed in seeds:
+            b = ssp_synth.make(world, seed=seed, n_beams=1024)
+            print(f"== {b['name']} nb=1024 ({len(b['keys'])} kf)", flush=True)
+            for tag, sm, seg_cls, kw in SPOT_ARMS:
+                cls = SegIntSLAM if seg_cls else F.BandSLAM
+                r = DS.run(dict(b), cls, sample=sm, spec=None, nph=0, **kw)
+                print(f"  {tag}  ATE {r['ate']:6.3f}  med {r['med']:6.3f}  "
+                      f"loops {r['loops']}  terms/scan "
+                      f"{_terms(b, sm):6.0f}", flush=True)
+
+
 def stage_synth(worlds=("mixed", "corridor"), seeds=(11, 12)):
     """The full variant grid on the SPOT-proxy 360-deg bench (exact GT)."""
     import ssp_synth
@@ -630,3 +711,5 @@ if __name__ == "__main__":
             stage_renorm(lg)
     elif what == "synth":
         stage_synth()
+    elif what == "spot":
+        stage_spot()

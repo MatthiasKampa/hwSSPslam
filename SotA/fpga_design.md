@@ -5,6 +5,32 @@ to fabric, grounded entirely in tonight's audited numbers (RESULTS
 "2026-07-10" sections; `ssp_fpga.py` is the bit-accurate reference model).
 This is the hand-off document for an RTL session.
 
+## Target sensor (user spec, 2026-07-10)
+
+SPOT-mounted custom head: **360° × 1024 beams @ 20 rotations/s**
+(0.35° spacing, 20.5k returns/s). Consequences, measured:
+
+- **Encode budget is a non-issue**: full 1024-term encode = 6.31 M
+  MAC-equiv/keyframe → 0.13 GMAC/s at 20 Hz keyframes ≈ **1 DSP48 @
+  200 MHz** (`ops_report(1024)`). The coarse/fine correlation stages
+  (point-count-independent) dominate. Group-integral decimation /16
+  (`ssp_sampling.pack_group`, mass-exact, 986→265 terms on the synth
+  bench) halves the total to 2.84 M — an efficiency option, not a need.
+- **Fine-ring aliasing from beam spacing vanishes**: wall-sample spacing
+  r·dθ stays under λ_min/2 = 0.125 m out to r ≈ 20 m at normal incidence —
+  the thermometer/blanking question reduces to occlusion gaps and grazing
+  incidence (encoder study, synth-360: renorm_alpha inert).
+- **Sampling structure matters more than density**: on the 1040-beam
+  stata proxy, raw per-beam points COLLAPSE the closure layer (1.659, 9
+  loops) while bridged pair-interpolation at the shipped 63.4° gate
+  restores it (0.196, 74 loops ≈ shipped 0.202) — the deploy sampler must
+  bridge, not just weight. (Full verdict in the encoder-study RESULTS
+  entry.)
+- **Motion skew** at 20 rot/s on a walking base (~1.5 m/s → up to ~7.5 cm
+  smear/rev): de-skew each revolution against the odometry twist before
+  encoding (host-side, cheap). Untested here — flag for the integration
+  session.
+
 ## System split
 
 - **Fabric**: per-keyframe hot path — scan sampling, phase encode, frontend
