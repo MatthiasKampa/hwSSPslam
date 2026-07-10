@@ -162,6 +162,19 @@ by index permutation, each scored against a 17×17 translation bank
 and x/y. Guess = previous estimate composed with the odometry delta; accept
 gate 0.45 m / 11°, else clean odometry fallback for that keyframe.
 
+**Odometry combination — hard vs soft.** Shipped, the odometry prior enters
+*hard*: it centers and bounds the search window (prediction), gates
+acceptance, and is the fallback pose. The *soft* alternative — advance by
+odometry, then take the MAP estimate of the correlation surface fused with
+a γ-weighted odometry prior — is built and measured
+(`scratch_odomprior`): it transforms odometry-excellent logs (ACES
+6.21→1.39, fr101 1.88→1.70 at γ=1.0) and damages drift-heavy ones (fr079
+5.52→10.1) — the frontend do-no-harm trade in its purest form, so γ ships
+as a per-deployment register with γ=0 default (the sandbox "prior γ"
+slider is this exact mechanism, live). On a platform with good kinematic
+odometry (SPOT legs), γ>0 is the expected setting. Backend-side odometry
+factors were also tested and rejected (helps fr101 only).
+
 **Keyframing & map write**: keyframes at 0.10 m / 5°; every 5th keyframe
 opens an anchor. Scans fold into the active segment in the anchor frame at
 EXACT rotation (points still in hand — the segment never sees per-keyframe
@@ -314,7 +327,11 @@ closest relatives come first, with a line on where this project departs.
 - Olson, *Real-Time Correlative Scan Matching* (ICRA 2009) — the dense
   translation × rotation correlation search this frontend mirrors, over
   occupancy grids; here the search runs over Fourier features with
-  rotation as index permutation and no grid ever built.
+  rotation as index permutation and no grid ever built. His formulation
+  also carries the motion-prior term that our soft γ-fusion option
+  corresponds to (cf. the measurement × motion fusion of Thrun, Burgard &
+  Fox, *Probabilistic Robotics* 2005; Cartographer's local matcher
+  penalizes deviation from the prior the same way).
 - Reddy & Chatterji (IEEE TIP 1996) phase correlation / Fourier–Mellin;
   Checchin et al. (2009) FMT radar registration; Bülow & Birk spectral
   registration — spectral-domain SE(2) matching, frame-to-frame on dense
