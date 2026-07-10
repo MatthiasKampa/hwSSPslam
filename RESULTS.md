@@ -3690,6 +3690,12 @@ Note on intel-FPGA8: its band [3.69 .. 5.60] sits INSIDE shipped's
 [2.44 .. 6.72] — at ~10× less map memory the quantized-integer configuration
 is band-indistinguishable from shipped on the tuning log.
 
+Seed-firming (4 extra ε=1e-3 seeds per config on intel, n≈7 total): shipped
+draws 2.78–6.43 (median ≈3.9; one draw approaches the knife-edge), E2 draws
+4.14–9.72 (median ≈5.3, incl. a 9.7 tail) — the intel verdicts (shipped
+sampling preferred; FPGA8 band-indistinguishable) stand on the larger
+sample.
+
 Reading (band vs band): **E2 dominates shipped outright on fr079** (its whole
 band clears shipped's best draw) **and on aces and belgioioso** (every rung
 better); on fr101 it improves the median (1.68 vs 1.88) at the cost of
@@ -3728,16 +3734,22 @@ and REFUTED as the position effect: **E3** (samples at REAL hit positions but
 with the shipped occlusion-filtered chord weights) reproduces shipped's bad
 fr079 frontend almost exactly (frontend-only 11.69 vs shipped 11.62 vs E2
 2.75; full 7.92 in shipped's band). So the E2 win is carried by the
-WEIGHTING and/or the occlusion filter's mass removal, not by where the
-samples sit. **E4** (r·dθ weights WITH the occlusion filter) then splits the
-two contributions: fr079 frontend-only shipped/E3 11.6 → E4 6.02 → E2 2.75.
-**Half the win is the arc-length r·dθ weighting; the other half is NOT
-running the occlusion filter.** The filter was designed to kill phantom
-bridges in chord interpolation — with point sampling there are no bridges to
-kill, and its weight-zeroing near depth discontinuities (door frames,
-furniture edges) deletes exactly the most translation-informative scan
-content. A shipped design feature is thus actively harmful in the
-point-sampling regime (and its protective role is moot there). FINDINGS §6 gains the addendum: the
+WEIGHTING and/or content selection, not by where the samples sit (audit
+caveat: E3's rmse matches shipped but its median improves 22% — positions
+are not literally nothing, they just don't touch the rmse-dominating
+failure). **E4** (r·dθ weights WITH a filter) initially suggested a 50/50
+split (11.6 → 6.02 → 2.75) — **the follow-up audit REFUTED that attribution
+as worded**: the E4 probe's isolation rule silently deleted depth-jump
+SILHOUETTE hits (hits whose neighbor chords all exceed MAX_CHORD — 0.45% of
+fr079's hits) that the shipped pipeline always keeps as lone hits; a
+faithful arm (E4a: dr/tang occlusion deletion only) scores **2.92 ≈ E2's
+2.75**. Corrected decomposition: **the point-regime win = arc-length r·dθ
+weighting + retaining isolated depth-jump silhouette hits; the dr/tang
+occlusion masking itself is nearly FREE (±0.2 m) under point sampling.**
+Those ~0.45% silhouette points carrying a 2× frontend factor is itself a
+sharp finding (they are the translation-informative payload). The
+chord-regime filter harm is carried by the separate occ-off experiment
+below, which the audit confirmed exactly. FINDINGS §6 gains the addendum: the
 do-no-harm gap's SIZE was substantially sampling damage (aces frontend now
 beats its own odometry); the guard's impossibility is untouched.
 
@@ -3860,7 +3872,7 @@ meaningful deltas:
     |d est| > 1 µm  : kf 6          (float noise)
     |d est| > 1 cm  : kf 250        (still only 1 cm!)
     ... d stays 0.1–0.4 mm through kf 3000 ...
-    FIRST DECISION DELTA: kf 3424 — the runs admit a DIFFERENT loop edge:
+    FIRST PERSISTENT/STRUCTURAL FLIP: kf 3424 — a DIFFERENT loop edge:
         A: (240 → 684)    B: (241 → 684)
     fallback flip kf 3547, first relax delta kf 3575, |d|>0.1 m kf 3575,
     |d|>1 m kf 3645; thereafter the loop-edge sets diverge wholesale
@@ -3874,7 +3886,15 @@ boundary anchor in/out of the 5 m candidate set, shifting the chain median by
 one anchor and re-anchoring the (otherwise nearly identical) constraint; the
 early-stopped relax's path-dependence then amplifies the ~cm difference over
 ~200 kf into meters, after which the trajectories present different closure
-candidates and the sets scatter. The matcher, the coherence tiers, and the
+candidates and the sets scatter. AUDIT (independent re-instrumentation,
+identical numbers): the flip is verified to the millimeter — run A has
+anchor 237 at 4.9999 m (inside the 5.0 m candidate radius), run B at
+5.0003 m (outside). Caveats folded in: a ~1 cm matcher-internal argmax flip
+occurs at kf 250 and SELF-HEALS by kf 300 (an unrecorded decision class that
+fires early and harmlessly — reinforcing the v2 front-consensus reading),
+so kf 3424 is the first PERSISTENT flip among recorded observables; the
+fallback proxy is blind at relax keyframes (9 such, identical in both runs,
+immaterial); insertion tallies are approximate at prune keyframes. The matcher, the coherence tiers, and the
 innovation gate were all innocent — which is why both jitter-consensus gates
 were no-ops. Targeted fix under test (`scratch_attrib.py`): attribute the
 edge to the chain anchor SPATIALLY NEAREST the matched pose (invariant to
@@ -3918,4 +3938,29 @@ float operators at both levels; bundling part-retrievability float 0.930 →
 thesis's algebraic claims — translate = phase multiply, rotate = permute,
 compose = add, O(D) graph corrections on frozen content — carry over to the
 quantized/integer store: intact at 6 bits, gracefully degraded at 2 bits
-(consistent with the e2e band table's per-log verdicts).
+(consistent with the e2e band table's per-log verdicts). AUDIT confirmed all
+numbers with framing caveats: T1 is best read as STORE fidelity with
+error-free operators (the transform — float or addr8-integer — adds ≤4e-4 at
+6 b on top of the static quantization cosine, which IS the algebra-survives
+claim); the sub-grid δ·segder rotation path is untested here (the e2e band
+table carries it); and nmag=1 mid-tread actually emits TWO magnitude levels
+(top-coded ≥p99 components, ~1%), so the "2 b/phasor" memory figures are
+~1%-of-components optimistic — a hardware clamp to one level is the honest
+fix, untested.
+
+### Session capstone (2026-07-10, ~10 h autonomous)
+Directive: rework Python-first after the webvis synth hand-tuning broke the
+real-data path; keep exploring submaps/loop closure; float groundwork toward
+an FPGA SSP-SLAM, then a binary VSA version. Delivered, all audited (two
+independent read-only audits; one attribution corrected): `ssp_fpga.py`
+(quantized per-ring store / integer front path / point encoding / band
+harness / sizing), the perturbation-band methodology (PROTOCOL §6) grounded
+in a millimeter-verified divergence trace and closed with four honest
+intervention negatives (`ssp_stablegate.py`), E2 point encoding (frontend
+win 5/5 logs, band-dominant fr079/aces/belg), the binary verdict (8-bit
+arithmetic knee, 2-bit store on robust logs, algebra survives the store),
+the FPGA-lean configuration (fr101 75 KB / fr079 110 KB / MIT 625 KB at
+band-equal accuracy), and a Python-fed two-source webvis replay (shipped +
+FPGA8) that defaults the real-data tab to the true pipeline. The corridor /
+verification walls were not re-litigated; nothing shipped was edited; every
+neutralised subclass is bit-exact to its parent.

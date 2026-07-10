@@ -817,14 +817,18 @@ consolidation" has the full table).
   frontend registration improvement on 5/5 logs** (frontend-only: fr079
   11.62→2.75, aces 6.38→4.33 — now BEATING its excellent raw odometry 5.41 —
   intel 5.07→4.39, fr101 3.16→3.00, belgioioso 2.45→2.17; audited). The
-  mechanism was pinned by a discriminator ladder (E3/E4): **half the win is
-  the arc-length r·dθ weighting, half is NOT running the occlusion filter**
-  (fr079 frontend-only: chord-weights+filter 11.6 → r·dθ+filter 6.0 →
-  r·dθ no-filter 2.75); the filter's weight-zeroing near depth
-  discontinuities deletes the most translation-informative scan content, and
-  with point sampling there are no phantom bridges for it to protect
-  against. (Interpolated-position mass, beam-count/Nyquist, and
-  viewpoint-neutrality were each tested and refuted as explanations.)
+  mechanism was pinned by a discriminator ladder (E3/E4/E4a, audited): the
+  win is **the arc-length r·dθ weighting + retaining isolated depth-jump
+  SILHOUETTE hits** (0.45% of hits carrying a 2× frontend factor on fr079);
+  the dr/tang occlusion masking itself is nearly free under point sampling
+  (a first E4 arm that suggested "half is the filter" was audit-corrected —
+  it had silently deleted silhouette hits shipped always keeps). Separately,
+  in the CHORD-sampling regime the occlusion filter is a per-environment
+  tradeoff (frontend-only occ-off: fr079 11.6→4.8, aces 6.4→2.4 — beating
+  E2 and raw odometry there — while intel needs it, 5.1→7.0).
+  (Interpolated-position mass, beam-count/Nyquist, and viewpoint-neutrality
+  were each tested and refuted as explanations; sample positions affect the
+  median, not the rmse-dominating failure.)
   Full-system, band-vs-band: **dominates shipped on fr079** (whole band
   [2.21..4.86] clears shipped's best 5.52), **wins aces and belgioioso**,
   median-improves fr101 at some variance cost, and is band-worse on intel
