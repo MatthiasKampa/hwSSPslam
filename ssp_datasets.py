@@ -142,6 +142,10 @@ def evaluate(bundle, fin):
         ref, valid = _ref_by_identity(bundle)
         al = C.align_se2(fin[valid, :2], ref[valid])
         e = np.linalg.norm(al - ref[valid], axis=1)
+    elif bundle["eval"] == "exact":              # synthetic bench (ssp_synth)
+        gt = bundle["gt"]
+        al = C.align_se2(fin[:, :2], gt[:, :2])
+        e = np.linalg.norm(al - gt[:, :2], axis=1)
     else:                                        # stata floorplan GT
         gts, gxy = _gt_stata()
         j = np.abs(gts[:, None] - kts[None, :]).argmin(1)
@@ -160,6 +164,9 @@ def ref_for_keys(bundle):
     if bundle["eval"] == "ident":
         ref, valid = _ref_by_identity(bundle)
         return ref.astype(np.float32), valid.astype(np.uint8)
+    if bundle["eval"] == "exact":                # synthetic bench (ssp_synth)
+        return (bundle["gt"][:, :2].astype(np.float32),
+                np.ones(n, np.uint8))
     if bundle["eval"] == "gfs":
         gfs = C.parse_flaser(bundle["path"].replace(".log", ".gfs.log"))
         rts = np.array([t for _, _, t in gfs])

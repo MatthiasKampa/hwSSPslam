@@ -580,6 +580,41 @@ def stage_renorm(lg):
               f"med {r['med']:6.3f}  loops {r['loops']}", flush=True)
 
 
+ARMS = (
+    ("shipped seg        ", "seg", None, {}),
+    ("E2 point           ", "point", None, {}),
+    ("interp n3 cut45    ",
+     lambda rr, b: sample_interp(rr, b, 3, 45.0), None, {}),
+    ("interp n3 cut63.4  ",
+     lambda rr, b: sample_interp(rr, b, 3, 63.4), None, {}),
+    ("interp n5 cut63.4  ",
+     lambda rr, b: sample_interp(rr, b, 5, 63.4), None, {}),
+    ("arcint             ", pack_arcint, "seg", {}),
+    ("segint c63 lone=pt ",
+     lambda rr, b: pack_segint(rr, b, 63.4, "point"), "seg", {}),
+    ("segint c63 lone=arc",
+     lambda rr, b: pack_segint(rr, b, 63.4, "arc"), "seg", {}),
+    ("segint c45 lone=arc",
+     lambda rr, b: pack_segint(rr, b, 45.0, "arc"), "seg", {}),
+    ("arcint alpha0.5    ", pack_arcint, "seg", dict(renorm_alpha=0.5)),
+    ("arcint alpha1.0    ", pack_arcint, "seg", dict(renorm_alpha=1.0)),
+)
+
+
+def stage_synth(worlds=("mixed", "corridor"), seeds=(11, 12)):
+    """The full variant grid on the SPOT-proxy 360-deg bench (exact GT)."""
+    import ssp_synth
+    for world in worlds:
+        for seed in seeds:
+            b = ssp_synth.make(world, seed=seed)
+            print(f"== {b['name']} ({len(b['keys'])} kf)", flush=True)
+            for tag, sm, seg_cls, kw in ARMS:
+                cls = SegIntSLAM if seg_cls else F.BandSLAM
+                r = DS.run(dict(b), cls, sample=sm, spec=None, nph=0, **kw)
+                print(f"  {tag}  ATE {r['ate']:6.3f}  med {r['med']:6.3f}  "
+                      f"loops {r['loops']}", flush=True)
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "selftest"
     if what == "selftest":
@@ -593,3 +628,5 @@ if __name__ == "__main__":
     elif what == "renorm":
         for lg in sys.argv[2:] or ["fr079"]:
             stage_renorm(lg)
+    elif what == "synth":
+        stage_synth()

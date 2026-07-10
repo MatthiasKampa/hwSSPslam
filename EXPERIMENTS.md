@@ -175,4 +175,20 @@ the one shared run/eval harness — see Datasets above); `ssp_stata.py` (bag
 adapter, floorplan GT; shipped 0.202 m); `ssp_hexreal.py` (full-circle hex
 lattice e2e on real logs: belg 2.071 vs polar 2.644, intel control loses —
 per-environment option); `ssp_lattice.py` (set_polar/set_hex/shipped —
-consolidated lattice patching, replaces per-scratch copies).
+consolidated lattice patching, replaces per-scratch copies);
+`ssp_synth.py` (SPOT-proxy synthetic 360° bench over worlds.py — exact GT,
+emits ssp_datasets bundles, deterministic local rng; `bench`/`fov` CLIs).
+
+**Encoding/sampling family (2026-07-10, user thread)** — `ssp_sampling.py`:
+`sample_interp(n_sub, cut_deg, w_mode)` multi-sub-point bridging with the
+occlusion gate angle-parameterized (shipped OCC_RATIO 2.0 == 63.4°;
+cut<0 == E2 points exactly); `pack_segint`/`pack_arcint` + `SegIntEncoder`
+EXACT line-integral encoding (sinc(k·d/2)·phasor — the principled form of
+the thermometer blanking; endpoint packing keeps matcher transforms
+linear); `renorm_alpha` restores blanked-ring energy on surviving rings
+(the blanking-vs-weighting question); `SegCore` copied-body override at the
+BoundedSLAM MRO level (Quant/Band layers compose above). Selftest:
+quadrature vs 400-pt sub-sampling, analytic dθ derivative vs numeric,
+degenerate-pack primitives bit-exact, e2e ATE-equivalent (ULP-amplified,
+documented). Run: `python3 ssp_sampling.py [selftest|interp|segint|renorm
+<logs>|synth]`.
