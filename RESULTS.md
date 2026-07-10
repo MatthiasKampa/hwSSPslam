@@ -3907,3 +3907,15 @@ sliding; shipped TRF step control is load-bearing), a no-odometry guess
 chain (nothing pulls back a wrong snap), and knife-edge admission — so the
 demo now DEFAULTS its real-data tab to the Python-fed replay; the live
 pipeline remains selectable as a toy.
+
+### Quantized composition: the algebra survives the FPGA store
+`scratch_qcompose.py` (real intel 5-kf segments; integer operators = addr8
+cis ROM): transform fidelity (shift+permute of quantized content vs float
+pipeline) **6 b: 0.986** / 2 b: 0.800 — with INTEGER operators identical to
+float operators at both levels; bundling part-retrievability float 0.930 →
+**6 b 0.925 (free)** → 2 b 0.849 (graceful); correction path-independence
+(two half-corrections vs one, integer ops) **0.9997** at both levels. The
+thesis's algebraic claims — translate = phase multiply, rotate = permute,
+compose = add, O(D) graph corrections on frozen content — carry over to the
+quantized/integer store: intact at 6 bits, gracefully degraded at 2 bits
+(consistent with the e2e band table's per-log verdicts).
