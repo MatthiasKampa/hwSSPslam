@@ -4029,3 +4029,16 @@ exactly; jsc parity harness verifies all three slots (loops 80/80, 66/66,
 81/81; RMSE within the known kf-vs-ref matching-direction offset). The old
 slot-2 fpga8-intel replay is superseded (lives in git history). Page
 13.3 MB, local-file.
+
+### Webvis sandbox: binary FPGA mode (live)
+The synth toy env gains a `binary FPGA` toggle implementing the audited
+operating point live in JS: all trig (encode, shift, matcher banks) through a
+256-entry × 7-bit cis ROM (mkTables rebuilds the shared table; matcher banks
+rebaked on toggle), and the matcher + decode panel see a 2-bit phase-only
+per-ring quantized VIEW of the map (the running sandbox map remains the
+full-precision accumulation buffer — the sandbox has no segment freeze;
+captioned). Combine with the existing point-encoding toggle for the full
+FPGA-lean recipe. Intel-live (if selected) follows the mode explicitly;
+replay slots are precomputed and immune. jsc functional test: per-ring
+unit-mag view PASS, binary-mode registration on a synthetic room 0.00 cm /
+0.00° PASS, ROM == addr8/val7 spec PASS.
