@@ -57,9 +57,14 @@ CONFIGS = {
                           ring_scales=True)),
     "binary": dict(label="BINARY replay: point+2b store+QPSK", sample="point",
                    kw=dict(spec=("q",), nph=4, nmag=1, ring_scales=True)),
-    # the session's lean winner: 2-bit phase-only ring store + 8-bit integer
-    # arithmetic + point encoding (fr101 1.13 @ 75 KB vs shipped 1.88 @ 1.9 MB)
-    "lean": dict(label="FPGA-lean replay: point+2b store+int8", sample="point",
+    # the FLOAT winner: per-beam point encoding, full-precision store —
+    # band-dominant on fr079/aces/belg (RESULTS 2026-07-10 band table)
+    "e2": dict(label="float winner: E2 point encoding",
+               sample="point", kw=dict(spec=None, nph=0)),
+    # the BINARY winner: point + 2-bit phase-only ring store + 8-bit integer
+    # arithmetic (fr101 75 KB / fr079 110 KB; MIT 625 KB, band-equal)
+    "lean": dict(label="binary winner: FPGA-lean (2b store + int8)",
+                 sample="point",
                  kw=dict(spec=("i", 8, 7, 7), nph=4, nmag=1,
                          ring_scales=True)),
 }
@@ -81,8 +86,9 @@ def make_slam(cfg):
             self.snaps.append((self.k, np.array(self.anchors, np.float32)))
 
     kw = dict(cfg["kw"])
-    kw["spec"] = F.IntSpec(2, 2, 0, unit_w=True) if kw["spec"][0] == "q" \
-        else F.IntSpec(*kw["spec"][1:])
+    if kw.get("spec") is not None:
+        kw["spec"] = F.IntSpec(2, 2, 0, unit_w=True) \
+            if kw["spec"][0] == "q" else F.IntSpec(*kw["spec"][1:])
     return RecFPGA(robust=True, attempt_every=4, relax_every=25,
                    gap_kf=300, recent_aids=12, eps=0.0, **kw)
 
@@ -140,8 +146,8 @@ def main():
     al = C.align_se2(fin[j[good], :2].astype(float), rxy[good])
     e = np.linalg.norm(al - rxy[good], axis=1)
     ate = float(np.sqrt((e ** 2).mean()))
-    print(f"shipped replay: ATE {ate:.3f} m over {int(good.sum())} ref poses, "
-          f"{len(loops)} loop edges, {len(slam.snaps)} relax snapshots")
+    print(f"{cfg_name} replay: ATE {ate:.3f} m over {int(good.sum())} ref "
+          f"poses, {len(loops)} loop edges, {len(slam.snaps)} relax snapshots")
 
     # ---- pack a SELF-CONTAINED replay: the shipped keyframing (0.10 m/5 deg)
     # differs from the demo's dense no-odometry stride, so the replay carries

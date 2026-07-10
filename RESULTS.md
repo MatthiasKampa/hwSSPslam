@@ -4017,3 +4017,15 @@ different fates:
   (the audited knee is a trivial 256-entry cis ROM); it becomes relevant on
   LUT-free substrates (in-memory/analog computing). Noted in
   SotA/fpga_design.md territory as a fallback primitive, not adopted.
+
+### Webvis: the two winning recipes integrated as replay sources
+Player generalized to three self-contained replay slots (each carries its own
+ranges/odometry/reference, so different logs coexist): slot 1 = shipped
+reference (intel, 2.440), slot 2 = **float winner: E2 point encoding**
+(fr079, 2.210, 66 loops), slot 3 = **binary winner: FPGA-lean, 2-bit ring
+store + int8 arithmetic** (fr079, 3.149, 81 loops — vs shipped-fr079's
+[5.5..12.4] band). Both exports reproduce the banked band-table numbers
+exactly; jsc parity harness verifies all three slots (loops 80/80, 66/66,
+81/81; RMSE within the known kf-vs-ref matching-direction offset). The old
+slot-2 fpga8-intel replay is superseded (lives in git history). Page
+13.3 MB, local-file.
