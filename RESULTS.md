@@ -4374,3 +4374,71 @@ flipping the shipped default re-baselines every table. DECISION PREPARED,
 not executed: recommend coh_target 0.45 as the new default under the
 SPOT-era suite; awaiting user sign-off. (sig_r0 2.8, the weak second
 candidate, is fr101-only — stata 0.208 vs 0.202 — dropped.)
+
+## 2026-07-10 — global readout: bundle capacity × scale ladder × bits (user thread; scratch_capacity*.py, scratch_fullread*.py)
+
+Question (user): how many vectors does the (binary) store need for a
+global/full-map readout to work — sweeping both bundle size K and the
+scale ladder ("large enough scales to not alias").
+
+**Protocol.** Fixture = shipped-float run (stata 0.196, 229 live segments;
+fr101 control 1.569/342); stores REBUILT per ladder from fixture poses
+(readout isolated from pipeline dynamics); bundles = K nearest segments;
+probes registered against the bundle. Arms: bits {float, 6 b, 2 b per-ring
+codes}; ladders L4 {0.25..2} … L7 {+5.3, 12.8, 25.6} all-matched; readouts
+LOCAL (guess truth⊕0.25 m, ±0.72 m window), REGION (rotation fenced,
+coarse-ring stage-1 over the bundle extent), DESCENT (per-ring
+phase-unwrapping, coarse→fine). Plus e2e full/global-read pipeline runs.
+
+**1. Bundle capacity (local-prior readout, shipped ladder).** stata:
+K* = 64 (float) = 64 (6 b) = 32 (2 b) under the strict criterion (med
+< 0.10 m AND p90 < 0.30 m) — the 2-bit code-noise floor costs exactly one
+octave of superposition capacity. Degradation is graceful (median only
+1.3→6 cm at K = 128; the p90 tail fails first). fr101 reads K* ≈ 8–16 on
+all tiers, but its fixture is only 1.57-ATE accurate — treat stata as the
+credible curve. → A 229-segment building needs ≥ 4 readout vectors at
+float/6 b, ≥ 8 at 2 b; **reads of ≤ 32 segments are safe even at 2 bits.**
+
+**2. Scales: widening the matched band is NEGATIVE (dilution).** L4
+dominates every K and both readouts; adding rings monotonically hurts
+(L7 LOCAL med 0.7–0.9 m at K ≥ 128 — the coarse components add crosstalk
+energy but no in-window discrimination; this re-derives why the original
+design kept relo rings OUT of the matched band). Region-readout at K ≤ 32
+already works on L4 alone (succ 0.88–0.96 — content correlation
+disambiguates within a few-metre region despite λ-periodicity).
+
+**3. Hierarchical descent over coarse rings FAILS at building scale.**
+Ring-pair phase-unwrapping (λ/8 steps, shrinking windows, fine matcher
+last): K = 32 succ 0.80–0.84 (worse than plain L4 region search), K = 128
+succ ≤ 0.36, K = 229 succ ≤ 0.20 with 6–17 m medians — the coarse-ring
+argmax picks the wrong part of the building. Large-λ rings cannot buy
+global readout from appearance-only content: the corridor/place-SNR wall
+again, now measured at the readout layer. 2-bit ≈ float throughout.
+
+**4. e2e full/global reads.** Float full-read (r = 8) breaks 4/5 logs
+(stata 0.196→9.46, fhw 0.35→3.16, fr079 2.21→11.6, belg 2.64→3.51) —
+architectural law 2 stands — EXCEPT fr101, which FLIPS: full-read float
+0.396 (vs 1.569 local; best fr101 number ever recorded) and even truly
+global reads win (2-bit global 0.885). Synth (cm drift): benign. The law
+is really about drift-consistency of old content: dense-revisit maps keep
+it graph-tight; sparse-revisit maps poison the frontend with it.
+
+**5. The bits interaction (open mechanism).** stata r = 8 full-read is
+monotone in store coarseness: float 9.46 (14 loops) / 6 b 4.42 (24) /
+**2 b 0.181 (77 loops — beats the local float reference 0.196)**. The
+magnitude-clamp explanation is REFUTED (phase-only 256-level/1-mag store
+reproduces the float failure, 8.83); the loop counts localize the channel
+to the accept-gate/closure layer (float full-read produces
+confident-but-wrong frontend matches that pass the gate and kill the
+closure layer; 2-bit matches either land or fail the gate cleanly —
+"quantization as decision hygiene"). Single-run points; mechanism OPEN.
+
+**ANSWER.** One global vector: NO — at any bit width and any ladder
+(capacity + place-SNR walls, measured independently). Radius-grouped
+readout vectors of ≤ 32 segments at 2 bits: YES with margin — a
+stata-scale building = ~8 such vectors (4 at 6 b/float). The matched band
+stays 4 rings; coarse rings remain relocalization-extension material only
+(and even there cannot deliver building-scale readout). Dense-revisit
+environments (fr101-class) tolerate even ONE global 2-bit vector end to
+end (0.885) — an environment-dependent bonus, not a spec. Deploy guidance
+unchanged + sharpened: cell-grouped bundle reads, ≤ 32 segments per read.

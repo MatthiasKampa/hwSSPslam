@@ -85,6 +85,17 @@ SPOT-mounted custom head: **360° × 1024 beams @ 20 rotations/s**
    per-ring scales. Budgets (audited): fr101 75 KB, fr079 110 KB,
    Intel 368–400 KB (6 b), MIT-1.9 km 625 KB (2 b lean) — an Artix-7-100T
    class part holds building-scale maps on-chip.
+4b. **Readout capacity rule (measured 2026-07-10, "global readout"
+   RESULTS entry)**: any bundle read must stay **≤ 32 segments at 2 bits**
+   (≤ 64 at 6 b) — the superposition-capacity knee on the stata store; a
+   building = ~8 grouped readout vectors. Do NOT widen the matched band
+   for bigger reads (score dilution, measured monotone negative), and do
+   not budget coarse-ring hierarchical descent for global relocalization
+   (fails at K ≥ 128: the place-SNR wall at the readout layer). Full-map
+   frontend reads are an ENVIRONMENT OPTION only (dense-revisit
+   fr101-class: global 2-bit read scored 0.885 e2e; sparse-revisit logs
+   break, law 2) — ship radius-grouped reads.
+
 5. **Loop path**: candidate chain bundle (sum of ≤ ~6 stored vectors,
    dequant + permute + phase-add), one cmatcher match, per-ring coherence
    sums to the host. The loop layer is measured perturbation-ROBUST
