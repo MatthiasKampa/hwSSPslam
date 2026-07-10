@@ -3659,3 +3659,124 @@ intel 13.5 / fr079 14.3 catastrophic; frontend MAP prior γ=1: aces 6.21→1.39,
 fr101 1.70, intel 8.5 / fr079 10.1 — fixed-weight fusion does not transfer
 (consistent with FINDINGS §6); it stays a sandbox toggle, not a pipeline
 change.
+
+## 2026-07-10 (consolidation) — the perturbation-band table, E2's mechanism, and the binary verdict
+
+The session's second half turned the individual findings into a uniform,
+band-probed comparison (PROTOCOL §6 band rule; `ssp_fpga.py band`). Four
+configs: **shipped** (segment resampling, float, c64 store), **E2** (per-beam
+point encoding, float, c64), **FPGA8** (E2 + 16ph×4mag per-ring 6 b store +
+int addr8/val7/w7 arithmetic), **BINARY** (E2 + 4ph phase-only 2 b store +
+QPSK unit-weight arithmetic); bands over ε ∈ {0, 1e-6, 1e-3 × 2 seeds}
+freeze-noise; plus **FPGA-lean** (E2 + 2 b store + int8 arithmetic — the
+post-hoc winner combining the store floor with the arithmetic knee).
+
+### The band table (ATE rmse m, [min .. max] median; map KB where quantized)
+
+    log    shipped              E2 point             FPGA8 (≈6b, ~10x mem)   BINARY (2b+QPSK)      FPGA-lean (2b+int8)
+    fr101  [1.88 .. 1.88] 1.88  [1.57 .. 3.74] 1.68  [2.21 .. 4.94] 3.57     [3.75 .. 5.93] 5.47   [1.13 .. 3.08] ~2.2 @ 75 KB
+    fr079  [5.52 .. 12.4] 8.37  [2.21 .. 4.86] 2.77  [3.15 .. 6.71] 5.37     [10.4 .. 13.9]        {3.15, 6.25} @ ~110 KB
+    aces   [6.21 .. 8.18] 7.03  [3.48 .. 6.66] 4.90  [2.15 .. 8.65] 7.57     [11.8 .. 22.4] 16.0   {8.04, 8.74} (fails: 5 loops)
+    intel  [2.44 .. 6.72] 3.17  [4.35 .. 5.50] 4.91  [3.69 .. 5.60] 4.44     ~12.5-12.7            (not run)
+    belg   {2.64,2.49,2.14}     {2.44,2.05,1.89}     —                       —                     —   (range-identity eval)
+
+Per-log configuration guidance falling out of the table: fr101/fr079 →
+FPGA-lean (25× less map, integer datapath, band at/below shipped); aces/belg
+→ E2-float (the lean store starves aces's already-sparse closures: 5 loops);
+intel-class sparse-beam clutter → shipped sampling (E2 band-worse), where
+FPGA8 is still band-indistinguishable at 10× less map if memory matters.
+
+Note on intel-FPGA8: its band [3.69 .. 5.60] sits INSIDE shipped's
+[2.44 .. 6.72] — at ~10× less map memory the quantized-integer configuration
+is band-indistinguishable from shipped on the tuning log.
+
+Reading (band vs band): **E2 dominates shipped outright on fr079** (its whole
+band clears shipped's best draw) **and on aces and belgioioso** (every rung
+better); on fr101 it improves the median (1.68 vs 1.88) at the cost of
+variance the shipped config doesn't have (fr101-shipped is the suite's one
+point-stable configuration, flat at 1.88 even under 1% noise); **on intel it
+is band-worse** (median 4.91 vs 3.17, overlapping ranges) — intel keeps
+shipped sampling. FPGA8 buys ~10× map memory for roughly one band-notch of
+accuracy on the E2 logs and dominates shipped on fr079; BINARY (QPSK
+arithmetic) fails everywhere except fr101-median — the arithmetic, not the
+store, is the binary bottleneck.
+
+### E2's mechanism: it is a FRONTEND registration win (5/5 logs)
+
+Frontend-only decomposition (loop attempts disabled):
+
+    log    shipped-frontend  E2-frontend   (raw odo)
+    fr079      11.62            2.75        14.35
+    aces        6.38            4.33         5.41   <- E2 frontend BEATS odo
+    intel       5.07            4.39        24.15
+    fr101       3.16            3.00         8.56
+    belg        2.45            2.17         1.72
+
+Per-beam point encoding improves the scan-to-map registration on every log —
+on fr079 the E2 frontend alone (2.75) nearly matches the full shipped system
+(5.52 with closures). The full-system per-log differences are all downstream
+closure-cascade behavior (intel's loop-count explosion to 205–286 with an
+in-band-worse median; fr079's doubled genuine closures). Two candidate
+mechanisms were tested and refuted en route: beam-count/Nyquist (audit: aces
+has 180 beams and MORE super-Nyquist hits than intel, yet improves) and
+viewpoint-neutrality of content (scratch_e2mech.py: point content's
+cross-pass/same-pass coherence ratio is LOWER, 0.29 vs 0.43 on fr079). The
+surviving explanation — the segment resampler's hit-to-hit chord
+interpolation invents straight-line mass across furniture/clutter that the
+outlier-blind correlation then optimizes against — was then tested DIRECTLY
+and REFUTED as the position effect: **E3** (samples at REAL hit positions but
+with the shipped occlusion-filtered chord weights) reproduces shipped's bad
+fr079 frontend almost exactly (frontend-only 11.69 vs shipped 11.62 vs E2
+2.75; full 7.92 in shipped's band). So the E2 win is carried by the
+WEIGHTING and/or the occlusion filter's mass removal, not by where the
+samples sit. **E4** (r·dθ weights WITH the occlusion filter) then splits the
+two contributions: fr079 frontend-only shipped/E3 11.6 → E4 6.02 → E2 2.75.
+**Half the win is the arc-length r·dθ weighting; the other half is NOT
+running the occlusion filter.** The filter was designed to kill phantom
+bridges in chord interpolation — with point sampling there are no bridges to
+kill, and its weight-zeroing near depth discontinuities (door frames,
+furniture edges) deletes exactly the most translation-informative scan
+content. A shipped design feature is thus actively harmful in the
+point-sampling regime (and its protective role is moot there). FINDINGS §6 gains the addendum: the
+do-no-harm gap's SIZE was substantially sampling damage (aces frontend now
+beats its own odometry); the guard's impossibility is untouched.
+
+### Arithmetic and store ladders (fr101 = the stable probe; intel = band)
+
+    int arithmetic (c64 store, fr101):  addr10 1.90 | addr8 2.10 | addr6 3.09
+      | addr4 2.17 | addr3 2.98 | QPSK-unit 3.81 (med 1.57 = shipped median)
+    int arithmetic (intel): >=addr8 lands in the perturbation band (4.7-6.1);
+      below addr8 there is REAL damage beyond the band (addr6 10.5, addr4 9.0,
+      addr3 8.5, QPSK 11.5) -> the arithmetic knee is addr8 (256-entry cis ROM,
+      7-bit values); QPSK is median-viable on robust logs only.
+    store floor (phase-only per-ring, float arith, fr101): 16ph/4b 2.98 |
+      8ph/3b 2.34 | 4ph/2b 1.41 - the STORE tolerates 2 bits/phasor on the
+      robust log; combining 2b store + int8 arithmetic + point encoding
+      (FPGA-lean) gives fr101 [1.13..3.08] @ 75 KB (vs shipped flat 1.88 @
+      1.9 MB) and fr079 {3.15, 6.25} @ ~110 KB (vs shipped band 5.5-12.4 @
+      2.6 MB) - comparable-to-better accuracy at ~25x less map memory on an
+      integer datapath.
+
+### FPGA deployment picture after this session
+
+Fabric budget (ops_report / ops_report_binary): the whole hot path is
+~2.6 MMAC-equiv per keyframe (0.05 GMAC/s at 20 Hz — a fraction of one DSP
+array; at the 8-bit knee these are LUT-adds, no DSPs needed); the map at the
+lean config is 75–110 KB for building-scale logs (fits small-FPGA BRAM with
+headroom). The honest per-regime accuracy statement is the band table above.
+
+**MIT capstone (1.9 km, range-identity eval — the MIT gfs timestamps are
+corrupt uint32 garbage, so the naive timestamp eval NaNs; convention as
+ssp_scancontext/belgioioso):** raw odometry 187.8; shipped 57.38 (77 loops —
+matching the historical closure count — 13.5 MB c64 map); E2 57.26 (92
+loops); **FPGA-lean 58.08 at 625 KB** — band-equal accuracy (documented MIT
+chaos band 38–58 m) at **22× less map memory** over 1.9 km of corridor. The
+O(area) bound and the quantized store compose at scale. (Note the eval
+convention differs from the historical 42.66 headline; within-table
+comparisons are like-for-like.)
+
+**Webvis:** slot-2 replay embedded — the demo's Intel player now offers
+"shipped replay (Python)" (2.440) and "FPGA replay: point+6b store+int8"
+(3.902, its in-band draw; 120 loops, 43 snapshots) side by side, both
+exported from the real Python pipelines (`export_replay.py --config=fpga8
+--slot=2 --embed`; page 10.6 MB).

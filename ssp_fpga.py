@@ -388,6 +388,33 @@ class IntSLAM(FrontSLAM):
 # arc-length weight r*dtheta; no hit-to-hit bridges, so no phantom walls)
 # ---------------------------------------------------------------------------
 
+def points_from_scan_occw(rr, beam):
+    """E3 mechanism probe: samples ONLY at real hit positions (like E2) but
+    with the SHIPPED occlusion-filtered chord weighting (each hit carries half
+    of each kept adjacent chord; lone hits get SAMPLE_DS) — the same surface
+    integral as shipped WITHOUT interpolated positions. Discriminates
+    'interpolated chord mass is the damage' from 'the r*dtheta weighting /
+    missing occlusion filter is the difference'."""
+    hit = np.isfinite(rr)
+    idx = np.flatnonzero(hit)
+    if len(idx) < 2:
+        return np.zeros((0, 2)), np.zeros(0)
+    r = rr[idx]
+    pts = np.stack([r * np.cos(beam[idx]), r * np.sin(beam[idx])], 1)
+    consec = np.diff(idx) <= 2
+    chord_v = pts[1:] - pts[:-1]
+    chord = np.linalg.norm(chord_v, axis=1)
+    dr = np.abs(np.diff(r))
+    tang = np.sqrt(np.maximum(chord ** 2 - dr ** 2, 0.0))
+    keep = consec & (chord <= S.MAX_CHORD) & (dr <= S.OCC_RATIO * tang)
+    w = np.zeros(len(idx))
+    w[:-1] += np.where(keep, chord / 2, 0.0)
+    w[1:] += np.where(keep, chord / 2, 0.0)
+    lone = w == 0.0
+    w[lone] = S.SAMPLE_DS
+    return pts, w
+
+
 def points_from_scan(rr, beam, wcap=None):
     """Per-hit sample points + arc-length weights (r * beam spacing).
     wcap caps the per-point weight: a far return is one point carrying its
@@ -430,6 +457,8 @@ def run_log(path, cls, cap=None, sample="seg", **kw):
             pts, w = points_from_scan(rr, beam)
         elif sample == "pointcap":
             pts, w = points_from_scan(rr, beam, wcap=0.25)
+        elif sample == "hitw":
+            pts, w = points_from_scan_occw(rr, beam)
         else:
             pts, w, _ = S.scan_to_samples(rr, beam)
         guess = opose if k == 0 else L.se2_mul(

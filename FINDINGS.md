@@ -800,33 +800,62 @@ is near the achievable frontier even against a place oracle.
 
 ---
 
-## 10. The FPGA track (opened 2026-07-10 — in flight)
+## 10. The FPGA track (opened and banded 2026-07-10)
 
 The deployment thesis: the per-keyframe hot path (encode, frontend match,
 segment fold, loop verify) is O(D) phase arithmetic + small dense MACs and maps
 onto FPGA fabric; the sparse pose-graph relax stays host-side. `ssp_fpga.py`
-(subclass-only; neutralised = bit-exact) carries the track. Established so far:
+(subclass-only; neutralised = bit-exact) carries the track. All config claims
+below are perturbation-banded per PROTOCOL §6 (RESULTS "2026-07-10
+consolidation" has the full table).
 
-- **Compute is trivial; memory and noise-tolerance are the design pressures.**
-  The whole shipped hot path is ~2.55 M MAC-equiv/keyframe → 0.05 GMAC/s at
-  20 Hz — a fraction of one DSP array at 200 MHz. The map is the resource:
-  3.9 MB (Intel, c64) shrinking to 368 KB at 6 b/phasor.
-- **Write-time polar quantization (freeze-on-anchor-advance) with PER-RING
-  scales** is the deployable store. Mechanism: per-vector scales are dominated
-  by the phase-coherent relocalization rings, crushing the finest rings — the
-  closure veto's own statistic (fine-ring fidelity 0.84 → 0.97 at the same
-  6 bits with per-ring scales). Verdict per regime: **fr101 free-or-better at
-  6–8 b (1.66–1.89 m at ~10× less map)**; Intel any-perturbation band (see the
-  stability-boundary finding, §3) — its 2.440 needs ≤1e-5 map fidelity that no
-  useful quantization provides.
+- **Compute is trivial; memory and perturbation-tolerance are the design
+  pressures.** The whole hot path is ~2.6 M MAC-equiv/keyframe → 0.05 GMAC/s
+  at 20 Hz; at the 8-bit arithmetic knee these are LUT-adds (no DSPs needed).
+  The map is the resource, and it compresses hard (below).
+- **Per-beam point encoding ("E2") is the session's algorithmic win — a
+  frontend registration improvement on 5/5 logs** (frontend-only: fr079
+  11.62→2.75, aces 6.38→4.33 — now BEATING its excellent raw odometry 5.41 —
+  intel 5.07→4.39, fr101 3.16→3.00, belgioioso 2.45→2.17; audited). The
+  mechanism was pinned by a discriminator ladder (E3/E4): **half the win is
+  the arc-length r·dθ weighting, half is NOT running the occlusion filter**
+  (fr079 frontend-only: chord-weights+filter 11.6 → r·dθ+filter 6.0 →
+  r·dθ no-filter 2.75); the filter's weight-zeroing near depth
+  discontinuities deletes the most translation-informative scan content, and
+  with point sampling there are no phantom bridges for it to protect
+  against. (Interpolated-position mass, beam-count/Nyquist, and
+  viewpoint-neutrality were each tested and refuted as explanations.)
+  Full-system, band-vs-band: **dominates shipped on fr079** (whole band
+  [2.21..4.86] clears shipped's best 5.52), **wins aces and belgioioso**,
+  median-improves fr101 at some variance cost, and is band-worse on intel
+  (keep shipped sampling there). It also deletes the one irregular-compute
+  preprocessing stage from the fabric path.
+- **Write-time polar quantization needs PER-RING scales** (the relo rings
+  otherwise crush the fine rings that the closure veto reads: fidelity
+  0.84→0.97 at the same 6 bits). With them, the STORE tolerates astonishing
+  compression on band-robust logs — down to **2 bits/phasor phase-only**
+  (fr101: 1.41 single-draw, [1.13..3.08] banded with int8 arithmetic at
+  75 KB vs shipped's flat 1.88 at 1.9 MB).
+- **The arithmetic knee is 8-bit** (256-entry cis ROM, 7-bit values): free on
+  fr101, in-band on intel; below it there is real damage beyond any band
+  (intel addr6 10.5 vs band ≤6.7). The QPSK/binary-spatter extreme holds
+  MEDIANS (fr101 med 1.57 = shipped) but not tails — **the binary bottleneck
+  is arithmetic, not storage**.
+- **The deployable "FPGA-lean" configuration** — point encoding + 2-bit
+  phase-only per-ring store + 8-bit integer arithmetic — runs an integer
+  datapath with a ~25× smaller map at comparable-to-better banded accuracy on
+  the transfer logs (fr101 [1.13..3.08] @ 75 KB; fr079 {3.15, 6.25} @ 110 KB
+  vs shipped's [5.5..12.4] @ 2.6 MB), and holds at scale: **MIT 1.9 km =
+  58.1 vs shipped 57.4 (both in the documented 38–58 chaos band) at 625 KB
+  vs 13.5 MB — 22× less map**. Configuration is per-regime: aces/belg want
+  E2-float (the lean store starves their sparse closures), intel-class
+  sparse-beam clutter keeps shipped sampling and lives in its perturbation
+  band regardless.
 - **Fine rotation via the scan's d/dθ derivative (11→3 encodes/match): clean
   negative** (fr101 2.50, Intel 4.67) — the first-order term is a storage-side
-  tool (bundle-averaged, ≤1.5°), not a matcher-side one. The re-encodes stay.
-- **Per-beam point encoding** (one phasor per hit, w = r·dθ; kills the one
-  irregular-compute preprocessing stage) — 3-of-4 win (fr079 5.52→2.21, aces
-  6.21→4.41, fr101 1.88→1.57), Intel regresses with loop flooding; audit in
-  flight; mechanism candidate = beam density vs λ_min/2 Nyquist (Intel is the
-  one 180-beam/1° log).
-- **Integer arithmetic model** (ROM-rounded cis, fixed-point weights, integer
-  MACs): high-width free; the QPSK extreme (4-phase, ±1 components, unit
-  weights) survives a first smoke test — the binary-VSA ladder is running.
+  tool (bundle-averaged, ≤1.5°), not a matcher-side one. The re-encodes stay
+  (they are cheap).
+- The webvis real-data path is now **Python-fed**: `demo/export_replay.py`
+  runs the actual deliverable and embeds a self-contained replay (poses,
+  per-relax anchor snapshots, loop edges); the browser replays it exactly
+  (jsc parity harness), so the demo can no longer drift from the system.
