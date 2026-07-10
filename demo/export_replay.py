@@ -76,7 +76,8 @@ def _interp2(rr, beam):
 
 GT_NAMES = dict(gfs="GMapping-corrected reference",
                 ident="GMapping-corrected reference (range-identity match)",
-                stata="floorplan-anchored GT (independent)")
+                stata="floorplan-anchored GT (independent)",
+                exact="held-out reference (withheld odometry / synthetic GT)")
 
 
 def recording(base):

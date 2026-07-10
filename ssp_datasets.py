@@ -45,6 +45,11 @@ DATASETS = {
                 path="data/MIT_Infinite_Corridor_2002_09_11_same_floor.log"),
     "stata": dict(kind="stata", path="data/stata/2012-01-27-07-37-01.bag",
                   eval="stata"),
+    # SPOT Telluride (target platform): lidar-only protocol — guess_mode
+    # 'cv' withholds the 528-Hz kinematic odometry from the system and
+    # uses it as GT ('exact' eval). See ssp_spot.py.
+    "spot": dict(kind="spot", path="data/spot_telluride/scans.npz",
+                 eval="exact"),
 }
 
 
@@ -52,6 +57,13 @@ def load(name, cap=None):
     """-> bundle dict: keys [(ranges, odom_pose, ts)], beam angles, odom
     stack, keyframe timestamps, range-validity params."""
     d = DATASETS[name]
+    if d["kind"] == "spot":
+        import ssp_spot
+        b = ssp_spot.make_bundle()
+        if cap:
+            for key in ("keys", "kts", "odom", "gt"):
+                b[key] = b[key][:cap]
+        return b
     if d["kind"] == "carmen":
         keys = C.keyframes(C.parse_flaser(d["path"]))
         if cap:
@@ -209,8 +221,22 @@ def run(name, cls=F.BandSLAM, cap=None, sample="seg", slam=None, **kw):
             pts, w = F.points_from_scan_occw(rr, beam)
         else:
             pts, w, _ = S.scan_to_samples(rr, beam)
-        guess = opose if k == 0 else L.se2_mul(
-            est[k - 1], L.se2_mul(L.se2_inv(odom[k - 1]), odom[k]))
+        if bundle.get("guess_mode") == "cv" and k > 0:
+            # lidar-only: constant-velocity extrapolation of own estimates
+            # (bundle odom is WITHHELD ground truth, display/eval only)
+            if k == 1:
+                guess = est[0].copy()
+            else:
+                v = est[k - 1] - est[k - 2]
+                vn = np.hypot(v[0], v[1])
+                if vn > 0.30:
+                    v[:2] *= 0.30 / vn
+                guess = np.array([est[k - 1][0] + v[0],
+                                  est[k - 1][1] + v[1],
+                                  est[k - 1][2] + S.wrap(v[2])])
+        else:
+            guess = opose if k == 0 else L.se2_mul(
+                est[k - 1], L.se2_mul(L.se2_inv(odom[k - 1]), odom[k]))
         est[k] = slam.add_keyframe(pts, w, guess)
     if slam.dirty:
         slam.relax()

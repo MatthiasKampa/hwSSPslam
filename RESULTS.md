@@ -4442,3 +4442,92 @@ stays 4 rings; coarse rings remain relocalization-extension material only
 environments (fr101-class) tolerate even ONE global 2-bit vector end to
 end (0.885) — an environment-dependent bonus, not a spec. Deploy guidance
 unchanged + sharpened: cell-grouped bundle reads, ≤ 32 segments per read.
+
+## 2026-07-10 — ultrathink batch: the deadband mechanism, the corrected global-readout verdict, and FIRST CONTACT with the target platform
+
+### The quantization deadband (mechanism of the 2-bit full-read rescue)
+The stata full-read r=8 anomaly (float 9.46 / 6 b 4.42 / 2 b 0.181 —
+monotone in store coarseness) decomposes cleanly:
+
+| store | ATE | loops |
+|---|---|---|
+| float | 9.46 | 14 |
+| phase-only (256 ph, 1 mag) | 8.83 | 11 |
+| snap-only (4 ph, 64 mag) | 3.51 | 18 |
+| 8 ph, 1 mag | 2.27 | 22 |
+| **4 ph, 1 mag (2-bit)** | **0.181** | **77** |
+| 2 ph, 1 mag (BPSK) | 1.51 | 20 |
+
+Magnitude equalization alone does nothing; phase snapping alone recovers
+part; TOGETHER they rescue fully — and the response is NON-monotone in
+nph with the optimum at exactly 4 levels. Interpretation (the DEADBAND
+theory): coarse phase codes snap drift-displaced copies of the same
+geometry to the SAME code when the per-ring phase offset stays inside the
+quantization cell — per-ring forgiveness ≈ λ/(2·nph). At nph=4 that is
+λ/8 (25 cm on the 2 m ring ≈ stata's inter-pass drift): mid rings FUSE
+the passes at the graph-mean pose while fine rings decohere the drifted
+copies into noise, and the one-level magnitude weights fused content
+uniformly against that noise. BPSK over-forgives (λ/4) and blurs the
+current pass too. The loop counts localize the e2e effect at the accept
+gate (float full-read passes confident-wrong matches that kill the
+closure layer; snapped stores either land or fail cleanly). Band-checked:
+stata r8+2 b = [0.16..0.18] median 0.17 — tighter than local float 0.196.
+**The binary store is not a compression compromise; at the right nph it
+is a per-scale drift-deadband — a robustness mechanism.** fr101 confirms
+the regime logic: tiny drift → float full-read best (0.396, best-ever
+fr101); wide reads need the deadband even there (float GLOBAL 3.44 vs 2 b
+GLOBAL 0.885).
+
+### Global readout, corrected (user: pick the joint alias outside the env)
+The earlier "impossible" verdict conflated three things; the honest
+decomposition (scratch_capacity4/5/5b):
+- The ×2 matched ladder joint-aliases every λ_top — but the shipped
+  incommensurate anchor pair {5.3, 12.8} has its first joint near-alias
+  at 63.6 m (computed) — OUTSIDE a stata floor. Aliasing is solvable by
+  design, exactly as the user said.
+- With a CUMULATIVE multiresolution joint decode (anchor band over the
+  extent → +2 m ring → +1 m ring → fine matcher; every level keeps the
+  coarser rings), K=32 bundles localize GLOBALLY: L1-hit 0.96, succ
+  0.76–0.80, float ≡ 2-bit. The K≥128 failure is PURE superposition SNR
+  (240 anchor components vs 229 segments; capacity theory wants
+  D_anchor ≳ K·ln #cells ≈ 1900), NOT aliasing.
+- Grouped construction (12 cell-vectors ≤32 segs): within-group decode
+  works; CROSS-group selection is place recognition and hits the
+  documented wall — raw argmax 0.32–0.40 right-group; top-3 + fine-match
+  verification lifts the MEDIAN to 0.039–0.040 m with succ 0.56–0.60.
+VERDICT (replaces the earlier one): global readout is FEASIBLE at
+suitable capacity — reliable given any ±10 m prior (group selection
+trivial, then 0.96 within-group), median-accurate but tail-broken (~0.6)
+with no prior at all. The prior-free tail is the §5 wall at the readout
+layer, not a lattice or bit-width limit. Anchor rings earn a role again:
+NOT in the matched band (dilution, measured), as the global-decode band.
+
+### SPOT Telluride — first contact with the target platform (ssp_spot.py)
+First dataset from the user's platform (HF
+lorinachey/spot-telluride-workshop-dataset): Ouster-class 1024×64 clouds
+@ 20 Hz (the custom-head spec), SPOT kinematic odometry @ 528 Hz, LIO-SAM
+trajectory; 78 s / 36.5 m / ~7×7 m room. Adapter: ring 34 (elevation
+0.00°) → 1024-beam 2D scans, npz-cached; keyframes = every Nth cloud
+(time-based, input-legal); **protocol per user: lidar-only** (constant-
+velocity guesses from own estimates; odometry WITHHELD and used as GT —
+"essentially spot on"), eval = 'exact'. Registry: DATASETS["spot"],
+guess_mode="cv" in the shared runner (selftest still bit-exact).
+
+| arm (lidar-only, GT = withheld odometry) | ATE | med | loops | map |
+|---|---|---|---|---|
+| point / bridge2 / seg, oct60, stride 4 | 0.315–0.316 | 0.044–0.047 | 22 | 354 KB |
+| **FPGA-lean 2 b + int8 (either sampler)** | **0.315** | **0.045** | 22 | **14 KB** |
+| 6-bit store | 0.316 | 0.045 | 22 | 37 KB |
+| stride 2 (10 Hz keyframes) | 0.289 | 0.043 | 52 | 461 KB |
+| stride 8 (2.5 Hz; gap disables loops) | 0.260 | 0.038 | 0 | 225 KB |
+| WITH-ODOM (labeled diagnostic) | 0.041 | 0.035 | 22 | — |
+| lattices fine60/oct90/oct36 | 0.317–0.318 | 0.048–0.062 | 22 | — |
+
+Read: **the full binary datapath reproduces float exactly on the target
+platform's own data — 4.5 cm median, 25× less map memory (14 KB for the
+room)** — and every setting ties within noise (registration-easy env;
+the sampler/lattice/search knobs don't bind at 7×7 m). The RMSE tail
+(0.32 vs 0.045 median) is guess/start-transient, not registration (the
+with-odom diagnostic bounds it at 0.041). Config for the demo: shipped
+lattice, bridged pairs, stride 4. Webvis: spot float + FPGA-lean replays
+exported into the pack (reference track = the withheld odometry).

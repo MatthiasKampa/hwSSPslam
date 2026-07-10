@@ -39,3 +39,15 @@ mkdir -p data/museum && curl -L -C - -o data/museum/cartographer_paper_deutsches
 `vertical_laser_2d`, `imu`. NO wheel odometry (walking backpack) and no
 published ground-truth relations (bucket probed 2026-07-10) — usable as a
 frontend/loop stress set; absolute eval TBD.
+
+## SPOT Telluride workshop (TARGET PLATFORM — first collected dataset)
+
+```bash
+# HF dataset lorinachey/spot-telluride-workshop-dataset (apache-2.0)
+# pointclouds (22 shards, 2.4 GB) + odometry_imu + odometry_lio_sam
+# -> data/spot_telluride/{pointclouds,odometry_imu,odometry_lio_sam}/
+python3 ssp_spot.py parse    # -> data/spot_telluride/scans.npz (ring-34 slice)
+```
+Ouster-class 1024×64 @ 20 Hz (the custom-head spec), SPOT odometry 528 Hz,
+78 s / 36.5 m / ~7×7 m room. Protocol: LIDAR-ONLY runs (odometry withheld
+as ground truth) — see `ssp_spot.py`.

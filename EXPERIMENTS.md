@@ -192,3 +192,14 @@ quadrature vs 400-pt sub-sampling, analytic dθ derivative vs numeric,
 degenerate-pack primitives bit-exact, e2e ATE-equivalent (ULP-amplified,
 documented). Run: `python3 ssp_sampling.py [selftest|interp|segint|renorm
 <logs>|synth]`.
+
+**Target platform (2026-07-10)** — `ssp_spot.py`: SPOT Telluride adapter
+(ring-34 slice of 1024×64 Ouster clouds @ 20 Hz → 1024-beam scans;
+lidar-only protocol, CV guesses, 528-Hz odometry withheld as GT;
+`parse`/`sweep`/`lattice` CLIs). First contact: FPGA-lean 2b+int8 ≡ float
+(0.315 / med 0.045) at 14 KB vs 354 KB; all samplers/lattices tie in the
+7×7 m room; with-odom diagnostic 0.041. Registry name `spot`
+(guess_mode="cv" in the shared runner). Webvis: spot float + lean replays.
+Capacity/global-readout scripts (`scratch_capacity*.py`,
+`scratch_fullread*.py`, kept in archive/scratch after banking): bundle-K
+knee 32@2b/64@float, deadband mechanism, grouped global decode.

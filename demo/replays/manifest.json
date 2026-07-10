@@ -1,4 +1,6 @@
 [
+ "replay_spot_interp2.json",
+ "replay_spot_lean.json",
  "replay_stata_shipped.json",
  "replay_stata_interp2.json",
  "replay_fhw_shipped.json",
