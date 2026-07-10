@@ -4136,3 +4136,51 @@ One manual download of Bicocca_2009-02-25b-{SICK_FRONT,ODOMETRY_XYT,
 GROUNDTRUTH}.csv.bz2 unblocks it — the adapter is a small CSV loader away
 (180° SICK = zero FOV work). Deutsches Museum (Cartographer bag, 493 MB,
 verified reachable) remains the second-reference-family option.
+
+## 2026-07-10 — per-dataset lattice/recipe study, hex-vs-polar on real data, the no-relo memory win, and the λ×bits co-design (all labeled per-dataset; PROTOCOL §6)
+
+### φ-prime ray-count recipe (user's synth-sandbox winner): REFUTED on real logs
+N_ANG = rays·(φ−1) rounded to the next prime — 113 (180 rays), 223 (360),
+643 (1040) — loses everywhere e2e: stata 113→1.158 / 643→1.190 (vs 60:
+0.202, at 16× compute); fhw 113→3.081 (vs 0.981); fr079 223→12.871 (vs
+5.523); belg 113→4.353 (vs 2.644); intel 113→4.588 (band-worse). Full
+ladders on the new envs put shipped-60 at the optimum with the documented
+even-count mechanism confirmed twice more (60→61: stata 0.202→0.772 loops
+99→19; fhw 0.981→2.748) — odd/prime counts miss the 90° wall normals.
+Another instance of the synth→real gap: the sandbox recipe was a
+crisp-walls artifact.
+
+### Hex SSP vs vanilla polar (first real-data e2e; ssp_hexreal.py)
+Full-circle triplet lattices (plain-shift permutation, no conjugate wrap;
+self-tested exact): intel keeps polar-60 (hex57/63/111 → 4.8/5.7/4.7, in
+band). **belg (non-Manhattan castle): hex63 → 2.071 vs shipped 2.644 (med
+1.28 vs 1.86)** — the synthetic curved-world prediction confirmed on real
+data for the first time; hex57 (3×19 prime) 3.52 and hex111 7.53 lose
+(belg's 1-9 closure counts make deltas noisy; the prime-base claim actually
+INVERTED here — composite 3×21 won). Verdict: hex is a per-environment
+option for non-Manhattan deployments, not a default. Webvis integration
+(pushed 6daccc1): sandbox angle-count selector + a validated non-Manhattan
+"castle" world so the regime split can be demonstrated live.
+
+### NO-RELO ablation — a free 33% of the map (component-inventory sleeper)
+The λ 5.3/12.8 relocalization rings are DEAD WEIGHT in the bounded
+deliverable: the matcher uses MAIN, the veto uses the finest two rings, and
+the drought/relo consumer lives only in the ssp_hier extension. Dropping
+them (D 360→240): **fr101 1.881 / intel 2.440 / fr079 5.523 — identical to
+shipped to the last digit, identical loop counts — at −33% map memory**
+(fr101 1.9→1.26 MB; binary segment 204→136 B; MIT-scale ~625→~417 KB).
+Keep the rings only if the drought/global-relocalization extension is
+wanted; drop for the FPGA deployment.
+
+### Scale ladder × store bits (binary co-design; scratch_binscale.py)
+The "binary needs finer λ_min" hypothesis resolves as PER-SENSOR, twice
+inverted: fr101 — finer {0.125..1} is the best FLOAT config ever drawn there
+(0.797! labeled, unbanked, config-wobble applies) but LOSES at 2 b (2.19 vs
+1.41: sensor phase noise ±50° + code ±45° pushes the finest ring past the
+decision boundary — coarse codes need per-component SNR headroom); stata —
+finer HELPS at 2 b (3.33 vs 4.89) but hurts float (1.06 vs 0.202), and
+nothing rescues 2 b there (closures 4-19 vs 99: a closure-redundancy limit,
+not resolution). Store-tier verdict per log stands: 2 b for
+closure-redundant fr101/fr079-class, 6 b tier for stata/intel-class; λ
+ladder stays {0.25..2}; 5-ring ladders need the try_constraint 4-ring
+Hessian slice generalized (deferred).

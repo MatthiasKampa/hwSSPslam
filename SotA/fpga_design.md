@@ -79,6 +79,15 @@ afford even a 256-entry ROM, this is the primitive to reach for.
 
 ## Binary-version spec sheet (bill of materials, computed 2026-07-10)
 
+UPDATE (no-relo ablation, bit-identical on 3 logs): the lam 5.3/12.8 relo
+rings are dead weight in the bounded deliverable — drop them for deployment
+(D 360->240, every store/compute figure below improves ~33%: binary segment
+204->136 B, Intel-scale map ~93 KB at 2 b / ~187 KB at 6 b, MIT ~417 KB).
+Keep them only if the drought/global-relocalization extension ships. Scale
+ladder stays {0.25..2}: lambda_min x store-bits is a per-sensor co-design
+(fr101 finer-lambda wins float but breaks 2 b; stata the reverse; see
+RESULTS "scale ladder x store bits").
+
 Constants: W ROM 360x2 in turns/m Q3.21 = 2.2 KB; cis ROM 256x2x8b = 512 B
 (64-entry quarter-wave folded: 128 B). Encoder: points (x,y) Q7.11 + 8-bit
 weights; per point-component 2 phase MACs (24x18, fractional-turn top 8 bits
