@@ -12,8 +12,6 @@ names). Discipline lives in `PROTOCOL.md`.
 CARMEN `.log` (odometry + laser); `.gfs.log` is the GMapping/RBPF-corrected
 reference used **only** for scoring. Under `data/` (gitignored, fetched).
 
-| key | file | notes |
-|---|---|---|
 | key | file | role |
 |---|---|---|
 | stata | `data/stata/2012-01-27-07-37-01.bag` | **primary** — floorplan-anchored GT (independent-class reference); 260° FOV, nearest to the SPOT/360° target |
