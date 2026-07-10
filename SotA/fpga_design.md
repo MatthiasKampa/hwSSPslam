@@ -53,13 +53,23 @@ SPOT-mounted custom head: **360° × 1024 beams @ 20 rotations/s**
 
 ## Blocks
 
-1. **Sampler** (per-environment mux — measured, per-log):
-   - `point` mode (default for dense/furnished: fr079/aces/belg/fr101):
+1. **Sampler** (per-SENSOR-REGIME mux — settled by the 2026-07-10 encoder
+   sampling study; the earlier per-log mux was the 180°-FOV shadow of it):
+   - **TARGET (wide-FOV dense head, SPOT 360°×1024 / stata-class): `bridge`
+     mode** — connect consecutive returns gated at the shipped 63.4°
+     occlusion angle (dr ≤ 2·tang, a compare + two mults) with arc mass
+     r̄·dθ_gap; emit n2/n3 midpoint sub-points (zero new hardware) or exact
+     integral terms (one extra D-dot for k·d + a sinc LUT). stata: 0.196 vs
+     raw-points 1.659 (closure layer collapses without bridging); the gate
+     value is a real optimum (45°→1.66, 75°→8.25) — bake it.
+     Optional GROUP/8 integral fold = mass-exact decimation (2.5× fewer
+     terms, no loss on the 1024-beam bench) if the stream must shrink.
+   - `point` mode (sparse 180° heads: fr079/aces/belg/fr101-class):
      one phasor per hit, w = r·dθ. No geometry preprocessing at all —
      a pure stream. Band-dominant on fr079/aces/belg.
-   - `chord` mode (intel-class sparse-beam clutter): the shipped
-     resampler. Irregular but small; silhouette emphasis (double-write of
-     depth-jump hits at r·dθ) is a frontend-only lever, not worth fabric.
+   - `chord` (the shipped fixed-0.12 m resampler): retired for the target —
+     it FAILS at 1024-beam density (synth corridor 1.76 m, 1 loop) and
+     up-samples the stream (1636 terms from 1024 beams).
 2. **Encoder**: phase = W·p as fixed-point MAC (W rows are constants),
    top-8-bits address the cis ROM, weighted accumulate. ~200 pts × 240 dims
    per encode; 11 encodes per frontend match (the derivative shortcut is a

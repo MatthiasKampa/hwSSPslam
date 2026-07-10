@@ -4274,3 +4274,103 @@ the real-data view). demo/export_data.py → archive/. index.html 26.2 → 20.0
 MB; jsc + 8-replay parity re-verified. Consistent with this suite's own
 findings: intel was the knife-edge log AND the agreement-with-GMapping
 caveat's worst case.
+
+## 2026-07-10 — encoder sampling study: point vs segment-integral vs multi-sub-point, the cutoff-angle gate, and blanking-vs-weighting (user thread; ssp_sampling.py + ssp_synth.py)
+
+User directive: compare per-beam point encoding, LINE-SEGMENT-INTEGRAL
+encoding, and n-sub-point interpolation of the segment; sweep the
+interpolation gate (cutoff angle); test whether blanked fine-scale energy
+should be re-weighted onto coarse scales harder than the linear r·dθ.
+Mid-thread the target platform landed (SPOT, 360° × 1024 beams @ 20 Hz) and
+the suite was redirected (intel removed; synth-360 added).
+
+**Machinery** (committed fd49069/40c427a): `sample_interp(n_sub, cut_deg,
+w_mode)` — the shipped occlusion test dr ≤ 2·tang IS a 63.4° cutoff angle,
+now parameterized; non-bridged hits stay E2 points. `SegIntEncoder` — the
+EXACT integral ∫e^{ik·x} along a chord = sinc(k·d/2)·e^{ik·c}: fine rings
+with |k·d|≫1 are suppressed automatically at full coarse-ring weight, i.e.
+THE SANDBOX THERMOMETER IS A HAND-TUNED APPROXIMATION OF THE SEGMENT
+INTEGRAL. Endpoint packing [P0;P1] keeps every pipeline transform linear;
+SegCore inserts at the BoundedSLAM MRO slot so Quant/Band layers compose.
+`pack_group(k)` = decimation-by-integral (fold ≤k bridged hits into one
+segment; per-hit footprint partition ⇒ mass-exact vs E2). `renorm_alpha`:
+sinc-surviving components scaled ρ^(-α/2), ρ = kept lattice-mass fraction.
+Selftests: quadrature (vs 400-pt sub-sampling, 2e-6), analytic dθ derivative
+(1e-9), degenerate-pack primitives BIT-exact to the point pipeline (e2e is
+ULP-equal only — BLAS rounds duplicated rows position-dependently; measured
+first delta 1.8e-15 at kf 62, knife-edge amplified to 2.8e-5; documented).
+
+**The verdict is FOV/density-dependent — one recipe per sensor regime:**
+
+| bench | best | numbers |
+|---|---|---|
+| synth-mixed 360°×360 | any bridged/integral ≈ E2 ≫ shipped | 1.1–1.3 cm vs shipped 4.8–5.8 |
+| synth-corridor 360° | insensitive (aperture-limited) | all 1.7–2.5 cm |
+| synth FOV ladder | E2-vs-shipped RANKING FLIPS with FOV | 180°: 6.2 vs 5.9 cm (tie/lose); 260/360°: 2.6–2.7 vs 4.8 (2× win) |
+| SPOT 1024-beam mixed | interp n3 / segint @63.4° | 1.1 cm; GROUP/4-8 hold 2.5 cm @ 367/276 terms; shipped resampler 6 cm @ 1636 terms |
+| SPOT 1024-beam corridor | all bridged ≈ 1.5 cm; **shipped seg FAILS (1.76 m, 1 loop)** | GROUP/8 1.6 cm @ 410 terms; decim/8 degrades (3.2 cm) |
+| stata 1040 beams (proxy) | **bridged @63.4° = 0.196 (74 loops), beats shipped 0.202**; raw E2 points COLLAPSE (1.659, 9 loops) | interp n2 ≡ n3 ≡ segint-lone-arc = 0.196; n5 3.43; CHORD-mass 2.58 (arc mass matters) |
+| stata gate response | 63.4° is a REAL optimum | 45° → 1.66 (under-bridge); 75° → 8.25 (over-bridge) — keep the constant |
+| fhw / fr079 / fr101 (180°) | E2 point stays champion | fhw 0.350 (interp 1.4–2.8 WORSE); fr079 2.21; fr101 1.57 |
+
+**Blanking-vs-weighting (the α question):** at target density it is MOOT —
+wall-sample spacing r·dθ < λ_min/2 inside ~20 m at 1024 beams, and synth-360
+shows α inert (all 0.011–0.026 regardless). On the SPARSE 180° logs the
+footprint-integral (arcint) base improves with α=0.5 on ALL THREE logs
+(fr101 3.13→1.61, fr079 5.35→2.43, fhw 1.00→0.744) while α=1.0 overshoots
+on all three — i.e. HALF-energy restoration is the right compensation where
+blanking bites — but arcint+α0.5 never beats plain E2 points there (fhw
+0.744 vs 0.350), so it is a mechanism note, not an adoption. stata: α flat
+(1.60/1.48/1.48) — bridging, not weighting, is what the dense head needs.
+
+**Deployment recipe (SPOT 1024×360°):** bridge consecutive returns at the
+shipped 63.4° gate with arc mass; encode either as n2/n3 sub-points (zero
+new hardware) or as exact integrals; if encode budget matters, GROUP/8
+integral decimation is lossless on the bench (410 terms, 1.6 cm) — but the
+budget analysis (ops_report(1024) = 6.3 M MAC/kf ≈ 1 DSP48 @ 200 MHz) says
+even the full head is cheap. Webvis: `replay_stata_interp2.json` exported
+(0.196, in the pack). Design note updated ("Target sensor" +
+sampler-mux sections).
+
+**Synth-360 bench** (`ssp_synth.py`, committed): worlds.py geometry, exact
+GT, deterministic per-seed rng, ssp_datasets-shaped bundles ('exact' eval
+family); shipped/E2 controls land at 1–6 cm — the cm-regime the sandbox
+showed, now scriptable and seed-controlled.
+
+### Veto/admission-tier constant sensitivity scan (scratch_vetoscan.py; fr101 + fhw stages, follow-ups on stata/belg/fr079)
+Purpose: knife-edge detection over the ~17 one-shot-calibrated admission
+constants (which must stay runtime registers vs bake into fabric), NOT
+retuning. VetoBand = copied verbatim body with every literal lifted
+(all-defaults asserted bit-exact).
+
+**fr101 (point-stable log): 9/17 constants are FLAT-ZERO** —
+chi2 {6,13}, allow_t {½,2×}, allow_r {½,2×}, repl {2.5,5}, coh_floor
+{0.15,0.28}, coh_infl_cap {20,80}, aniso_min {0.32,0.48}, ridge_max
+{0.5,0.7}, ridge_s_max {0.42,0.58}: ATE 1.881 ± ≤0.006 each way. The
+calibrated ridge/aniso classifier and the whole innovation-gate cluster are
+BAKEABLE. Movers: chain_gap→4 (+1.27), coh_target→0.65 (+1.16, the
+documented cliff side), gate_t→0.8 (+0.38), ill_mult→4 (−0.31),
+coh_target→0.45 (−0.24), infl_pow→3 (−0.20), gate_t→0.45 (−0.18),
+sig_r0→2.8 (−0.17).
+
+**fhw (dense-closure log, 559 loops): hypersensitive with OPPOSITE signs**
+on most movers — gate_t→0.8 −0.71 (fr101 +0.38); sig_r0→1.4 −0.75 (fr101
++0.07); infl_pow→3 +0.19 (fr101 −0.20); chain_gap→4 −0.18 (fr101 +1.27).
+The one-shot constants sit at a cross-env compromise; no cross-log retune
+exists in this cluster. FPGA conclusion: {gate_t, sig_r0, coh_target,
+ill_mult, infl_pow, chain_gap} = runtime registers; the other 9 = constants.
+
+**coh_target→0.45, the single ALIGNED mover** (fr101 −0.24, fhw −0.67):
+follow-up — stata 0.203 (≈ shipped 0.202, +2 loops), belg 2.644 (identical;
+1-loop env has no decision surface), fr079 band [4.33..12.24] median 8.18 vs
+shipped [5.52..12.41] median 8.37 — band-equal, floor slightly better.
+Suite scorecard for 0.45: fr101 −0.24, fhw −0.67, stata +0.001, belg 0.000,
+fr079 band-equal — WEAKLY DOMINANT on the post-redirect suite. The shipped
+0.55 was chosen by worst-of-three INCLUDING the now-removed intel log, so
+the calculus has genuinely changed. Caveats before adoption: the hypothesis
+came from the scan itself (mild selection effect; the stata/belg/fr079
+follow-up was the independent check and came back neutral-not-better), and
+flipping the shipped default re-baselines every table. DECISION PREPARED,
+not executed: recommend coh_target 0.45 as the new default under the
+SPOT-era suite; awaiting user sign-off. (sig_r0 2.8, the weak second
+candidate, is fr101-only — stata 0.208 vs 0.202 — dropped.)

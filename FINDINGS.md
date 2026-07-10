@@ -593,6 +593,24 @@ needs the independent signal above. (Audited; mechanism localized by
 frontend-only decomposition; the viewpoint-neutrality and beam-count/Nyquist
 explanations were both tested and refuted en route — see RESULTS 2026-07-10.)
 
+**2026-07-10 second addendum — E2's win is a 180°-FOV/sparse-beam REGIME
+result, and the general law is per-regime sampling (RESULTS "encoder
+sampling study").** The synth FOV ladder flips the E2-vs-shipped ranking
+with aperture (180°: tie/lose; 260–360°: 2× win), and on dense wide-FOV
+heads raw per-beam points COLLAPSE the closure layer (stata 1040 beams:
+1.659, 9 loops) while bridged pair-interpolation at the shipped 63.4° gate
+restores and edges past shipped (0.196 vs 0.202, 74 loops); the gate value
+is a genuine optimum there (45° under-bridges → 1.66; 75° over-bridges →
+8.25). The EXACT segment integral (sinc(k·d/2)·phasor — the principled form
+of the range-thermometer blanking) matches the sub-point implementation
+(stata 0.196 either way) and doubles as a mass-exact decimation operator
+(GROUP/8: 1.6 cm at 2.5× fewer terms on the 1024-beam bench). Blanking
+compensation (α) is moot at target density and a consistent
+half-energy-restoration effect on sparse 180° logs (α=0.5 best 3/3, never
+beating plain E2 there). Deploy recipe for the SPOT head (360°×1024): bridge
+at 63.4°, arc mass, sub-points or integrals; shipped fixed-0.12 m resampling
+FAILS at that density (1024-beam corridor: 1.76 m, 1 loop).
+
 ---
 
 ## 7. The negatives (honest table)

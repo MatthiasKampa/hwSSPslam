@@ -62,7 +62,17 @@ CONFIGS = {
     # full-circle hex lattice (non-Manhattan winner: belg 2.07 vs 2.64)
     "hex63": dict(label="hex SSP lattice (63 dirs, full circle)",
                   sample="seg", kw=dict(spec=None, nph=0), hex=63),
+    # the wide-FOV/dense-head deploy sampler (encoder study 2026-07-10):
+    # bridged PAIR sub-points at the 63.4-deg occlusion gate — on the
+    # 1040-beam stata target proxy 0.196 vs raw points 1.659
+    "interp2": dict(label="deploy sampler: bridged pairs @ 63.4°",
+                    sample=None, kw=dict(spec=None, nph=0)),
 }
+
+
+def _interp2(rr, beam):
+    import ssp_sampling as SP
+    return SP.sample_interp(rr, beam, 2, 63.4)
 
 GT_NAMES = dict(gfs="GMapping-corrected reference",
                 ident="GMapping-corrected reference (range-identity match)",
@@ -97,9 +107,10 @@ def export(name, cfg_name, cap=None, stride=None):
         base = H.HexSLAM
     else:
         base = F.BandSLAM
+    sample = _interp2 if cfg_name == "interp2" else cfg["sample"]
     # est stays float64 inside DS.run: float32 chaining of the guess alone
     # perturbs the chaotic closure cascade (measured: Intel 2.44 -> 3.97 m).
-    r = DS.run(name, recording(base), cap=cap, sample=cfg["sample"],
+    r = DS.run(name, recording(base), cap=cap, sample=sample,
                eps=0.0, **kw)
     slam, bundle, est = r["slam"], r["bundle"], r["est"].astype(np.float32)
     keys, beam = bundle["keys"], bundle["beam"]
