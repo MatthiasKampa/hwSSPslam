@@ -4184,3 +4184,60 @@ not resolution). Store-tier verdict per log stands: 2 b for
 closure-redundant fr101/fr079-class, 6 b tier for stata/intel-class; λ
 ladder stays {0.25..2}; 5-ring ladders need the try_constraint 4-ring
 Hessian slice generalized (deferred).
+
+## 2026-07-10 — consolidation: dataset registry + lattice module, repo cleanup, 9-replay webvis
+
+Directive: "read all code and results, clean up, integrate other datasets
+into webvis, rework both python side and webvis, continue experiments."
+
+### Infra consolidation (committed modules)
+`ssp_datasets.py` — ONE registry + run/eval harness for all eight datasets
+(intel/fr079/fr101/aces/fhw gfs-eval; belg/mit range-identity; stata
+floorplan-GT), replacing the three parallel copies of the run loop
+(ssp_fpga.run_log, ssp_stata.run, scratch_belgioioso/scratch_fpga_mit2).
+Acceptance: `selftest` asserts the registry loop == run_log BIT-EXACT
+(fr101[:1200], max|Δpose| 0); banked-number reproduction belg 2.644 /
+fhw 0.981 / stata 0.202 — all three eval families exact. `ssp_lattice.py` —
+set_polar (any ladder/ring count)/set_hex/shipped()-restore with an exact
+shipped-globals selftest, consolidating the three per-scratch lattice
+patch copies. `ssp_hexreal.py` rewired onto both (verbatim-run equivalence:
+its runners now delegate to the registry loop, which is proven bit-exact);
+its scratch_belgioioso import is gone (range-identity eval promoted into
+the registry).
+
+### Repo cleanup
+16 committed root figures → `archive/plots/`; the two tracked scratch
+scripts + ~200 untracked scratch files/logs → `archive/scratch/` (READMEs
+in both; RESULTS references cite the same file names); regenerable root
+`*.npz` → `archive/local/`. Repo root now holds docs + committed modules +
+the active thread's scratch only.
+
+### Webvis rework — replay pack + 9 datasets (the real-data side)
+`demo/export_replay.py` rewritten registry-driven: any dataset ×
+{shipped, e2, lean, fpga8, binary, hex63}; per-dataset scoring reference
+travels with the blob (gfs / range-identity / floorplan GT + provenance
+string); display beams strided to ≤260 (poses computed on full scans);
+output → `demo/replays/` + manifest; `--embed` splices ONE lazy-decoding
+REPLAY_PACK (replaces the 3 numbered slots). index.html: dataset/config
+selector built from the pack, drag-drop/Load-replay for sidecar JSONs,
+"Real data" tab naming, pack self-tests. Embedded set (ATE, all
+reproduced by the exporter run itself):
+
+| replay | ATE m | note |
+|---|---|---|
+| intel shipped | 2.440 | float64 est chaining preserved |
+| fr101 shipped | 1.881 | |
+| fr101 FPGA-lean | 1.132 | 2b+int8 @ 75 KB — this draw lands at the band floor [1.13..3.08]; binary BEATS float here |
+| fr079 E2 | 2.210 | float winner |
+| fr079 FPGA-lean | 3.149 | |
+| belg shipped | 2.644 | range-identity eval in-blob |
+| belg hex63 | 2.071 | the non-Manhattan hex win, now live |
+| stata shipped | 0.202 | independent floorplan GT in-blob |
+| fhw shipped | 0.981 | 7035 kf |
+
+Verification: jsc parity harness decodes all 9 embedded blobs and walks the
+JS replay shim over every keyframe — max |shim − Python fin| ≤ 4e-6 m
+(fhw 3.2e-4, float32 snapshot accumulation over 157 relaxes; 3 orders below
+drawing resolution). Full-page JS re-run through jsc (core executes to the
+headless guard; UI parses); 46 referenced element ids all defined.
+index.html self-contained at 26.2 MB.
