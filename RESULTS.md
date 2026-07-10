@@ -3780,3 +3780,130 @@ comparisons are like-for-like.)
 (3.902, its in-band draw; 120 loops, 43 snapshots) side by side, both
 exported from the real Python pipelines (`export_replay.py --config=fpga8
 --slot=2 --embed`; page 10.6 MB).
+
+## 2026-07-10 (late) — decision-stability thread: the perturbation band is a FRONTEND phenomenon; the occlusion filter is a per-environment tradeoff
+
+`ssp_stablegate.py` (subclass-only; jit_k=0 asserted bit-exact to parent).
+Motivation: if the band's decision flips could be made perturbation-stable,
+quantization would become attributably free on every log.
+
+### v1 — loop-gate jitter-consensus: NULL (and diagnostic)
+Re-match every loop candidate against K=2 jittered old-map bundles (the exact
+noise channel of the band study); reject jitter-unstable candidates. Result:
+at ε=0 and 1e-6 the gate binds NEVER (bit-identical to shipped: intel
+2.440/80, fr079 5.523/32, fr101 1.881/53); on a full intel run at ε=1e-3 the
+counter shows **0 rejections** (seed 7, results bit-identical to no-gate).
+fr079's gated band [5.52..12.41] = the ungated band exactly. The one apparent
+improvement (intel s1 6.72→3.88) is a re-roll from a rare firing, not a
+systematic clip. **The loop-candidate matched peaks are already jitter-stable
+— the flips are not there.**
+
+### Channel localization: the band enters ENTIRELY through the frontend
+Inject 1e-3 relative noise into ONLY one bundle-read channel (intel):
+
+    noise ONLY in loop-candidate reads:  ATE 2.440  med 1.553  loops 80
+                                         [veto 51 innov 26] — EXACTLY shipped
+    noise ONLY in frontend local-bundle: ATE 5.145  med 3.044  loops 91
+                                         [veto 97 innov 24] — the full band
+
+The closure layer (candidate match + coherence tiers + innovation + IRLS/LOO)
+is fully robust to 1e-3 map noise. The band is produced by the frontend's
+reads alone.
+
+### Amplifier hunt: NOT the session-relative calibration
+Pinning coh_ref to the unperturbed run's steady value (0.3851) during an
+ε=1e-3 run does NOT collapse the band (4.668, loops 112) — the
+coherence-calibration feedback (veto 97 above) is a symptom, not the
+amplifier. By elimination the driver is the **est-chain divergence of the
+frontend's own discrete layer** (per-keyframe accept-gate / coarse-argmax
+flips integrating over ~6k keyframes; the audit's continuous-channel estimate
+predicts only ~cm at 1e-3). v2 below tests exactly that layer.
+
+### v2 — frontend jitter-consensus: the band COLLAPSES — onto its median
+`ConsensusMatcher`: after each frontend match, re-match against K=2 jittered
+local bundles; if the matched pose is unstable beyond (5 cm, 0.5°), decline
+the match (odometry fallback for that keyframe). Intel band:
+
+    front-consensus: [3.84 .. 4.15] median 3.87   (width 0.31)
+    no gate:         [2.44 .. 6.72] median 3.17   (width 4.28)
+
+The band narrows 14x — but re-centers at the band median instead of keeping
+the knife-edge 2.44: the unperturbed optimum is BUILT FROM frontend matches
+that do not survive 1e-3 jitter, so a perturbation-consistent system
+converges to its noise-robust performance level. Interpretation for
+deployment: front-consensus buys PREDICTABILITY (a hardware/quantized system
+is guaranteed a perturbation anyway — a tight [3.84..4.15] spec beats an
+unpredictable [3.5..5.5] draw) at the price of the fragile upside. It is a
+choice, not a free win; not shipped by default.
+
+### The occlusion filter is a per-environment tradeoff (frontend-only ATEs)
+Disabling the day-1 occlusion filter (runtime `S.OCC_RATIO = inf`; shipped
+segment sampling otherwise):
+
+    fr079  11.62 → 4.83   aces  6.38 → 2.40 (!)   intel  5.07 → 6.99 (worse)
+
+On the furnished-but-clean logs the filter's weight-zeroing near depth
+discontinuities deletes the most translation-informative content (aces
+occ-off even beats E2's 4.33 and raw odometry 5.41 at the frontend level);
+on cluttered sparse-beam intel the phantom-bridge protection is genuinely
+needed. This completes the E2 per-log pattern with a mechanism: E2 (which has
+no bridges to protect) wins exactly where the filter hurts and loses where it
+protects. Full-system occ-off on fr079 lands in-band (8.31; the closure layer
+reshuffles), so this is a frontend-level finding — E2 remains the deployable
+form of it.
+
+### Divergence trace (the microscope pass): the band's FIRST FLIP is the closure edge's chain-median ATTRIBUTION
+`scratch_divtrace.py` — run ε=0 and ε=1e-3 (the 4.168 draw) side by side on
+intel, log per-keyframe poses + observable decisions, find the first
+meaningful deltas:
+
+    |d est| > 1 µm  : kf 6          (float noise)
+    |d est| > 1 cm  : kf 250        (still only 1 cm!)
+    ... d stays 0.1–0.4 mm through kf 3000 ...
+    FIRST DECISION DELTA: kf 3424 — the runs admit a DIFFERENT loop edge:
+        A: (240 → 684)    B: (241 → 684)
+    fallback flip kf 3547, first relax delta kf 3575, |d|>0.1 m kf 3575,
+    |d|>1 m kf 3645; thereafter the loop-edge sets diverge wholesale
+    (A 86 / B 101 insertions, only 36 common).
+
+**The divergence is not integration — it is one discrete event.** For 3,400
+keyframes the perturbed run tracks at sub-mm (the continuous response,
+exactly as the audit predicted). The first flip is in `try_constraint`'s
+edge ATTRIBUTION — `c_aid = chain[len(chain)//2]`: sub-mm pose noise flips a
+boundary anchor in/out of the 5 m candidate set, shifting the chain median by
+one anchor and re-anchoring the (otherwise nearly identical) constraint; the
+early-stopped relax's path-dependence then amplifies the ~cm difference over
+~200 kf into meters, after which the trajectories present different closure
+candidates and the sets scatter. The matcher, the coherence tiers, and the
+innovation gate were all innocent — which is why both jitter-consensus gates
+were no-ops. Targeted fix under test (`scratch_attrib.py`): attribute the
+edge to the chain anchor SPATIALLY NEAREST the matched pose (invariant to
+membership flips at the far radius boundary); gate = eps-0 points hold
+multi-log AND the intel band tightens.
+
+### Stable attribution (the targeted fix): the knife-edge is NOT recoverable by local rule-hardening — thread conclusion
+Nearest-anchor attribution (the one-line fix the trace suggested): fr101
+1.879 (≈shipped), aces 5.954 / fr079 7.03 (in their bands), but intel's ε=0
+point itself moves to 3.951 and the band becomes [3.95 .. 5.75] med 4.51 —
+narrower than shipped's [2.44 .. 6.72] but WITHOUT the 2.44 draw. Any rule
+change that decides differently is a fresh draw from the band.
+
+**Thread conclusion (four interventions, one trace).** The intel 2.440 is an
+unstable fixed point whose basin has ~measure zero under any perturbation OR
+local rule change: loop-gate jitter-consensus (no-op, 0–1 firings), coh_ref
+pinning (no collapse), frontend jitter-consensus (band collapses 14× onto
+its median 3.87, losing the fragile upside), nearest-anchor attribution
+(relocates the draw). The divergence trace shows why: the system holds
+sub-mm for thousands of keyframes, then ONE boundary decision flips (chain-
+median attribution at kf 3424 in the traced pair) and the early-stopped
+relax's path-dependence amplifies it; hardening that boundary just promotes
+the next one. Deployment guidance unchanged and now fully grounded: report
+bands (PROTOCOL §6); where determinism matters, frontend jitter-consensus
+buys a 14×-tighter predictable band at the band-median accuracy level.
+Practical corollary for the webvis report ("irrecoverable divergence at loop
+closures on real data"): the live-JS port stacks three of tonight's causes —
+an LM/PCG relax (the solver class the ledger rejected for flat-valley
+sliding; shipped TRF step control is load-bearing), a no-odometry guess
+chain (nothing pulls back a wrong snap), and knife-edge admission — so the
+demo now DEFAULTS its real-data tab to the Python-fed replay; the live
+pipeline remains selectable as a toy.

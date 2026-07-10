@@ -855,7 +855,22 @@ consolidation" has the full table).
   negative** (fr101 2.50, Intel 4.67) — the first-order term is a storage-side
   tool (bundle-averaged, ≤1.5°), not a matcher-side one. The re-encodes stay
   (they are cheap).
+- **The knife-edge is not recoverable by local rule-hardening** (decision-
+  stability thread, `ssp_stablegate.py` + divergence trace). A perturbed run
+  tracks the unperturbed one at sub-mm for thousands of keyframes, then ONE
+  boundary decision flips (first flip in the traced pair: the closure edge's
+  chain-median attribution) and the early-stopped relax's path-dependence
+  amplifies it. Four targeted interventions — loop-gate jitter-consensus
+  (no-op), coh_ref pinning (no collapse), frontend jitter-consensus (band
+  collapses 14× onto its median, losing the fragile upside), nearest-anchor
+  attribution (relocates the draw) — all fail to keep Intel's 2.44: it is an
+  unstable fixed point with a ~measure-zero basin. Where determinism matters
+  (hardware), frontend jitter-consensus gives a tight predictable band
+  ([3.84..4.15] on Intel) at band-median accuracy.
 - The webvis real-data path is now **Python-fed**: `demo/export_replay.py`
   runs the actual deliverable and embeds a self-contained replay (poses,
   per-relax anchor snapshots, loop edges); the browser replays it exactly
-  (jsc parity harness), so the demo can no longer drift from the system.
+  (jsc parity harness), so the demo can no longer drift from the system —
+  and the real-data tab now DEFAULTS to the replay (the live-JS port stacks
+  an LM/PCG relax, a no-odometry guess chain, and knife-edge admission —
+  the observed "irrecoverable divergence at loop closures").

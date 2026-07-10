@@ -479,7 +479,8 @@ def run_log(path, cls, cap=None, sample="seg", **kw):
     return dict(ate=float(np.sqrt((e ** 2).mean())), med=float(np.median(e)),
                 loops=nloop, ms=dt / n * 1e3, mem_kb=slam.memory_kb(),
                 pruned=slam.n_pruned, veto=slam.n_veto, infl=slam.n_inflate,
-                innov=slam.n_innov_rej, coh_ref=slam.coh_ref, fin=fin)
+                innov=slam.n_innov_rej, coh_ref=slam.coh_ref,
+                jit=getattr(slam, "n_jit_rej", 0), fin=fin)
 
 
 # ---------------------------------------------------------------------------
