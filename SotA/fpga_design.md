@@ -77,6 +77,23 @@ vernier's per-bin sign-op datapath only pays on LUT-free substrates, and
 dither only de-biases a 1-bin QPSK encode path. If a future target cannot
 afford even a 256-entry ROM, this is the primitive to reach for.
 
+## Binary-version spec sheet (bill of materials, computed 2026-07-10)
+
+Constants: W ROM 360x2 in turns/m Q3.21 = 2.2 KB; cis ROM 256x2x8b = 512 B
+(64-entry quarter-wave folded: 128 B). Encoder: points (x,y) Q7.11 + 8-bit
+weights; per point-component 2 phase MACs (24x18, fractional-turn top 8 bits
+address the ROM) + 2 weighted MACs (8x8); accumulators D x 2 x int32 =
+2.9 KB; active-segment buffer 5.8 KB; ~13 encodes/keyframe -> ~52 MMAC/s at
+20 Hz = 1-2 DSP48 @ 100 MHz or LUT adders. Store: 2 b/phasor (4-PSK,
+one-level clamp) + 6 per-ring 16-bit scales -> 204 B/segment; budgets fr101
+68-76 KB / fr079 110 KB / Intel-scale 140 KB / MIT 480-625 KB. Matcher:
+E-banks recomputed through the encoder datapath (0 BRAM; stored variant
+139 KB coarse + 300 KB loop-coarse); rotations = index permutation; scores =
+240-term complex dots 8x8->int32. Whole fabric (recompute-E): ~155 KB BRAM +
+<=6 DSPs; Artix-7 100T fits with 4x headroom. Intel-class deployments: chord
+sampling + 6-bit store (16-PSK x 4 mag ~= 560 B/segment). Accuracy contract:
+the band table; arithmetic floor = 8-bit cis ROM (QPSK is median-only).
+
 ## Open items for the RTL session
 
 - Fixed-point W·p MAC width vs. range (ranges ≤ 40 m, W ≤ 25.1 rad/m →
