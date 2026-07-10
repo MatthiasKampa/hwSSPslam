@@ -49,13 +49,20 @@ re-litigate this without new information — see `FINDINGS.md` §5–§6.
 ## Run the shipped deliverable
 
 ```bash
-python3 ssp_bounded_carmen.py data/intel.log        # build + ATE vs .gfs.log
+python3 ssp_bounded_carmen.py data/fr101.log        # build + ATE vs .gfs.log
+python3 ssp_datasets.py run stata                   # flagship (floorplan GT)
 ```
-Current numbers (ATE rmse, reproduced bit-exact by audit): Intel 2.44 m,
-fr101 1.88, fr079 5.52, ACES 6.21, MIT 42.66, belgioioso 2.64. Baselines
-(same harness): ICP 1.70 / CSM 3.27 / RBPF 0.12* (Intel). Encoder lattice lives
-as module globals in `ssp_slam_loop.py` (`LAMS`, `N_ANG`, `W`, `ENC`, `ENC_MAIN`);
-the frontend matcher uses the 4 matched rings × 60 angles (D=240).
+**Acceptance suite (2026-07-10 redirect; see PROTOCOL):** stata 0.202
+(floorplan GT — the target proxy; platform = SPOT, 360° × 1024-beam head @
+20 Hz), fr101 1.88, fhw 0.98, fr079 5.52 (read as a band), belg 2.64, plus
+the synthetic 360° bench (`ssp_synth.py`). **intel was REMOVED from the
+suite** (knife-edge band, GMapping-referenced GT, 180° FOV) — do not tune
+or accept against it; its historical numbers stay in the ledger. Baselines
+(same harness): ICP 1.70 / CSM 3.27 / RBPF 0.12* (intel-era). Encoder
+lattice lives as module globals in `ssp_slam_loop.py` (`LAMS`, `N_ANG`,
+`W`, `ENC`, `ENC_MAIN`); the frontend matcher uses the 4 matched rings × 60
+angles (D=240). Patch lattices only via `ssp_lattice.py`; run datasets only
+via `ssp_datasets.py`.
 
 ## Map of the repo
 
