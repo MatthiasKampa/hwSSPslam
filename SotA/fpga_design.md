@@ -66,6 +66,7 @@ trace to a single 0.4 mm boundary flip):
 | ditto, memory-critical | point + 2 b one-level store + int8 | fr101 1.82–3.1 @ 75 KB; MIT-scale 625 KB |
 | sparse-beam cluttered (intel-class) | chord + 6 b + int8 | band [3.7..5.6] ≈ float band; FPGA8 is band-indistinguishable from float shipped |
 | determinism-critical | + front-consensus | band width ~0.3 m at band-median accuracy |
+| uncertainty-aware | + twin pipeline w/ 1e-3 dither, report divergence | online band/health estimate (the band is frontend-recurrence noise — BFC negative — so an envelope must be measured, not formulated away) |
 
 ## Fallback primitive (tested, not needed here)
 
