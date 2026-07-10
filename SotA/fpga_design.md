@@ -67,6 +67,15 @@ trace to a single 0.4 mm boundary flip):
 | sparse-beam cluttered (intel-class) | chord + 6 b + int8 | band [3.7..5.6] ≈ float band; FPGA8 is band-indistinguishable from float shipped |
 | determinism-critical | + front-consensus | band width ~0.3 m at band-median accuracy |
 
+## Fallback primitive (tested, not needed here)
+
+Multi-bin phase-shifted binary (vernier) + dithered fractional encoding
+(user's scheme, RESULTS 2026-07-10 later): at matched bits a flat k-bit
+phase code + small cis ROM dominates on fidelity and e2e bands; the
+vernier's per-bin sign-op datapath only pays on LUT-free substrates, and
+dither only de-biases a 1-bin QPSK encode path. If a future target cannot
+afford even a 256-entry ROM, this is the primitive to reach for.
+
 ## Open items for the RTL session
 
 - Fixed-point W·p MAC width vs. range (ranges ≤ 40 m, W ≤ 25.1 rad/m →

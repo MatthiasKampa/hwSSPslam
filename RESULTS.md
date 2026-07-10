@@ -3985,3 +3985,35 @@ Completed sampling map per log: fr079/aces/belg (+fr101 median) → E2;
 intel frontend → silhouette-emphasized chords (frontend-level only). The
 sampling recipe is a per-environment knob, exactly like the occlusion
 filter it modulates.
+
+## 2026-07-10 (later) — multi-bin phase-shifted binary + dithered fractional encoding (user's scheme): tested, decomposed, not adopted
+
+The user's proposal: per lattice site, M binary bins with structured phase
+shifts (a vernier, M≥2–3), dithering between the two nearest candidates so
+the expectation carries the fractional phase. `scratch_ditherbin.py`
+(deterministic splitmix dither — LFSR-equivalent in hardware) +
+`scratch_ditherbin_e2e/band` runs. The scheme decomposes into two ideas with
+different fates:
+
+- **Dither (zero-mean quantization error).** Real and measurable exactly
+  where its theory predicts: the coarsest single-bin ENCODE, where the error
+  pool averages over ~200 points (1-bin QPSK encode fidelity 0.9662 →
+  0.9779). Everywhere else round-to-nearest wins statics (store fidelity
+  2-bin 0.974 vs 0.894; registration 0.0038 vs 0.0070) because dither's
+  added variance outweighs the bias it removes once codes are ≥4 bit. E2E:
+  the dithered-QPSK 2-bit store drew a striking fr101 1.205 — but the band
+  probe (PROTOCOL §6) lands it at [1.20 .. 3.19] median 1.81, statistically
+  indistinguishable from round-to-nearest 2-bit ([1.13 .. 3.08]; one-level
+  1.82); fr079 lean-with-dither shows no transfer win (7.94/6.16 vs
+  3.15/6.25). VERDICT: keep round-to-nearest for the store; dither is the
+  right tool only if an ENCODE path is ever forced to 1-bin QPSK (it
+  de-biases exactly there).
+- **The vernier (M phase-shifted QPSK bins).** At matched bits/site the flat
+  code always wins fidelity — effective step 2π/(4M) vs 2π/4^M (2×QPSK
+  0.9962 < 16-PSK 0.9993 at 4 b; 0/π binary bins far worse: 0.92–0.96
+  encode, 0.57–0.70 store). E2E on fr101 the vernier variants land 2.1–2.3
+  (the log's coarse-loves-it pattern). Its genuine merit is HARDWARE SHAPE —
+  per-bin sign ops instead of a phase LUT — which this design does not need
+  (the audited knee is a trivial 256-entry cis ROM); it becomes relevant on
+  LUT-free substrates (in-memory/analog computing). Noted in
+  SotA/fpga_design.md territory as a fallback primitive, not adopted.
