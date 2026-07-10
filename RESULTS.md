@@ -4042,3 +4042,38 @@ FPGA-lean recipe. Intel-live (if selected) follows the mode explicitly;
 replay slots are precomputed and immune. jsc functional test: per-ring
 unit-mag view PASS, binary-mode registration on a synthetic room 0.00 cm /
 0.00° PASS, ROM == addr8/val7 spec PASS.
+
+## 2026-07-10 (v3) — bundle-frame smooth closure factors (BFC): CLEAN NEGATIVE, and the band's final localization
+
+`ssp_bfc.py` (use_bfc=False bit-exact to parent). The ultrathink candidate:
+replace single-anchor attribution + hard membership with smooth-membership
+tapered ([4.0,5.5] m) per-anchor peak-contribution factor groups
+(information-preserving split of the matched pose) + weighted innovation
+chi². Physically the "edge the measurement actually made"; kills the traced
+kf-3424 attribution flip class by construction. FALSIFIABLE PREDICTION: the
+intel 1e-3 band collapses toward the ~cm continuous response.
+
+    eps0: fr101 1.877 (holds) / fr079 10.31 (high draw) / aces 7.33 (band)
+          / intel 4.17 (band); loop-edge counts inflate by design (weighted
+          groups: intel 862 edges)
+    intel band: [3.20 .. 6.78] median 4.13 — SAME WIDTH as shipped
+    and eps=1e-6 ≠ eps=0 (4.092 vs 4.169) where shipped was stable to 1e-5:
+    the group machinery (w-min cut, top-k, chain choice) adds boundaries.
+
+**Verdict: REFUTED as a band fix — and the refutation completes the band's
+localization.** Combining with the channel study (loop-side noise moves
+nothing; frontend-side noise reproduces the band) and nearest-attribution
+(hardening one boundary promotes the next): the band is a property of the
+RECURRENT FRONTEND ESTIMATOR (est[k] feeds guess[k+1] through per-keyframe
+argmax + accept gates), not of the closure formulation. Any loop-layer
+reshaping — smooth or hard — is structurally incapable of removing it,
+because the divergence enters upstream and will cross SOME structural
+boundary downstream. Making the recurrence itself C¹ would require softmax-
+pose blending (= the closed belief-frontend negative); the working levers
+are consensus at the source (frontend jitter-consensus: band 14× tighter at
+band-median accuracy) or hypothesis envelopes (report the band online). P2
+(decision fragility) is hereby CHARACTERIZED-AND-BOUNDED: smooth admission
+refuted as insufficient (BFC), frontend recurrence identified as the locus,
+consensus/envelope as the deployable mitigations. P1 (twin verification)
+unchanged — the isometry argument stands; embedding reshaping wins live on
+the retrieval/memory/smoothness axes only.
