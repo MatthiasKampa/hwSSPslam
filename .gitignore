@@ -18,6 +18,7 @@ scratch_*.out
 # accumulating as experiments run.
 *.npz
 
-# generated replay blobs (embedded into demo/index.html by --embed)
-demo/replay_*.json
+# generated replay blobs (embedded into demo/index.html by --embed;
+# demo/replays/manifest.json stays tracked — it defines the embed set/order)
+demo/replays/replay_*.json
 scratch_*.md

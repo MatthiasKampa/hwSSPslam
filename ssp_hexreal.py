@@ -28,25 +28,17 @@ import numpy as np
 import ssp_slam as S
 import ssp_slam_loop as L
 import ssp_fpga as F
+import ssp_lattice
+import ssp_datasets as DS
 
-RELO = (5.3, 12.8)
-OCT = (0.25, 0.5, 1.0, 2.0)
+RELO = ssp_lattice.RELO
+OCT = ssp_lattice.OCT
 
 
 def set_lattice_hex(n_ang):
-    """Patch module lattice globals to a full-circle hex layout."""
-    L.LAMS = np.array(list(OCT) + list(RELO))
-    L.N_ANG = n_ang
-    L.N_RING = 6
-    L.MAIN = slice(0, 4 * n_ang)
-    a = np.arange(n_ang) * 2 * np.pi / n_ang          # FULL circle
-    u = np.stack([np.cos(a), np.sin(a)], 1)
-    L.W = np.concatenate([(2 * np.pi / lam) * u for lam in L.LAMS])
-    L.ENC.W = L.W
-    L.ENC_MAIN.W = L.W[L.MAIN]
-    L._RINGS = np.repeat(np.arange(L.N_RING), n_ang)
-    L.WIDE = L._RINGS >= 2
-    L.WIDER = L._RINGS >= 3
+    """Patch module lattice globals to a full-circle hex layout
+    (consolidated into ssp_lattice.set_hex; kept as the RESULTS-cited name)."""
+    ssp_lattice.set_hex(n_ang)
 
 
 def hex_permute(v, m, n_ang):
@@ -147,36 +139,14 @@ def self_test(n_ang):
 
 def run_intel(n_ang):
     set_lattice_hex(n_ang)
-    r = F.run_log("data/intel.log", HexSLAM, spec=None, nph=0)
+    r = DS.run("intel", HexSLAM, spec=None, nph=0)
     return r["ate"], r["med"], r["loops"]
 
 
 def run_belg(n_ang):
     set_lattice_hex(n_ang)
-    import ssp_slam_carmen as C
-    from scratch_belgioioso import PATH, ref_xy_by_identity, ate
-    keys = C.keyframes(C.parse_flaser(PATH))
-    odom = np.stack([k[1] for k in keys])
-    ref, valid = ref_xy_by_identity(keys)
-    nb = len(keys[0][0])
-    beam = np.deg2rad(-90.0 + np.arange(nb) * (180.0 / nb))
-    slam = HexSLAM(robust=True, attempt_every=4, relax_every=25, gap_kf=300,
-                   recent_aids=12, spec=None, nph=0)
-    slam.store_dtype = np.complex64
-    n = len(keys)
-    est = np.zeros((n, 3))
-    for k, (r, opose, ts) in enumerate(keys):
-        rr = np.where(r < 40.0, r, np.inf)
-        pts, w, _ = S.scan_to_samples(rr, beam)
-        guess = opose if k == 0 else L.se2_mul(
-            est[k - 1], L.se2_mul(L.se2_inv(odom[k - 1]), odom[k]))
-        est[k] = slam.add_keyframe(pts, w, guess)
-    if slam.dirty:
-        slam.relax()
-    fin = np.stack([slam.pose_of(k) for k in range(n)])
-    rmse, med, _ = ate(fin[:, :2], ref, valid)
-    nloop = sum(1 for e in slam.edges if e[5] == "loop")
-    return rmse, med, nloop
+    r = DS.run("belg", HexSLAM, spec=None, nph=0)
+    return r["ate"], r["med"], r["loops"]
 
 
 def main():

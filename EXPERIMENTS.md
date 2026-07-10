@@ -18,13 +18,18 @@ reference used **only** for scoring. Under `data/` (gitignored, fetched).
 | fr079 | `data/fr079.log` | Freiburg 079, zero-shot |
 | fr101 | `data/fr101.log` | Freiburg 101, held-out dense-revisit building |
 | aces | `data/aces_publicb.log` | ACES3 Austin, zero-shot, odo already good |
-| belgioioso | `data/belgioioso.log` | non-Manhattan castle; range-identity eval |
-| mit | `data/MIT_Infinite_Corridor_2002_09_11_same_floor.log` | 1.9 km held-out capstone |
+| fhw | `data/fhw.log` | FHW Ravensburg exhibition hall |
+| belg | `data/belgioioso.log` | non-Manhattan castle; range-identity eval |
+| mit | `data/MIT_Infinite_Corridor_2002_09_11_same_floor.log` | 1.9 km held-out capstone; range-identity eval |
+| stata | `data/stata/2012-01-27-07-37-01.bag` | MIT Stata, floorplan-anchored GT (independent-class reference) |
 
-**Eval recipe** (identical everywhere): parse `.gfs.log`, match each reference
-pose to the nearest keyframe timestamp within 0.3 s, `C.align_se2` the matched xy,
-report RMSE / median / max. Belgioioso/MIT have timestamp quirks — check the
-relevant `RESULTS.md` section before trusting an ATE there.
+**One registry for all of it: `ssp_datasets.py`** — `load(name)`,
+`evaluate(bundle, fin)`, `run(name, cls, sample=..., **kw)`. The run loop is
+a bit-exact transcription of `ssp_fpga.run_log` (asserted in
+`python3 ssp_datasets.py selftest`); eval dispatches per dataset: `gfs`
+nearest-timestamp <0.3 s, `ident` range-array identity (belg/mit — their gfs
+timestamps are corrupt), `stata` floorplan GT <30 ms. Quick single runs:
+`python3 ssp_datasets.py run belg [shipped|e2|lean]`.
 
 ## Run recipes
 
@@ -51,19 +56,18 @@ class MySLAM(B.BoundedSLAM):
 ```
 
 **Run the shipped loop with a parameterised encoder** (sweep a lattice constant
-without editing the module) — see `scratch_lattice_sweep.py`:
+without editing the module) — `ssp_lattice.py` is the one committed home:
 ```python
-import ssp_slam_loop as L
-def set_lattice(lams_matched, n_ang):          # 4 matched rings + 2 relo fixed
-    L.LAMS = np.array(list(lams_matched) + [5.3, 12.8]); L.N_ANG = n_ang
-    L.N_RING = len(L.LAMS); L.MAIN = slice(0, 4 * n_ang)
-    L.W = L.build_W(); L.ENC.W = L.W; L.ENC_MAIN.W = L.W[L.MAIN]
-    L._RINGS = np.repeat(np.arange(L.N_RING), n_ang)
-    L.WIDE = L._RINGS >= 2; L.WIDER = L._RINGS >= 3
-# then replicate ssp_bounded_carmen.main's loop + eval verbatim
+import ssp_lattice, ssp_datasets as DS
+ssp_lattice.set_polar((0.125, 0.25, 0.5, 1.0), n_ang=60)   # any ladder/count
+ssp_lattice.set_hex(63)                                     # full-circle hex
+ssp_lattice.shipped()                                       # exact restore
+r = DS.run("fr101", spec=None, nph=0)                       # then run
 ```
-Validate any such harness reproduces a known shipped number before trusting a
-sweep (fr101 → 1.881 m at the baseline lattice).
+(`python3 ssp_lattice.py` asserts set_polar()==shipped globals exactly and
+hex rotation==permutation.) Validate any such harness reproduces a known
+shipped number before trusting a sweep (fr101 → 1.881 m at the baseline
+lattice).
 
 **Reuse the flow field** (`ssp_flow.FlowField`): pose-pose stiff edges +
 analytic SSP-correlation overlap force, grad-L2 normalised. `ssp_hybrid.py` shows
@@ -140,7 +144,8 @@ python3 ssp_fpga.py front fr101 intel   # E1/E2 frontend variants
 python3 ssp_fpga.py int fr101           # integer arithmetic ladder
 python3 ssp_fpga.py chaos intel         # freeze-noise response curve
 python3 ssp_fpga.py band fr079          # config x perturbation band table
-python3 demo/export_replay.py data/intel.log --embed   # Python-fed webvis
+python3 demo/export_replay.py stata --config=shipped   # Python-fed webvis
+python3 demo/export_replay.py --embed   # splice manifest into index.html
 ```
 Verdicts in RESULTS.md "2026-07-10 — FPGA track opened" (+ the consolidation
 section that follows it): quantized store needs PER-RING scales; ≥6-bit quant
@@ -148,3 +153,18 @@ deltas on Intel are not attributable (perturbation band); E2 = frontend
 registration win 5/5 logs, closure-layer per-log; arithmetic knee = 8-bit ROM
 cis; 2-bit phase-only store viable on robust logs (fr101 band [1.1–2.7] at
 75 KB); QPSK arithmetic = median-only.
+
+**Stability / decision-flip thread (2026-07-10)** — `ssp_stablegate.py`
+(JitterMixin loop-layer dither-consensus: bands narrow but medians drift;
+ConsensusMatcher FRONTEND jitter-consensus: collapses the intel band 14×
+onto the median — the mitigation candidate); `ssp_bfc.py` (bundle-frame
+smooth closure factors: clean negative — band is a recurrent-estimator
+property, not a factor-shape artifact). Both carry the verbatim copied
+`try_constraint` body pattern (neutralised → bit-exact, asserted).
+
+**Datasets / lattice infra (2026-07-10)** — `ssp_datasets.py` (registry +
+the one shared run/eval harness — see Datasets above); `ssp_stata.py` (bag
+adapter, floorplan GT; shipped 0.202 m); `ssp_hexreal.py` (full-circle hex
+lattice e2e on real logs: belg 2.071 vs polar 2.644, intel control loses —
+per-environment option); `ssp_lattice.py` (set_polar/set_hex/shipped —
+consolidated lattice patching, replaces per-scratch copies).
