@@ -3491,3 +3491,135 @@ Representation-track work (the lean 113 config exists to be quantized).
   and 0.97 coherence fidelity — a concrete advance on the bounded-memory thesis.
   NEXT: end-to-end confirm (segder-drop + polar-6bit map through the full pipeline —
   ATE + closure recall vs shipped).
+
+## 2026-07-10 — FPGA track opened: write-time quantized store, the perturbation band, point encoding, Python-fed webvis replay
+
+Session goal (user directive): progress toward an SSP SLAM system for FPGA
+deployment — float groundwork first, then a binary/integer VSA version; rework
+the Python side (the webvis had been hand-tuned on the synth sandbox and its
+real-data part broke). New module `ssp_fpga.py` (subclass/import only; the
+neutralised subclass is asserted bit-exact to the parent: `selftest` max|Δpose|
+= 0.0). Shipped baseline reproduced first: Intel 2.440 / 80 loops / 15 ms/kf,
+bit-exact.
+
+### FPGA sizing: compute is trivial, memory + noise-sensitivity are the design pressures
+Analytic op count of the shipped hot path (`ssp_fpga.py ops`, n_pts=200):
+frontend encode 0.10 + coarse banks 0.97 + fine 0.54 + segment fold 0.22 +
+amortized loop attempt 0.72 ≈ **2.55 M MAC-equiv per keyframe → 0.05 GMAC/s at
+20 Hz** — a fraction of one DSP array at 200 MHz; even a small FPGA is compute-
+idle. Map store at the shipped D=360×2 vectors: Intel 3.93 MB (c64) → 368 KB at
+6 b/phasor; MIT 13.5 MB → 1.27 MB. The real design pressures are (a) map
+memory (solved below, per-log caveats) and (b) the closure cascade's
+perturbation sensitivity (measured below — the session's centerpiece).
+
+### Write-time polar-quantized store (deployable, unlike read-time requant)
+`QuantStoreSLAM`: a segment accumulates at full precision while its anchor is
+active (hardware: a 1-deep high-precision accumulation buffer) and is polar-
+quantized ONCE when the anchor advances; every later read — frontend recency
+bundle, loop candidates, coherence probes — sees quantized content.
+
+- Read-time requant (scratch_quant_e2e.py, the queued NEXT from 2026-07-09):
+  fr101 6b 1.646 / 4b 0.866(!); intel 6b 4.890 / 4b 11.12. Models nothing
+  storable; superseded by write-time.
+- Write-time, per-VECTOR scale: fr101 8b 1.886 (free; med halves to 0.669) /
+  6b 1.656 / 4b 2.594; intel 8b 5.937 / 6b 3.733 / 4b 7.728 with loop counts
+  scattering 56/169/198 (vs 80).
+- **Per-ring scale fix (mechanism confirmed static).** The per-vector 99th-pct
+  scale is set by the phase-coherent relocalization rings (per-ring |v| p99 =
+  7.9/14.4/19.7/25.9/24.9/35.1 across λ 0.25..12.8), so the two FINEST rings —
+  the closure veto's `coh[:2]` statistic — collapse into the bottom magnitude
+  levels: per-ring coherence fidelity at 6 b jumps 0.841/0.909 → 0.972/0.974
+  with per-ring scales (6 extra f32/vector). This also explains why the static
+  2026-07-09 bench (3-oct lattice, NO relo rings) failed to predict the e2e
+  regression. A dead-zone (true-zero) magnitude code was also added; the
+  floor-mass hypothesis it tests was NOT supported statically (distant-segment
+  |xcorr|: raw 0.517 / mid-tread 0.502 / dead 0.496).
+- Write-time, per-RING scales, intel: 8b 4.097 (loops 183) / 6b 5.648 (64) /
+  4b 4.790 (62) / 10b 4.856 (113) — non-monotone in bits, counters wobbling
+  around shipped [veto 51 infl 51 innov 26]. Interpretation resolved by the
+  chaos control below.
+
+### The perturbation band (chaos control) — intel's 2.440 is a knife-edge
+`NoiseStoreSLAM` adds i.i.d. RELATIVE Gaussian noise (ε·mean|v|) to each
+segment at freeze time (deterministic seed), isolating "any map perturbation"
+from "quantization structure":
+
+    intel:  ε=1e-6 → 2.440 BIT-IDENTICAL (loops 80, counters identical)
+            ε=1e-5 → 2.440 identical
+            ε=1e-4 → 3.999            ε=1e-3 → 4.168 / 3.596 / 3.866 (3 seeds)
+            ε=1e-2 → 5.232            ε=3e-2 → 3.464
+    fr101:  ε=1e-3 → 1.883 (≈1.881 shipped; loops 56 vs 53)
+
+**Intel bifurcates between 1e-5 and 1e-4 relative map noise into a ~[3.5, 5.5]
+m band that does not widen with ε** — not progressive degradation but a
+solver-path bifurcation (early-stopped TRF relax + closure-admission cascade
+re-rolls; a float32 rounding of the frontend guess alone lands at 3.971, same
+band). All six write-time quant results on intel (3.7–5.9) lie inside the same
+band as every noise sample (12 perturbed samples all in [3.5, 6.0], none ≤2.6).
+Consequences: (1) preserving intel's 2.440 requires ≤1e-5 relative map
+fidelity (≈17+ bits) — no useful quantization keeps it, but the 2.440 itself
+is a knife-edge configuration, not a robust operating point; the honest
+perturbed-intel figure is the band, still ~5× under raw odometry (24.2). (2)
+fr101 is noise-robust at 1e-3 and quantization-FREE at 6–8 b (1.66–1.89 at
+183–246 KB vs 1.9 MB c64 — a real ~10× map-memory win where the log
+tolerates it). fr079/aces tolerance rungs in flight; verdict per log.
+
+### E1 — fine rotation via scan d/dθ derivative: CLEAN NEGATIVE
+`DerFineMatcher` replaces the fine stage's 9 re-encodes with one derivative
+encode + permutations (11 → 3 encodes/match, attractive for fabric): fr101
+1.881→2.496, intel 2.440→4.666. The first-order Lie term is validated for
+STORAGE reconstruction (≤1.5°, bundle-averaged) but is not accurate enough for
+the fine stage's 0.375° argmax decisions on a single scan. Keep the re-encodes
+(0.5 MMAC/kf — cheap). Rejected.
+
+### E2 — per-beam point encoding: 3-of-4 win, intel regression (AUDIT PENDING)
+`points_from_scan`: one phasor per raw hit, weight = r·dθ (arc-length
+footprint — the surface integral as a per-beam Riemann sum), replacing the
+whole segment-resampling + occlusion-filter preprocessing (the one
+irregular-compute stage in the fabric path):
+
+    fr079  5.523 → 2.210  (loops 32 → 66)   — best fr079 result in the repo
+    aces   6.212 → 4.409  (11 → 39)         — beats shipped AND raw odo 5.41
+    fr101  1.881 → 1.569  (53 → 64)
+    intel  2.440 → 5.126  (80 → 250, flooding — inside the perturbation band,
+                            but the loop-count flooding is a distinct signature)
+
+Positive result ⇒ read-only audit dispatched before banking (PROTOCOL §4):
+verifying no eval drift between harnesses, the beam-count mechanism story
+(intel = 180 beams/1° → far-wall point spacing 14–35 cm exceeds λ_min/2
+Nyquist; the winning logs have ~360 beams), and the weight-cap variant (E2b,
+w ≤ 0.25) as the intel-clutter probe. VERDICT TO BE FILLED FROM THE AUDIT.
+
+### Integer front-path model (binary-VSA track opened)
+`IntSpec`/`cis_int`/`IntEncoder`/`IntMatcher`/`IntSLAM`: the fabric arithmetic
+modeled value-exactly on integer grids (ROM-rounded cis at 2^addr phases ×
+2^(bits-1) signed values, fixed-point weights, integer MACs carried in float64
+— exact below 2^53), with the HW split: encoder + correlation banks + store on
+fabric, pose math/gates/relax host-side. Smoke (fr101 cap 600): float 0.927 /
+int addr10-val9-w9 0.920 / **QPSK (4-phase cis ∈ {±1,±i}, unit weights) 1.096**
+— the binary extreme is NOT dead on arrival. Full ladder running (fr101 +
+intel, addr10/8/6/4/3/QPSK).
+
+### Webvis real-data path: fixed and Python-fed
+Diagnosis: the Intel replay was COUPLED to the sandbox config — buildIntelLattice
+used cfg.ladder/cfg.hex, intelProcessKF used cfg.occ/cfg.pointEnc, and the hex
+toggle rebuilt the Intel lattice — so synth-env hand-tuning silently reconfigured
+the real-data pipeline (the reported breakage). Fixes: (1) the Intel replay is
+now PINNED to the shipped config; (2) NEW `demo/export_replay.py` runs the real
+`ssp_bounded` deliverable and embeds a self-contained replay (ranges, odometry,
+reference, online estimates, per-kf anchor refs, per-relax anchor snapshots,
+loop edges; 4.06 MB → page 6.3 MB) — reproduces 2.440 / 80 loops / 30 snapshots
+deterministically; (3) index.html gained a "shipped replay (Python)" source in
+the player bar, driven by a slam-shaped shim over the recorded streams (graph
+snaps replay exactly via the snapshots; Python is the source of truth, the JS
+pipeline can no longer drift); (4) jsc parity harness: the page's own
+loadReplay+makeReplayShim reconstruct the trajectory at RMSE 2.351 over its
+2034 kf-indexed reference matches (the official 2.440 is over 890 ref-indexed
+matches — matching-direction difference, understood), 80/80 loop edges, all
+snapshots applied. Browser-runtime remains unverified (numbers-only rule).
+Also documented from 2026-07-09 scratch outputs: the sandbox's odometry-MAP
+fusion in Python on real logs — backend odo factor: fr101 1.744 wins but
+intel 13.5 / fr079 14.3 catastrophic; frontend MAP prior γ=1: aces 6.21→1.39,
+fr101 1.70, intel 8.5 / fr079 10.1 — fixed-weight fusion does not transfer
+(consistent with FINDINGS §6); it stays a sandbox toggle, not a pipeline
+change.

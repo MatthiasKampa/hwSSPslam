@@ -206,6 +206,24 @@ split is the shipped map refinement.
   before the sloppy ones. The prior ships default-off; **every future
   acceptance gate must be multi-log**.
 
+- **The stability boundary of that early-stopped pipeline is now measured — and
+  Intel's 2.440 is a knife-edge** ("FPGA track opened", 2026-07-10). A
+  freeze-time noise control (i.i.d. relative Gaussian on each frozen segment
+  vector, deterministic) shows Intel is *bit-identical* through ε=1e-5 and
+  **bifurcates between 1e-5 and 1e-4 relative map noise into a ~[3.5, 5.5] m
+  band that does not widen with ε** (1e-4 → 4.00; three seeds at 1e-3 → 4.17/
+  3.60/3.87; 1e-2 → 5.23; 3e-2 → 3.46) — not progressive damage but a
+  solver-path bifurcation of the early-stopped relax + closure-admission
+  cascade (even float32-rounding the frontend guess lands in the same band,
+  3.97). fr101 shrugs off 1e-2 (1.884 ≈ 1.881). Two consequences. (1) Honest
+  framing: the shipped Intel figure is a knife-edge configuration; under *any*
+  implementation perturbation ≥1e-4 (storage quantization, fixed-point
+  arithmetic, reordered accumulation) the robust Intel figure is the band —
+  still ~5× under raw odometry. (2) Design spec: per-log map-noise tolerance
+  varies by 3+ orders of magnitude (fr101 ≥1e-2, Intel ≤1e-5), so quantized /
+  hardware deployments must be judged per regime, not on the tuning log's
+  point value.
+
 - **complex64 is a free 2×** ("Memory levers"). Segment storage at 8 B/component
   gives round-trip error ~2.4e-8 and a match-peak shift of 0.000 mm / 0.00
   millideg; Intel/fr079/ACES ATE bit-identical. It is opt-in (default off on
@@ -747,3 +765,36 @@ is near the achievable frontier even against a place oracle.
    competitor (so IRLS can downweight it), whereas a corridor twin has *no*
    genuine competitor to weigh against — so this result sharpens, not softens, the
    corridor verification finding. The two are orthogonal.
+
+---
+
+## 10. The FPGA track (opened 2026-07-10 — in flight)
+
+The deployment thesis: the per-keyframe hot path (encode, frontend match,
+segment fold, loop verify) is O(D) phase arithmetic + small dense MACs and maps
+onto FPGA fabric; the sparse pose-graph relax stays host-side. `ssp_fpga.py`
+(subclass-only; neutralised = bit-exact) carries the track. Established so far:
+
+- **Compute is trivial; memory and noise-tolerance are the design pressures.**
+  The whole shipped hot path is ~2.55 M MAC-equiv/keyframe → 0.05 GMAC/s at
+  20 Hz — a fraction of one DSP array at 200 MHz. The map is the resource:
+  3.9 MB (Intel, c64) shrinking to 368 KB at 6 b/phasor.
+- **Write-time polar quantization (freeze-on-anchor-advance) with PER-RING
+  scales** is the deployable store. Mechanism: per-vector scales are dominated
+  by the phase-coherent relocalization rings, crushing the finest rings — the
+  closure veto's own statistic (fine-ring fidelity 0.84 → 0.97 at the same
+  6 bits with per-ring scales). Verdict per regime: **fr101 free-or-better at
+  6–8 b (1.66–1.89 m at ~10× less map)**; Intel any-perturbation band (see the
+  stability-boundary finding, §3) — its 2.440 needs ≤1e-5 map fidelity that no
+  useful quantization provides.
+- **Fine rotation via the scan's d/dθ derivative (11→3 encodes/match): clean
+  negative** (fr101 2.50, Intel 4.67) — the first-order term is a storage-side
+  tool (bundle-averaged, ≤1.5°), not a matcher-side one. The re-encodes stay.
+- **Per-beam point encoding** (one phasor per hit, w = r·dθ; kills the one
+  irregular-compute preprocessing stage) — 3-of-4 win (fr079 5.52→2.21, aces
+  6.21→4.41, fr101 1.88→1.57), Intel regresses with loop flooding; audit in
+  flight; mechanism candidate = beam density vs λ_min/2 Nyquist (Intel is the
+  one 180-beam/1° log).
+- **Integer arithmetic model** (ROM-rounded cis, fixed-point weights, integer
+  MACs): high-width free; the QPSK extreme (4-phase, ±1 components, unit
+  weights) survives a first smoke test — the binary-VSA ladder is running.

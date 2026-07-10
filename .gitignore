@@ -17,3 +17,7 @@ scratch_*.out
 # left in place (git-ignore does not untrack); this only stops NEW ones from
 # accumulating as experiments run.
 *.npz
+
+# generated replay blobs (embedded into demo/index.html by --embed)
+demo/replay_*.json
+scratch_*.md
