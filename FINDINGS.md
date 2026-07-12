@@ -896,3 +896,123 @@ consolidation" has the full table).
   and the real-data tab now DEFAULTS to the replay (the live-JS port stacks
   an LM/PCG relax, a no-odometry guess chain, and knife-edge admission —
   the observed "irrecoverable divergence at loop closures").
+
+## Addendum (2026-07-11, hardware + mechanism session) — four findings that reshape sections above
+
+1. **Integral-proximity cascade basins (sampling).** On stata-class
+   dense sensors, session outcome is selected not by per-scan encode
+   fidelity (cosine-1.000 families bifurcate) but by the pack's
+   fine-ring distance from the EXACT segment integral: packs within
+   ~2e-3 (r0 rel) — including the exact integral itself — fall into a
+   deep bad basin of the closure cascade (starving at the cmatcher
+   displacement pre-gate); sampling discreteness rescues (n1–n3
+   sub-points survive; n4+, GROUP folds, and half-chord packs collapse).
+   Bench losslessness does not transfer. The deployed bridge2 (n2,
+   7.6e-3) sits safely inside the good basin.
+2. **The band owns more than we knew (store).** stata-lean's "2b
+   failure / 6b rescue" is an ε≤1e-6 basin property, not a fidelity
+   tier: uniform-2b's own band spans [0.17..2.99] and uniform-6b
+   collapses at ε=1e-3. No fixed per-ring bit allocation stabilizes it;
+   a chain-bundle cap of 8 members is the first observed stabilizer
+   (band med 1.48→0.29; validation incomplete). Fine-ring bit
+   over-provisioning ([64,64,4,4]) STARVES the loop matcher — store
+   fidelity is not monotone in bits.
+3. **The wall extends to commit policy (tracking).** In fabric-tracker
+   form, corridor-class degeneracy produces confident wrong peaks; the
+   local score surface is IDENTICAL between healthy-but-degenerate and
+   lost keyframes (best gate: 83% catch at 11% false-flag = worse than
+   no gate). Correctness is not a per-keyframe surface property —
+   §5's information wall reaches every local commit rule.
+4. **Bounded map readout has a sharp shape (readout).** The matched
+   octave ladder is coherently aliased at exactly 2 m (ghost combs);
+   raster occupancy tops at AUC ~0.63–0.69 at ANY bits/K
+   (representation-limited) — but correlation reads are cm-sharp, and
+   a ~0.1–1 KB self-certified free-space mask (from the system's own
+   pass-1 scans) plus a fabric refine turns first-return visibility
+   from 0.80 m to 0.07–0.15 m vs GT on silicon. The map's fidelity
+   lives in reads, not rasters; O(area) auxiliary masks are cheap and
+   GT-free.
+
+## Addendum (2026-07-12, standalone + fidelity-space session) — the dual-space architecture and five laws
+
+**A5. The dual-space architecture (supersedes the single-lattice framing
+in §3/§10 for deployment).** The chip runs SLAM standalone in the MATCHER
+space (oct60, D=240, 2b codes, per-segment matching) — golden-proven to
+2 mm parity with the host tracker, self-mapping at 7.3 cm on revisit-rich
+floors (3.9× better than dead reckoning) and odometry-grade on long
+tours; pose is streamed (it is tracked on-chip anyway). A SECOND
+encode-only FIDELITY space is folded per segment on-fabric, frozen to 2b,
+streamed out (~130 B/s), and decoded on the laptop for display/readout —
+and, in future, fused with other sensors by vector addition. Encode-only
+scales to D≈2k today (one SPRAM accumulator; octave rings are bit-slice
+free, half-octave costs one extra projection pass; the derivative vector
+costs NO extra projection — cross_a = ±u_{a∓30}).
+
+**A6. The fidelity-lattice laws (scratch_biglat family, school8 + stata
+phase-2).** (i) ANGLES CAP AT 60 — more angles hurt extraction on every
+ladder tested (both stores, both fixtures; nothing anywhere has ever paid
+for >60). (ii) THE LADDER IS THE LEVER: half-octave densification of the
+content band + coarse extension (2.83/4 m) lifts real-data extraction
++.096 AUCgt, pushes prior-free global-decode success .85→.95, extends the
+2b capacity tail (K=128 p90 .74→.15), and ANNIHILATES the 2 m octave
+ghost comb. Recipe: span11x60 (0.125–4 m, D=660, 418 B/seg) primary;
+hoct9x60 lean. (iii) THE FINE FLOOR IS THE SENSOR COHERENCE LENGTH
+λ_min ≈ 2πσ_r (≈12.6 cm at σ=2 cm): sub-coherence rings are dead bytes
+(confirmed to 1.1 cm; only the noise-free analytic PSF sharpens). (iv)
+The old "aperture-limited" extraction mechanism is AMENDED to RADIAL
+ALIAS STRUCTURE — D grew 8× with zero gain when growth was angular or
+sub-coherence. (v) Golden-ratio ladders REFUTED on real data (second
+φ synth-sandbox artifact); √2 stands — mid-band DENSITY is the binding
+constraint, and φ's sparser band costs more than its superior
+incommensurability buys.
+
+**A7. Explicit history beats superposed history (third and fourth
+instances) + the commit-wall extends to re-registration.** The anneal
+cycle (negate→rematch→reencode) works on explicit frozen-code history
+in-basin (≲0.4 m) and is DEAD via time-bound superposition (20–80× over
+the knee; naive unbind-subtract injects √(K−1) noise). The spare-SPRAM
+sample reservoir is GT-neutral-to-worse on this system at every arm
+incl. forced-blackout diagnostics: capture and map are the SAME estimator
+(common-mode errors), so score-vs-map cannot select GT improvement —
+the commit-policy wall (§6) seen from the re-registration side. BSC at
+equal bits (dimension-compensated, fine multi-scale codes): bundle knee
+K*≈8–16 vs phasor 32–48 — binary-grade STORAGE is already harvested
+(2b codes, i^mc multiply-free matching); binary-grade OPERATIONS lose.
+
+**A8. Readout is gauge-bound, not method-bound.** The line-prior pursuit
+(exact line atoms, per-segment decode + cross-segment consensus) reads
+the store at 5 cm median in the map's own gauge; scored against GT it
+inherits the store warp exactly like every readout must. Per-segment
+(sub-knee) decode is mandatory — global-bundle readout is the low-AUC
+raster. Parametric lines (~50 KB) are a display/compaction option
+composing with the fidelity stream.
+
+**A9. Handoffs are a solved sub-problem in the code domain.** Best-of-3
+nearest-segment matching with incumbent hysteresis is a STRICT win for
+localization on coherent maps (mixed p90 .128→.104, max .876→.466, holds
+55→6; beats the live host tracker) because 2b phase-only segment vectors
+are norm-equal — raw totals compare across segments, unlike the float
+domain where the same idea thrashed and was reverted. On gauge-warped
+self-built maps it mixes gauges and regresses: K=3 is a MODE (coherent
+map), not a default.
+
+**A10. On a memory-rich small FPGA, the VSA representation is cheap —
+CONTROL is the expensive part (v7 build session, measured).** The full
+standalone-SLAM function on iCE40 UP5K: the entire VSA datapath (encode,
+resident-map match, fold-at-pose, all ROMs) fits in 2034 LUT / 6 EBR /
+2 DSP after serializing the rings (the throughput the parallel v6 core
+sells — 488 vs 1385 cyc/cand — is 500x more than the 5 Hz task needs).
+What does NOT fit is the scalar SE(2)/gating/protocol machinery written
+as parallel-word FSMs: tracker + top = 5614 LUT of the 7452 total vs a
+5280 budget, and hand-CSE recovers nothing (synthesis already shares).
+The corner exercise inverted the resource profile (v6: 97% LC + 100%
+EBR; lean: 51% LC + 20% EBR) and thereby exposed the closure: move
+control into the memory the lean core freed (microcoded scalar engine,
+~650 LC + EBR ucode). The representation thesis survives contact with
+silicon; the engineering lesson is that its bounded-memory property
+extends to control — the natural home of a SLAM chip's brain is a tiny
+interpreter over the same BRAM that holds the map. Freeze-store corollary
+(banked, both fixtures): 2b phase + 1 liveness bit + 4 ring scales
+(38 B/seg, all integer, from one freeze scan) reads out BETTER than the
+float store it quantizes — quantization noise is below, and dead-lattice
+junk above, the extraction's noise floor.

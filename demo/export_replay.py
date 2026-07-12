@@ -23,7 +23,12 @@ Usage:
   python3 demo/export_replay.py intel                      # shipped config
   python3 demo/export_replay.py belg --config=hex63
   python3 demo/export_replay.py stata --config=shipped
+  python3 demo/export_replay.py dynsch8-p0 --config=interp2  # dynenv arm
   python3 demo/export_replay.py --embed                    # splice manifest
+
+Dynenv arms (DYNENV below) build their bundle via ssp_dynenv.make() — the
+reference is the synthetic ground truth — and are pinned to the banked
+bench-grid numbers: the export aborts if ATE/loops drift.
 """
 import base64
 import json
@@ -79,6 +84,56 @@ GT_NAMES = dict(gfs="GMapping-corrected reference",
                 stata="floorplan-anchored GT (independent)",
                 exact="held-out reference (withheld odometry / synthetic GT)")
 
+# --- dynamic synthetic environments (ssp_dynenv.py) ------------------------
+# Registry of exportable dynenv arms. The bundle is BUILT by ssp_dynenv.make()
+# (ssp_datasets-shaped, eval='exact'): the scoring/display reference is the
+# SYNTHETIC GROUND TRUTH itself — exact poses, no external log. Config is
+# PINNED to interp2 (bridge2 deploy sampler + shipped encoder), matching the
+# RESULTS.md 2026-07-11 "Dynamic multi-room environments" bench grid (1024
+# beams, seed 11); `expect` pins that grid's ATE/loops and the export ABORTS
+# on any mismatch (protocol: no silent config drift).
+DYN_GROUP = "Dynamic synth (people)"
+DYNENV = {
+    # small-room nominal: classroom ATE is people-invariant under pairing
+    "dyncls-p5w": dict(
+        make=dict(env="classroom", people=5, moving=True, seed=11,
+                  n_beams=1024),
+        short="classroom, 5 walking — small-room nominal (people-robust)",
+        note="7×7 m room, 5 walkers with deterministic yield: closure "
+             "precision 1.00, ATE 8 mm and people-invariant — walker "
+             "dynamics at this density do not hurt the small room.",
+        expect=dict(ate=0.008, loops=14),
+    ),
+    # DELIBERATE NEGATIVE SHOWCASE: identical-rooms aliasing, nobody present
+    "dynsch8-p0": dict(
+        make=dict(env="school", rooms=8, people=0, moving=False, seed=11,
+                  n_beams=1024),
+        short="school8, nobody — aliasing admits wrong closures "
+              "(worse than odometry)",
+        note="hallway + 8 IDENTICAL classrooms (483 m²), nobody present: "
+             "the twin rooms alias, wrong closures are accepted (precision "
+             "0.53, constraint errors to 1.5 m) and SLAM lands WORSE than "
+             "raw odometry (0.95 vs 0.39 m). The verification wall at "
+             "building scale.",
+        negative=True,
+        expect=dict(ate=0.954, loops=93),
+    ),
+    "dynsch8-p5s": dict(
+        make=dict(env="school", rooms=8, people=5, moving=False, seed=11,
+                  n_beams=1024),
+        short="school8, 5 standing — people de-alias the twin rooms",
+        note="same building + 5 standing people as symmetry-breaking "
+             "landmarks: precision 0.78, ATE 0.35 m vs 0.95 with nobody — "
+             "persistent bodies de-alias the identical rooms.",
+        expect=dict(ate=0.348, loops=112),
+    ),
+}
+
+
+def dyn_bundle(name, cap=None):
+    import ssp_dynenv
+    return ssp_dynenv.make(cap=cap, **DYNENV[name]["make"])
+
 
 def recording(base):
     """base pipeline + snapshot of anchor poses after every relaxation."""
@@ -96,6 +151,11 @@ def recording(base):
 
 
 def export(name, cfg_name, cap=None, stride=None):
+    dyn = DYNENV.get(name)
+    if dyn is not None:
+        assert cfg_name == "interp2", \
+            "dynenv arms are benched ONLY with the bridge2 deploy sampler " \
+            "(run with --config=interp2; RESULTS.md 2026-07-11 grid)"
     cfg = CONFIGS[cfg_name]
     kw = dict(cfg["kw"])
     if kw.get("spec") is not None:
@@ -111,7 +171,8 @@ def export(name, cfg_name, cap=None, stride=None):
     sample = _interp2 if cfg_name == "interp2" else cfg["sample"]
     # est stays float64 inside DS.run: float32 chaining of the guess alone
     # perturbs the chaotic closure cascade (measured: Intel 2.44 -> 3.97 m).
-    r = DS.run(name, recording(base), cap=cap, sample=sample,
+    src = dyn_bundle(name, cap) if dyn is not None else name
+    r = DS.run(src, recording(base), cap=cap, sample=sample,
                eps=0.0, **kw)
     slam, bundle, est = r["slam"], r["bundle"], r["est"].astype(np.float32)
     keys, beam = bundle["keys"], bundle["beam"]
@@ -119,6 +180,13 @@ def export(name, cfg_name, cap=None, stride=None):
     print(f"{name}/{cfg_name}: ATE {r['ate']:.3f} m (med {r['med']:.3f}) "
           f"over {r['n_ref']} ref poses, {r['loops']} loop edges, "
           f"{len(slam.snaps)} relax snapshots, mem {r['mem_kb']:.0f} KB")
+    if dyn is not None:                 # pinned to the banked bench grid
+        exp = dyn["expect"]
+        if abs(r["ate"] - exp["ate"]) > 5e-4 or r["loops"] != exp["loops"]:
+            raise SystemExit(
+                f"ABORT {name}: export path gives ATE {r['ate']:.4f}/"
+                f"{r['loops']} loops, bench grid says {exp['ate']:.3f}/"
+                f"{exp['loops']} — config drift, do not ship")
 
     fin = r["fin"].astype(np.float32)
     aid = np.array([slam.aid_of(k) for k in range(n)], np.uint16)
@@ -157,8 +225,14 @@ def export(name, cfg_name, cap=None, stride=None):
                 keyTrans=C.KEY_TRANS, keyRotDeg=float(np.degrees(C.KEY_ROT)),
                 dataset=name, evalKind=bundle["eval"],
                 gt=GT_NAMES[bundle["eval"]],
-                log=Path(bundle["path"]).name, config=cfg_name,
+                log=Path(bundle["path"]).name if bundle.get("path")
+                else bundle["name"], config=cfg_name,
                 label=cfg["label"])
+    if dyn is not None:                 # selector group + one-line verdicts
+        meta.update(group=DYN_GROUP, short=dyn["short"], note=dyn["note"],
+                    gt="synthetic ground truth (exact poses)")
+        if dyn.get("negative"):
+            meta["negative"] = True
     RDIR.mkdir(exist_ok=True)
     out = RDIR / f"replay_{name}_{cfg_name}.json"
     out.write_text(json.dumps(dict(meta=meta, b64=base64.b64encode(

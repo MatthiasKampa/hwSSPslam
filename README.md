@@ -262,6 +262,29 @@ veto scan splits the admission constants into 9 bakeable constants vs 6
 per-environment runtime registers ({gate_t, sig_r0, coh_target, ill_mult,
 infl_pow, chain_gap}).
 
+**Silicon status (iCE40 UP5K / iCEbreaker, 2026-07-12 build session).**
+Encoder, candidate matcher, and on-fabric argmax are bit-exact on device
+(v6 deploy build: 5142/5280 LC, 30/30 EBR, 30.2 MHz — 488 cyc/candidate,
+6.95k poses/s; encoder-only corner closes 36/40.3 MHz). The deployment is
+**dual-space**: the on-chip SLAM/matcher space stays oct60 (D=240, 2-bit
+codes, 120 B/segment), and a second encode-only **fidelity space**
+(span11×60 ladder) streams to the laptop and is decoded there — map
+readout, prior-free relocalization (stata success 0.95), parametric line
+extraction at 5 cm store-gauge. Standalone SLAM (v7 "dumb-cable": points
++ odometry deltas in, pose frames out, everything between on-chip) is
+**RTL-complete and sim-gated bit-exact end to end**: serial-ring lean
+core (2034 LUT / 6 EBR / 2 DSP — the S-corner rewrite; the v6 pipeline's
+488 cyc/cand is 500× more throughput than the 5 Hz task needs), tracker
+with on-chip SE(2) service, fold-at-pose, and a **tuned freeze store**
+(2b phase + liveness bit + per-ring scales, 38 B/segment — beats the
+float store on extraction on both tuning fixtures) dumped over UART and
+consumed by `ice40/host/decode.py`. UP5K fit: DSP/EBR/SPRAM comfortable;
+the full function is 7452 LUT vs 5280 — the control fabric, not the VSA
+datapath, is the wall (microcoded-control closure filed as v7.2; the v6
+deploy build remains the flashable hardware). Live demo:
+`ice40/host/live.py`; interactive simulator with the recipe ladders and
+the sample-replay mechanism: `demo/index.html`.
+
 ## Quickstart
 
 ```sh

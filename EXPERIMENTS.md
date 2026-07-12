@@ -205,3 +205,181 @@ float + lean replays lead the pack.
 Capacity/global-readout scripts (`scratch_capacity*.py`,
 `scratch_fullread*.py`, kept in archive/scratch after banking): bundle-K
 knee 32@2b/64@float, deadband mechanism, grouped global decode.
+
+**iCE40 hw-in-the-loop track (2026-07-11)** — `ssp_ice40.py` (golden
+integer model: az-LUT + A1 octave bit-slice phases + cis ROM + i16/i18
+envelope; bit-exact spec for the RTL; fidelity vs float ≥0.99999 on
+spot/synth) and `ice40/` (RTL + build + host: `rtl/encoder.v` v1 serial,
+`rtl/encoder_par.v` v2 ring-parallel 63 cyc/pt — both verified BIT-EXACT
+on the iCEbreaker; `top_encoder.v` UART protocol with always-listening
+parser + FIFO + bulk mode at 3 Mbaud). Corner-S encode acceptance PASS:
+684 scans (spot 414 + dynenv 270) through the fabric, 0 mismatches. Run:
+```bash
+python3 ssp_ice40.py selftest              # golden-model invariants
+python3 ice40/host/gen_luts.py             # ROM images (shared w/ RTL)
+python3 ice40/host/vectors.py gen 64       # test vector + golden
+python3 ice40/host/vectors.py sim rtl/encoder_par.v   # iverilog bit-exact
+cd ice40 && make TOP=top_encoder_par \
+  RTL="rtl/uart.v rtl/encoder_par.v rtl/top_encoder.v" build prog
+python3 ice40/host/vectors.py hw-replay '' spot        # zero-glitch gate
+```
+Verdicts in RESULTS.md "2026-07-11 — iCE40 hardware-in-the-loop track".
+
+**iCE40 second burst (2026-07-11): corner T (36 MHz) + corner F
+(matcher on silicon)** — `rtl/encoder_pipe.v` v3 (3 pipe stages, cis ROM
+forced to 4 EBR replicas, bit-sliced readback; 39.7 MHz icetime, 2933
+LC) + `rtl/enc_top.v`/`top_direct.v`/`top_pll.v` (32-bit FIFO wrapper,
+36 MHz PLL — acceptance PASS 684 scans, 0 mismatches at 36 MHz);
+`rtl/encoder_match.v` v4 + `enc_top_m.v`/`top_match.v` (24 MHz): the
+candidate-pose matcher — golden `ssp_ice40.match_int` (per-ring partial
+sums; H = conj(Q)·i^mc sign/swap; rotation = permute+conj-wrap; per-scan
+shift), M codes in SPRAM, 483 cyc/candidate, cmds 0x06/0x07. hw-match
+BIT-EXACT (22 candidates × 4 rings). Run:
+```bash
+python3 ssp_ice40.py match                 # golden matcher geometry pins
+python3 ice40/host/vectors.py sim rtl/encoder_pipe.v rtl/tb_encoder2.v
+python3 ice40/host/vectors.py sim-match    # matcher RTL vs golden
+cd ice40 && make TOP=top_pll FREQ=36 \
+  RTL="rtl/uart.v rtl/enc_top.v rtl/top_pll.v rtl/encoder_pipe.v" build prog
+cd ice40 && make TOP=top_match FREQ=24 \
+  RTL="rtl/uart.v rtl/enc_top_m.v rtl/top_match.v rtl/encoder_match.v" build prog
+python3 ice40/host/vectors.py hw-match     # silicon vs match_int
+python3 ice40/host/vectors.py hw-match-sweep   # 441-cand paced sweep, 3.6k/s
+# v5 (encoder_match2/enc_top_m2/top_match2, cmd 0x08 batched via FIFO):
+cd ice40 && make TOP=top_match2 FREQ=24 \
+  RTL="rtl/uart.v rtl/enc_top_m2.v rtl/top_match2.v rtl/encoder_match2.v" build prog
+python3 ice40/host/vectors.py hw-batch     # both modes bit-exact; 6.6k/s totals
+```
+N_ANG×bits study (`scratch_nang.py`, self-validated vs banked registry
+numbers): **oct36/45 rejected** — stata 0.202→0.975/1.203, loops 99→53/33;
+spot indifferent; fr101@36 = knife-edge draw. oct60 stands; school8 map
+= 35 KB @2b/no-relo/oct60 (27% of SPRAM). RESULTS "second burst" entry.
+
+**Live FPGA-in-the-loop vis (`ice40/host/live.py` + `live.html`)** —
+endless perturbed classroom replay (interpolated bridge closes the tour;
+per-pass noise redraw; nothing resets), python SLAM forever + fabric
+encode cross-check + fabric localization vs the frozen 2b map + fabric
+matched-filter map image (delta probe) + pickable-viewpoint visibility
+(cached image ray-march, or every ray sample probed live from silicon).
+Geometry matcher↔SE2 pinned empirically at startup (hard-fail).
+`python3 ice40/host/live.py selftest` (headless numbers; enc 24/24,
+fx err ~3 cm, direct-vs-cached walls 0.15 m median) then
+`python3 ice40/host/live.py serve 8642 2` → http://127.0.0.1:8642/
+(needs the top_match bitstream flashed; owns the serial port).
+
+**Dynamic multi-room environments (2026-07-11)** — `ssp_dynenv.py`:
+classroom (spot-proxy) + school8 (hallway + 8 identical rooms, 9.9×
+area, the aliasing stressor) with people as standing/walking circle
+obstacles; noise draws people-independent (±people at fixed seed =
+exactly paired); fenced diag_gt loop-precision labels. Key verdicts:
+school aliasing admits wrong closures at prec 0.53–0.62 with zero people
+(net-negative vs raw odometry in 7/10 arms — wrong > missed); standing
+people de-alias monotonically (→0.85), walkers don't; classroom loop
+on/off is a basin draw (read as bands); 10× map = 301 segments = 40 KB
+@2b (24 KB oct36) vs the UP5K's 128 KB SPRAM. Run:
+`python3 ssp_dynenv.py [check|quick|bench|tenx]`.
+
+**Fidelity-space lattice scaling (2026-07-12)** — `scratch_biglat{,2,3}.py`
+(gitignored scratch; harness imports the validated capacity2b stack):
+frozen-pose store re-encode across 13 lattices (D 240→1980) on school8 +
+stata fixtures. Verdicts: angles cap at 60 (×120/×180 hurt extraction on
+every ladder); the LADDER is the lever — half-octave densification +
+coarse {2.83, 4 m} extension lifts extraction AUCgt +.048 school8 /
++.096 stata and annihilates the 2 m ghost comb; fine floor = sensor
+coherence length (λ_min ≈ 2πσ_r ≈ 12.6 cm at σ=2 cm; sub-coherence rings
+= dead bytes, confirmed to 1.1 cm); capacity K-tail extends on real data
+(2b K=128 p90 .742→.150). Recipe: fidelity space span11x60 (D=660,
+418 B/seg) primary, hoct9x60 (D=540) lean; matcher space stays oct60
+D=240. Run: `python3 scratch_biglat.py {gate|sweep} school`, then
+`scratch_biglat2.py` (x60 + fine cells), `scratch_biglat3.py` (stata
+phase 2). Gate reproduces banked capacity2b rows before new cells.
+
+**Anneal-by-time-binding (2026-07-12)** — `scratch_anneal.py`: the
+negate→rematch→reencode cycle under 5 memory assumptions. Verdict: works
+on EXPLICIT frozen-code history in-basin (≲0.4 m; A2h = deployable form),
+DEAD via time-bound superposition (20–80× knee; naive unbind-subtract =
+√(K−1) noise injection); gated folding & 2b-requant-per-touch rejected.
+Run: `python3 scratch_anneal.py`.
+
+**BSC vs FHRR equal-bit shootout (2026-07-12)** — `scratch_bsc.py`:
+dimension-compensated 480-bit majority bundles (multi-scale binarized-RFF
+position codes, 2 cm atoms) vs the banked 2b-SUM phasor group vector.
+Verdict: BSC knee K*≈8–16 vs phasor 32–48; at K=32 succ 0.07 vs 0.70;
+K=1 control validates pipeline. Run: `python3 scratch_bsc.py` (+ ksweep).
+
+**Golden-ratio ladders (2026-07-12)** — `scratch_biglat4.py`: phi8/phi13
+(1 cm..3.6 m). Verdict: REFUTED on stata (−.06 both stores; 2nd φ synth
+artifact); comb-kill replicates but mid-band density is the binding
+constraint. Run: `python3 scratch_biglat4.py {school|stata}`.
+
+**Replay-augmented frontend (2026-07-12)** — `scratch_replayfront.py`:
+the webvis sample-replay mechanism as a pipeline subclass (reservoir,
+refine-in-place, protected overwrite, do-no-harm, R0/R1/R2 arms + gates).
+Verdict: see RESULTS (log-dependent; fhw 4× win, fr101/belg regress —
+banked as opt-in, not default). Run: `python3 scratch_replayfront.py
+[logs]`.
+
+**Line-prior cleanup (2026-07-12)** — `scratch_lineprior.py`: matching
+pursuit with exact line atoms; per-segment decode + cross-segment
+consensus + micro-refine. Verdict: reads the store at 5 cm own-gauge
+(GT-frame bound by store warp); global-bundle pursuit is the past-the-
+knee control; display/compaction option. Run: `python3
+scratch_lineprior.py school` (global arms) or `run_perseg()`.
+
+**v7 standalone golden + v7.1 handoffs (2026-07-12)** —
+`ice40/host/solo.py`: integer SoloTracker/SoloMapper (parity 2 mm vs
+live), selfmap/reservoir/blackout benches, K_TRY best-of-K rule.
+Run: `python3 ice40/host/solo.py {bench|selfmap|reservoir} [env] [traj]`.
+
+**v7 top_solo RTL track (2026-07-12)** — `ice40/rtl/encoder_solo.v` (v6
+core + 2-line resident-map mc_seg addressing), `ice40/rtl/solo_tracker.v`
+(on-fabric tracker FSM: nearest/rel/parametric grid+retry/parabolic/EMA/
+pose/re-search+relock, on-chip shift_for behind SH_ONCHIP),
+`ice40/rtl/tb_solo_bridge.v` + `tb_solo_step.v`, harnesses
+`ice40/host/solo_bridge.py`, `solo_step.py [n_kf] [suffix]`, fixtures via
+`solo_vectors.py`. Gates: bridge 32/32 partials; step 220/220 kf
+bit-exact (golden-sh AND on-chip-sh); relock fixture (320U kidnap kick,
+2 relocks) gate = the stage-3b acceptance. Defect classes banked in
+RESULTS (OR'd partials, $signed part-selects, RAM read off-by-one,
+$readmemh truncation).
+
+**Cleanup formulations program (2026-07-12)** — `scratch_cleanups.py`
+(+ pursuit upgrades in `scratch_lineprior.py`): P1 CLEAN gain/OMP
+(gain = recall/precision dial; amplitude pruning NO-OP — tail is
+model-limited), P4 dead-zero store (3b = 2b phase + liveness bit BEATS
+FLOAT both fixtures), P2 coherence-weighted Wiener read (GT-free C_r
+observable; +.016/+.005), P4+P2 stack ~additive (school .6212, stata
+.6751), P3 gauge relax NEUTRAL (adjacent segments share gauge; slow
+warp = backend's job), P5 dictionary NEGATIVE (energy-greedy can't
+model-select), P7 DRIVEN-PATH VETO = the tail-slayer (school p50
+.226->.087, p90 halved, recall free; in decode.py + the webvis). Run: `python3 scratch_cleanups.py {p1|p4|p2}
+{school|stata}`; stack/relax via `python3 -c "import scratch_cleanups
+as CU; CU.p42_stack(...); CU.p3_gauge_relax(...)"`.
+**v7 stream consumer** — `ice40/host/decode.py [map.hex] [anchors.hex]
+[--gamma G] [--out npz]`: the deploy read-side recipe on chip dumps
+(coherence profile + Wiener imaging + pursuit/consensus lines).
+
+**v7 build session (2026-07-12 evening)** — corner-tuned silicon:
+`scratch_liveness.py {school|stata}` (freeze-store tuning: theta=1/2
+liveness + per-ring Mmax scales BEAT the float store on extraction both
+fixtures; theta=5/8 refuted by stata; scales-only ~nil);
+`scratch_v7refine.py` (REFINE A/B: divider is p90-neutral for
+localization, selfmap BETTER without it — lean build sets REFINE=0);
+`scratch_p5pen.py {school|stata}` (P5 successor: complexity-penalized
+atom selection — en/df activates model selection (points get chosen)
+and improves +veto p50, at a recall cost; en/sup DEGENERATE all-points;
+aicc too weak — see RESULTS for the verdict). RTL: `encoder_lean.v`
+(serial-ring S/F core, 2034 LUT / 6 EBR / 2 MAC16, gates bit-exact),
+`top_solo.v` + `tb_solo_top.v` + `ice40/host/solo_top.py [n_kf]` (the
+full standalone-SLAM top + UART-level end-to-end gate; phantom-keyframe
+handshake race banked as a defect class), corner builds via `make
+TOP=... RTL=... FREQ=...` (v6 deploy 5142 LC / 30 EBR / 30.2 MHz;
+lean probe 2694 LC / 26.1 MHz; full solo 7452 LUT = the UP5K wall;
+microcode closure filed). Lean fixtures: `python3 solo_vectors.py lean`
+then `python3 solo_step.py 220 l1 lean` / `160 lr lean`.
+
+**Truncated-Krylov GN backend (OPEN — unbanked)** — `ssp_krylov.py`:
+portable exactly-specifiable replacement candidate for the load-bearing
+scipy-TRF max_nfev=30 truncation (fixed-budget CG on the normal
+equations, hard iteration cap). No banked verdict yet — the module is
+committed for provenance; run + bank before any deploy claim.

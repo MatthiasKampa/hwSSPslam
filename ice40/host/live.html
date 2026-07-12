@@ -1,0 +1,166 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SSP live — FPGA in the loop</title>
+<style>
+  body { margin:0; background:#0e1116; color:#d6dae0; font:13px/1.45 -apple-system, "SF Mono", Menlo, monospace; }
+  #bar { padding:8px 14px; display:flex; gap:18px; flex-wrap:wrap; align-items:baseline; border-bottom:1px solid #232833; }
+  .chip b { color:#fff; font-weight:600; }
+  .g { color:#7ee787 } .y { color:#e3b341 } .r { color:#ff7b72 } .c { color:#79c0ff } .m { color:#d2a8ff }
+  #wrap { display:flex; gap:12px; padding:12px; }
+  canvas { background:#05070a; border:1px solid #232833; border-radius:6px; }
+  #side { max-width:330px; }
+  #side p { margin:6px 0; color:#8b949e }
+  #status { color:#e3b341 }
+</style>
+<div id="bar">
+  <span class="chip">pass <b id="pss">–</b></span>
+  <span class="chip">kf <b id="kf">–</b></span>
+  <span class="chip c">python err <b id="epy">–</b> m</span>
+  <span class="chip m">fabric err <b id="efx">–</b> m <b id="fxs"></b></span>
+  <span class="chip g">fabric encodes bit-exact <b id="enc">–</b></span>
+  <span class="chip">segs <b id="segs">–</b></span>
+  <span class="chip">map <b id="mem">–</b> KB</span>
+  <span class="chip">kf time <b id="ms">–</b> ms</span>
+  <span class="chip y" id="bridge" style="display:none">BRIDGE (synthetic interp)</span>
+</div>
+<div id="wrap">
+  <canvas id="cv" width="860" height="860"></canvas>
+  <div id="side">
+    <p id="status">connecting…</p>
+    <p><span class="g">■</span> map readout — matched-filter image probed FROM THE FPGA
+       (delta probe × stored 2-bit codes; brighter = wall evidence).</p>
+    <p><label><input type="checkbox" id="gtwalls" checked>
+       <span style="color:#d6dae0">╌╌</span> ground-truth walls overlay
+       (the analytic world the scans are raycast from — display only;
+       compare against the fabric's green wall evidence).</label></p>
+    <p><span class="c">■</span> python SLAM pose (shipped pipeline, never reset)<br>
+       <span class="m">■</span> fabric localization (frozen 2-bit map, paced match sweeps on device)<br>
+       <span style="color:#555">■</span> ground truth ghost (display only)</p>
+    <p><b>Click anywhere</b> on the map: walls visible from that position
+       (first-ridge ray march on the fabric image).</p>
+    <p><label><input type="checkbox" id="direct"> query viewpoint
+       <b>directly from phasor space</b> — every ray sample is a live
+       fabric readout (~120 rays × 47 ranges of match probes; replay
+       pauses for a few seconds). Occlusion (first return) stays a
+       host-side selection — it is not a linear phasor op.</label></p>
+    <p id="pickinfo"></p>
+  </div>
+</div>
+<script>
+const cv = document.getElementById('cv'), g = cv.getContext('2d');
+let MAP=null, view=null, trails={py:[],fx:[],gt:[]}, robot=null, pick=null, hits=[], WORLD=null;
+const $ = id => document.getElementById(id);
+
+function fitView() {
+  if (!MAP) return;
+  const w = MAP.w*MAP.step, h = MAP.h*MAP.step;
+  const s = Math.min(cv.width/(w+1), cv.height/(h+1));
+  view = {s, x0:MAP.x0-0.5, y0:MAP.y0-0.5};
+}
+const W2C = p => [ (p[0]-view.x0)*view.s, cv.height-(p[1]-view.y0)*view.s ];
+
+function drawMap() {
+  if (!MAP || !view) return;
+  const px = MAP.step*view.s;
+  for (let i=0;i<MAP.h;i++) for (let j=0;j<MAP.w;j++) {
+    const v = MAP.img[i][j]; if (v<=0.02) continue;
+    const c = W2C([MAP.x0+j*MAP.step, MAP.y0+i*MAP.step]);
+    g.fillStyle = `rgba(126,231,135,${(0.12+0.85*v)*v})`;
+    g.fillRect(c[0]-px/2, c[1]-px/2, px+0.5, px+0.5);
+  }
+}
+function drawWorld() {
+  if (!WORLD || !view || !$('gtwalls').checked) return;
+  g.strokeStyle='rgba(214,218,224,0.55)'; g.lineWidth=1.2;
+  g.setLineDash([5,4]);
+  for (const sg of WORLD) {
+    const a=W2C([sg[0],sg[1]]), b=W2C([sg[2],sg[3]]);
+    g.beginPath(); g.moveTo(a[0],a[1]); g.lineTo(b[0],b[1]); g.stroke();
+  }
+  g.setLineDash([]);
+}
+function drawTrail(t, color) {
+  if (t.length<2) return;
+  g.strokeStyle=color; g.lineWidth=1.4; g.beginPath();
+  const a=W2C(t[0]); g.moveTo(a[0],a[1]);
+  for (const p of t.slice(1)) { const c=W2C(p); g.lineTo(c[0],c[1]); }
+  g.stroke();
+}
+function render() {
+  g.clearRect(0,0,cv.width,cv.height);
+  if (!view) return;
+  drawMap();
+  drawWorld();
+  drawTrail(trails.gt, '#3a4150');
+  drawTrail(trails.py, '#79c0ff');
+  drawTrail(trails.fx, '#d2a8ff');
+  if (pick) {
+    g.strokeStyle='rgba(227,179,65,0.55)'; g.lineWidth=1;
+    for (const h of hits) { const a=W2C(pick), b=W2C(h);
+      g.beginPath(); g.moveTo(a[0],a[1]); g.lineTo(b[0],b[1]); g.stroke(); }
+    g.fillStyle='#e3b341';
+    for (const h of hits) { const b=W2C(h); g.fillRect(b[0]-1.7,b[1]-1.7,3.4,3.4); }
+    const a=W2C(pick); g.beginPath(); g.arc(a[0],a[1],4,0,7); g.stroke();
+  }
+  if (robot) {
+    for (const [pose,color] of [[robot.gt,'#3a4150'],[robot.py,'#79c0ff'],[robot.fx,'#d2a8ff']]) {
+      if (!pose) continue;
+      const c=W2C(pose); g.strokeStyle=color; g.fillStyle=color; g.lineWidth=2;
+      g.beginPath(); g.arc(c[0],c[1],5,0,7); g.stroke();
+      g.beginPath(); g.moveTo(c[0],c[1]);
+      g.lineTo(c[0]+11*Math.cos(-pose[2]), c[1]+11*Math.sin(-pose[2])); g.stroke();
+    }
+  }
+}
+async function loadMap() {
+  const m = await (await fetch('/map')).json();
+  if (m.pending) { setTimeout(loadMap, 3000); return; }
+  MAP=m; fitView(); render();
+}
+async function loadTrails() {
+  const t = await (await fetch('/trails')).json();
+  trails.py=t.py; trails.fx=t.fx; trails.gt=t.gt;
+  if (!MAP && t.gt.length>1) {   // provisional view before the map lands
+    const xs=t.gt.map(p=>p[0]), ys=t.gt.map(p=>p[1]);
+    const w=Math.max(...xs)-Math.min(...xs)+8, h=Math.max(...ys)-Math.min(...ys)+8;
+    view={s:Math.min(cv.width/w,cv.height/h), x0:Math.min(...xs)-4, y0:Math.min(...ys)-4};
+  }
+  render();
+}
+cv.addEventListener('click', async ev => {
+  if (!view) return;
+  const r=cv.getBoundingClientRect();
+  const x=(ev.clientX-r.left)/view.s+view.x0, y=(cv.height-(ev.clientY-r.top))/view.s+view.y0;
+  pick=[x,y];
+  const mode = $('direct').checked ? '&mode=direct' : '';
+  $('pickinfo').textContent = 'querying…';
+  const res=await (await fetch(`/pick?x=${x.toFixed(3)}&y=${y.toFixed(3)}${mode}`)).json();
+  hits=res.hits; $('pickinfo').textContent =
+    `pick (${x.toFixed(2)}, ${y.toFixed(2)}): ${hits.length} visible wall points`
+    + (res.mode==='direct' ? ` — direct from fabric in ${res.secs}s` : ' (cached fabric image)');
+  render();
+});
+const es = new EventSource('/events');
+es.onmessage = ev => {
+  const s = JSON.parse(ev.data);
+  if (s.probe) { $('status').textContent = 'probing map from fabric: '+s.probe; return; }
+  if (s.map_ready) { loadMap(); return; }
+  if (s.k === undefined) return;
+  $('pss').textContent=s.pss; $('kf').textContent=s.k;
+  $('epy').textContent=s.err_py; $('efx').textContent=s.err_fx??'–';
+  $('fxs').textContent = s.fx_state && s.fx_state!=='tracking' ? '['+s.fx_state.toUpperCase()+']' : '';
+  $('enc').textContent=s.enc + (s.enc_bad? ` (${s.enc_bad} BAD!)`:'');
+  $('enc').parentElement.className = 'chip ' + (s.enc_bad? 'r':'g');
+  $('segs').textContent=s.segs; $('mem').textContent=s.mem; $('ms').textContent=s.ms;
+  $('bridge').style.display = s.bridge? '':'none';
+  $('status').textContent = s.status;
+  robot = {gt:s.gt, py:s.py, fx:s.fx};
+  trails.gt.push([s.gt[0],s.gt[1]]); trails.py.push([s.py[0],s.py[1]]);
+  if (s.fx) trails.fx.push([s.fx[0],s.fx[1]]);
+  for (const k of ['gt','py','fx']) if (trails[k].length>4000) trails[k].splice(0, trails[k].length-4000);
+  render();
+};
+document.getElementById('gtwalls').addEventListener('change', render);
+fetch('/world').then(r=>r.json()).then(w=>{WORLD=w.segs; render();});
+loadTrails().then(loadMap);
+</script>

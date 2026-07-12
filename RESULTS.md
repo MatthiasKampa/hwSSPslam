@@ -4555,3 +4555,1980 @@ LEAN 2-bit+int8 0.039 ATE — medians 3.3/3.5 cm, max 12–13 cm, 22 loops,
 kinematic odometry at the level of the earlier with-odometry diagnostic
 (0.041) — i.e., at the reference's own noise floor. Remaining "jitters"
 are the cm-scale frame noise (p99 ~0.10–0.12).
+
+## 2026-07-11 — iCE40 hardware-in-the-loop track: the encoder on silicon (bit-exact), dynamic multi-room synth environments, and the school-aliasing quantification
+
+**Session note (PROTOCOL §8 exception, user call 2026-07-11):** subagents ran
+experiments in parallel this session (the dynenv bench grid below; solver /
+consensus / lattice studies report separately and will be banked on arrival).
+Verification for the banked numbers: the bench grid's longest arm reproduced
+BIT-EXACT on an independent rerun (`tenx` == bench row: 0.954/93/0.53/1.52);
+the classroom p0 row matches this session's hands-on smoke run; the loop-
+precision metric's GT fence was audited read-only (GT enters only as a label
+on already-accepted edges, ssp_bounded.py:456–473 — accept logic is
+coherence/ridge/innovation, PROTOCOL §2 held).
+
+### iCE40 track opened: target iCEbreaker v1.0e (UP5K), hw-in-the-loop
+
+Toolchain: oss-cad-suite darwin-arm64 (yosys 0.67, nextpnr-ice40 0.10,
+icestorm, icarus 14) installed fresh; board verified (flash W25Q128, CDONE
+toggles; UART echo-plus-one at 1 Mbaud proved clock/RX/TX/fabric compute).
+
+**Golden model (`ssp_ice40.py`)** implements the design-note v1 integer spec:
+position unit λ_min/256 with the mm→unit factor folded into the az-LUT
+constants, x/y from a 1024-entry az LUT (uniform head ⇒ beams exactly on
+grid), 60 2-MAC angle projections, **ring cis addresses as bit-slices of one
+projection word (A1: exact because the octave ladder is ×2)**, cis ROM
+256×2×7b, int32 accumulators, i16/i18 envelope asserts, hits masked beyond
+31.2 m (i16 bound; mask cost on long corridors unmeasured — flagged).
+Fidelity vs float encode on the same masked points: cosine ≥ 0.99999 on
+spot scans, synthetic room, and dyn-classroom (min over 100 scans). All
+integer, deterministic (bit-equal on repeat).
+
+**Encoder RTL, two generations, both BIT-EXACT vs the golden model in
+simulation AND on the device** (`ice40/rtl/`, golden vectors
+`ice40/host/vectors.py`):
+
+| build | cycles/pt | LUT | DSP | EBR | fmax (icetime) |
+|---|---|---|---|---|---|
+| v1 serial (`encoder.v`) | ~845 | 1085/5280 | 6/8 | 18/30 | 37.4 MHz |
+| v2 ring-parallel, angle-pipelined (`encoder_par.v`) | 63 | 3782/5280 | 4/8 | 27/30 | 26.3 MHz |
+
+v2: banked per-ring accumulators (EBR dual-port shape: readback muxes
+through the idle read port; write addr latched WITH its enable), 1
+cycle/angle software pipeline, the four 16×16 mults in MAC16s, the eight
+8×8 ring products hand-lowered to 7-tap shift-adds (yosys -dsp otherwise
+claims 12 DSPs > 8; `use_dsp="no"` attribute is ignored by synth_ice40).
+Run at 12 MHz (2.2× timing margin): 903-pt scan encodes in ~4.8 ms ≈ 208
+scans/s — 13 encodes/kf at 5 Hz keyframes needs 65/s, so ~3× headroom
+before the PLL.
+
+**UART protocol lessons (hw-in-loop found both):** (1) a cmd-FSM that
+ignores RX while the encoder runs DROPS BYTES and desyncs (first hw run
+failed exactly so) → always-listening parser + 256-deep point FIFO; (2) at
+3 Mbaud (exact 12 MHz/4) the encoder outruns the wire, so per-point acks
+are pure USB-latency waste → bulk mode (cmd 0x05, no ack) + one counter
+poll; per-scan wall time 477 → 141 → 68 ms, now bound by the FT2232H
+~16 ms USB latency timer on 3 round-trips, datapath ~4.8 ms.
+
+**Corner-S encode acceptance ("no glitches on test data"): PASS.** Full
+replays through the fabric, every accumulator of every scan bit-exact:
+spot 414/414 scans, dyn-classroom p5-walking 120/120 (1024-beam synth),
+dyn-school8 p5 150/150 (long-range mask boundary exercised). 684 scans /
+~600k points / 0 mismatches at ~70 ms/scan. `hw-replay` is the standing
+acceptance gate for RTL changes.
+
+### Dynamic multi-room environments (`ssp_dynenv.py`) + the people ablation
+
+Design: classroom (7×7, spot-proxy) and school8 (hallway + 8 IDENTICAL
+classrooms, 483 m² ≈ 9.9× classroom — deliberate aliasing stressor);
+people as r=0.18 m circles, standing or waypoint-walking at 1.2 m/s with
+deterministic yield-to-robot (min robot-person dist 0.72 m ≥ the 0.45
+yield); **noise draws are people-independent, so ±people at fixed seed is
+an exactly-paired comparison** (verified: untouched beams bit-equal).
+Checks: clearance 0.55 m (door half-width), same-seed bit-equal.
+
+Bench grid (1024 beams, bridge2 deploy sampler, shipped config + fenced
+diag_gt labels; agent-run, 20 arms, no crashes):
+
+| env | arm | s11 ATE/loops/prec | s12 ATE/loops/prec |
+|---|---|---|---|
+| classroom | p0 | 0.008 / 14 / 1.00 | 0.008 / 0 / — |
+| classroom | p2 stand | 0.007 / 14 / 1.00 | 0.007 / 14 / 1.00 |
+| classroom | p5 stand | 0.008 / 0 / — | 0.008 / 14 / 1.00 |
+| classroom | p5 walk | 0.008 / 14 / 1.00 | 0.008 / 14 / 1.00 |
+| classroom | p10 walk | 0.009 / 14 / 1.00 | 0.008 / 14 / 1.00 |
+| school8 (odom 0.385 / 0.719) | p0 | 0.954 / 93 / 0.53 | 0.749 / 115 / 0.62 |
+| school8 | p2 stand | 0.411 / 97 / 0.70 | 0.590 / 110 / 0.72 |
+| school8 | p5 stand | 0.348 / 112 / 0.78 | **0.153** / 108 / **0.85** |
+| school8 | p5 walk | 0.862 / 113 / 0.69 | 0.777 / 105 / 0.64 |
+| school8 | p10 walk | 0.765 / 108 / 0.69 | 0.997 / 80 / 0.52 |
+
+**Findings (seed-stable claims first):**
+1. **The identical-rooms aliasing admits wrong closures with NOBODY
+   present** — school8 p0 precision 0.53/0.62, constraint errors up to
+   1.5 m — and the admitted-wrong edges are net-negative: SLAM ATE is
+   WORSE than raw paired odometry in 7 of 10 school arms (p0-s11: 0.954
+   vs 0.385). Wrong > missed, now quantified in the deployment-shaped
+   environment; this is the §5/§7 verification wall reproduced at
+   building scale with a 360° head.
+2. **Standing people are symmetry-breaking landmarks**: precision climbs
+   monotonically with standing density in BOTH seeds (0.53→0.70→0.78;
+   0.62→0.72→0.85) and paired ATE improves by −0.16..−0.61 m. Persistent
+   bodies de-alias the twin rooms.
+3. **Walkers do not de-alias** (not position-stable across the revisit):
+   precision ~p0-level, paired ATE deltas mixed at noise level; the only
+   recall sag in the grid is heavy walker traffic (p10w-s12: 80 loops,
+   prec 0.52). Closure RECALL is otherwise people-robust (80–115 loops
+   in every school arm).
+4. **Classroom closure on/off is a basin draw** (bistable 0-or-14,
+   uncorrelated with people: s12 died at p0 with nobody around; s11 died
+   at p5-standing; both survive 10 walkers). The earlier 360-beam smoke
+   reading "5 walkers kill closures" does NOT replicate at 1024 beams —
+   read small-room loop counts as bands per the PROTOCOL §6 rule.
+   Classroom ATE is people-invariant under pairing (|Δ| ≤ 1 mm; frontend
+   + odometry carry the small room regardless).
+5. **The 10× map fits the UP5K with headroom**: school8 tour = 301
+   segments → 40 KB at 2b/no-relo/oct60 (31% of the 128 KB SPRAM), 24 KB
+   at oct36 (19%). The people arms change map size by <3%.
+
+Open follow-ups filed: more seeds on the school grid (people-density
+precision ladder is 2-seed so far); classroom bands via freeze-noise
+probe; jitter>0 (distinguishable rooms) as the de-aliasing control that
+separates "people as landmarks" from "any asymmetry as landmark"; walker
+motion-during-sweep (de-skew ablation) once the fabric path carries it.
+
+## 2026-07-11 — front-consensus on the current suite: NOT default-safe (the intel median-collapse does not generalize)
+
+Agent-run per the session's PROTOCOL §8 exception; harness validated before
+trust: `FrontConsensusSLAM(fc_k=0)` bit-exact to shipped BandSLAM on
+fr101[:1200] (max|dpose| 0), and four banked numbers reproduced in-session
+(fr101 1.881, belg 2.644, spot-registry 0.034, synth-mixed/corridor in
+range). Config = the banked intel v2 consensus exactly (fc_k=2, fc_eps=1e-3,
+tol 5 cm/0.5°); no per-dataset tuning. Runner: `scratch_consensus.py` (log
+`scratch_consensus.log`).
+
+| log | shipped | consensus | declines | note |
+|---|---|---|---|---|
+| fr101 | 1.881 (53 loops) | 1.882 (50) | 2/1893 kf | unharmed; gate never binds |
+| fr101 @1e-3 | 1.881 | 1.881 | 0 | ditto under perturbation |
+| fr079 BAND | [5.52..12.41] med 8.37 (banked) | **[12.17..14.84] med 12.32** (5 rungs) | 4–11/run | **collapses onto the band's WORST level** |
+| belg | 2.644 (1 loop) | 2.305 (0 loops) | 1 | improvement, AUDIT-PENDING (do-no-harm shaped) |
+| synth mixed/corridor | 0.048 / 0.020 | identical | 0 | exact-GT bench: no-op |
+| spot (lidar-only) | 0.034 | identical | 0 | target platform: no-op |
+
+Overhead: uniformly ~2.35–2.5× total ms/kf (fc_k=2 ⇒ 3 frontend matches/kf).
+
+**Verdict (a clean negative with one pending positive).** (1) On every
+stable/target log consensus is a no-op that costs 2.5× frontend compute —
+the gate never fires. (2) On fr079 the jitter-robust performance level sits
+at the TOP of the shipped band, not the median: all five consensus rungs
+land at/above shipped's worst banked draw (+47% over the band median,
+2.2× the ε=0 point). The intel finding ("band collapses 14× onto its
+median") is therefore log-dependent: consensus guarantees *a* level, and
+that level can be the worst draw. A hardware determinism mode bought this
+way can be a guarantee of the worst case — the accuracy-contract row in
+`SotA/fpga_design.md` is amended accordingly. (3) belg improves 2.644 →
+2.305 (med 1.86→1.45, max 8.6→4.6) with a single decline and the one loop
+dropped — mechanistically consistent with the frontend do-no-harm gap
+(odo-excellent log; raw odo 1.72 still beats both), so it is evidence for
+that thread, NOT for consensus adoption; labeled AUDIT-PENDING per
+PROTOCOL §4. Consensus stays opt-in, default OFF, including for the iCE40
+deployment posture (the ε-dither twin as an online band ESTIMATOR is
+unaffected — it reports, it does not decline).
+
+## 2026-07-11 (second burst) — iCE40 corners T and F on silicon: 36 MHz pipelined encoder, the matcher bit-exact on device, oct36 rejected
+
+### Corner T: encoder v3 (`ice40/rtl/encoder_pipe.v`) + 36 MHz PLL — acceptance PASS
+
+The v2 fmax (26.3 MHz) was not the arithmetic: yosys's cost model had
+silently LUT-mapped the 4-read-port cis ROM (a 9-LUT-level cone into
+`cre_q`), and after that every fix exposed the next ~30 ns cone. The
+ladder, each step sim-verified bit-exact before building:
+
+| fix | fmax (icetime) |
+|---|---|
+| v2 baseline (banked) | 26.3 MHz |
+| + u_q proj register + registered w·cis products | 31.3 |
+| + cis ROM forced to 4 EBR replicas (`ram_style="block"`) + FIFO 34→32 b (noack = mode reg, not a FIFO bit) → EBR 30/30 | 30.5 |
+| + product tree split into 2 registered partials | 33.0 |
+| + bit-sliced readback addressing {ring,j} (kills the ÷60 decode cone; wire byte order unchanged) | 33.3 |
+| + registered fifo_empty/ack_pend flags + timing-driven PnR (`FREQ=36`) | **39.7** (nextpnr 39.75 @ 36) |
+
+v3 is also smaller: 2933 LC (v2 3782), 4/8 DSP, 30/30 EBR, ~67 cyc/pt
+(3 pipe stages deeper, still 1 cycle/angle). `top_pll.v` = SB_PLL40_PAD
+12→36 MHz, UDIV=12 (3 Mbaud exact), margin 1.10×; the empirical gate is
+the sweep. **Acceptance at 36 MHz: PASS — 64-pt vector + spot 414/414 +
+dyn-classroom-p5 120/120 + dyn-school-p5 150/150, zero mismatches.**
+Wall stays ~69 ms/scan (FT2232H USB-latency-bound); the datapath went
+4.8 → 1.6 ms/scan ≈ 590 scans/s, keyframe headroom ~3× → ~9×.
+
+### Corner S closed: N_ANG × bits verdict — oct60 STANDS, oct36/45 rejected
+
+The krylov-agent N_ANG×bits sweep never banked; rerun directly
+(`scratch_nang.py`, background, ~13 min). Harness self-validated: every
+n_ang=60 arm reproduced its banked registry number exactly (spot 0.034,
+stata 0.202/99 loops, fr101 1.881/53) before the 45/36 arms were read.
+Config fixed across datasets (no per-log tuning); lattice patched only
+via `ssp_lattice.set_polar`.
+
+| n_ang | spot sh / lean | stata sh (loops) / lean | fr101 sh / lean | 2b seg | school301 |
+|---|---|---|---|---|---|
+| 60 | 0.034 / 0.036 | **0.202** (99) / 2.122 | 1.881 / 1.132 | 120 B | 35 KB |
+| 45 | 0.040 / 0.039 | 1.203 (33) / 1.122 | 2.076 / 3.474 | 90 B | 26 KB |
+| 36 | 0.042 / 0.036 | 0.975 (53) / 3.192 | 0.905 / 2.048 | 72 B | 21 KB |
+
+Verdict: (1) spot ties at the reference noise floor at every N_ANG — the
+7×7 room does not bind the knob (consistent with the banked "all
+samplers/lattices tie" there). (2) The stata proxy — the closest real log
+to the SPOT head — collapses below 60 angles: shipped float 0.202 →
+0.975/1.203 with loops 99 → 53/33; lean-2b is bad on stata at every
+N_ANG (the known closure-redundancy limit, 6b tier there). (3)
+fr101@36 0.905 has the exact signature of the un-banked lam8/N36
+knife-edge draw (2026-07-08 precedent, 0.668, fragile) — not banked.
+**oct60 stands. The oct36 ROM option is REJECTED for deployment; its
+memory case is moot anyway — school8 at 2b/no-relo/oct60 is 35 KB = 27%
+of the UP5K's 128 KB SPRAM.** (2b bytes here = phase codes only,
+2·D_MAIN·2b; the earlier 40 KB figure included per-ring scales +
+overheads.)
+
+### Corner F: the matcher on fabric — bit-exact on silicon at 24 MHz
+
+Golden integer matcher added to `ssp_ice40.py` (`match_int`,
+`rot_grid_int`, `shift_for`; `encode_int` untouched, selftest still
+passes). Contract: per-ring partial sums
+
+    s[k] = Σ_j conj(rot(Q >> sh, ρ))[k,j] · i^mc[k,j] · cis(u_kj(Δ))
+
+with Q = the last-encoded scan's accumulators (read-only in match mode —
+one encode serves many candidates), mc = the 240 2-bit QPSK map codes
+(THE deploy store), Δ = (dx,dy) in λ_min/256 units, ρ = grid-rotation
+steps, sh = per-scan pre-shift (real 1024-beam scans reach |Q| ≈ 2^23.3
+— measured spot/classroom/school max 2^23.0/22.9/23.3 — so sh≈9 keeps
+DSP operands i16; scores are linear in Q, the shift is truncation
+precision only). Geometry pinned in `selftest_match`: float rotation ==
+permute-with-conjugate-wrap at m ∈ {1,7,33,59}; score peak at (0,0,ρ=0)
+on the synth room; alignment convention pinned (map content displaced +δ
+peaks at Δ = −δ); deterministic.
+
+RTL (`ice40/rtl/encoder_match.v` = v3 + match extension; encode schedule
+untouched, match-mode gates are enable-muxes that free-run in encode
+mode): H = conj(Q)·i^mc is pure sign/swap (no multiplier); the
+translation phases REUSE the encoder's proj→cis datapath (x,y regs carry
+dx,dy; same ang ROMs, same cis EBRs); the four 16×8 products per ring go
+to the 4 free MAC16s (8/8 DSPs now used); 8 cycles/angle sequential
+schedule (stage-A mux+barrel-shift → stage-B conj+negations → consume →
+accumulate) = **483 cycles/candidate ≈ 20 µs @ 24 MHz ≈ 50k
+candidate-poses/s fabric-side** (deploy-shaped: ~500 evals/kf → 10 ms/kf,
+~100× under the 5 Hz budget). M codes live in a SPRAM (30/30 EBRs taken;
+single-port is safe — writes only while idle, reads only during match
+beats; its registered read IS the mc pipeline stage; a register-file
+version cost ~900 LC and blew the device). Protocol (`enc_top_m.v`):
+0x06 + 60 packed bytes → ack 0x2C; 0x07 dx dy ρ sh → 32-byte reply
+(4 rings × re,im i32 LE). Build: 4716/5280 LC, 8/8 DSP, 30/30 EBR, 1/4
+SPRAM; places at ~28–30 MHz (remaining limiters: exec-FSM decode + score
+accumulate mux — follow-up filed) → ships at 24 MHz PLL (UDIV=8, 3 Mbaud
+exact, margin ~1.17×). The 36 MHz corner remains the encoder-only build's.
+
+**hw-match: BIT-EXACT — 22 candidates (translations to ±8 m, rotations
+incl. conjugate-wrap cases, two shift values) × 4 rings, vs `match_int`,
+on device.** Wall 16 ms/candidate = one USB round-trip each (a batched
+0x07 is the obvious follow-up, as bulk 0x05 was for encode).
+Re-acceptance on the match bitstream: spot 414/414 + school-p5 150/150,
+zero mismatches — the encode path is untouched by the extension.
+
+Hardware-in-the-loop earned its keep again, catching what sim + TB
+missed: E_MWAIT trusted the STICKY m_done of the previous match, so ring
+0 of every reply streamed the stale previous score while rings 1–3 were
+"saved" by the UART being slower than the new match — an on-device-only
+failure signature (the TB's polling timing never exposed it). Fixed with
+a busy-based wait; sim re-verified, reflashed, bit-exact.
+
+Files: `ice40/rtl/{encoder_pipe,encoder_match,enc_top,enc_top_m,
+top_direct,top_pll,top_match,tb_encoder2,tb_match}.v`, Makefile FREQ=
+knob, `ssp_ice40.py` matcher golden, `ice40/host/vectors.py`
+{gen,sim,hw}-match + Board.load_m/match. Corner status: **S closed
+(oct60, 35 KB school8 map), T closed at 36 MHz (encoder) / 24 MHz
+(encoder+matcher), F = encoder AND matcher primitives bit-exact on
+silicon.** Next on the track: batched match command (kill the USB
+round-trip), match-build timing to 36 (est decode + accumulate mux),
+on-fabric argmax/top-k, and the ε-dither twin for online band estimation.
+
+**Addendum — pipelined match sweep (host-only, no RTL change).** The
+16 ms/candidate wall was one FTDI latency-timer stall per synchronous
+round-trip. The always-listening parser already buffers one pre-fed
+command while a reply streams, and the fabric is deterministic (reply
+106.7 µs + match 20.1 µs at 24 MHz), so time-paced writes + one bulk
+read keep at most one undispatched command in the parser regs (the
+overwrite invariant) and let replies pack the FTDI buffer back-to-back:
+`Board.match_sweep_paced` / `vectors.py hw-match-sweep`. On device, 441
+candidates (21×21 grid × 3 rotations), every reply bit-exact vs
+`match_int`: **279 µs/cand = 3 582 poses/s at the safe 250 µs period
+(2× wire margin); probes at 200/160 µs gave 4 325/5 189 poses/s, both
+bit-exact** (wire floor ≈ 127 µs). Deploy-shaped: ~500 evals/kf ≈
+140 ms/kf — the frontend correlation is real-time at 5 Hz keyframes
+even THROUGH the 3 Mbaud bench UART; fabric-side it is 10 ms/kf. A
+fabric candidate FIFO (for un-paced hosts) stays a follow-up.
+
+## 2026-07-11 — webvis: dynenv showcases embedded (agent-run, spot-verified)
+
+Agent-run per this session's §8 exception; verified in the main session:
+pack parses with 14 entries, the three dynenv arms carry exactly the
+banked bench-grid numbers, the exporter diff is registry-only + a pinned
+`expect` gate that ABORTS export on any ATE/loop drift from the banked
+grid (no silent config drift, permanent).
+
+Embedded (seed 11, 1024 beams, bridge2 deploy sampler, shipped config;
+reference = synthetic exact GT): dyn-classroom-p5w 0.008/14,
+dyn-school8-p0 0.954/93 (labeled DELIBERATE NEGATIVE SHOWCASE — the
+identical-rooms aliasing admitting wrong closures, worse than raw
+odometry), dyn-school8-p5s 0.348/112 (standing people de-alias). Selector
+grouped (Real-world logs / Dynamic synth (people)) with verdict
+one-liners; docs-alongside captions. jsc parity: all 14 replays shim-walk
+to Python fin (new arms ≤3.7e-6 m; the 11 old replays unchanged;
+re-export of spot through the modified exporter is byte-identical). Page
+21.8 → 25.5 MB (under the 26.2 precedent).
+
+**Known-issue ledger (pre-existing, found by the agent's regression
+sweep, NOT fixed):** webvis core self-test T8 ("segment fold: d/dθ
+correction beats permutation-only 3×") fails at HEAD — broke at 1f2bab3
+when the sandbox ladder moved to 5 cm finest (the test's fixed 0.6°
+offset is ~3 rad of phase at a 5 cm ring, beyond first-order), and
+`?test=1` threw entirely from 1f2bab3..9bfdaff (missing `LADDERS.phi`)
+so the break went unnoticed. Sandbox/display toy only (replay poses are
+Python-recorded); fix = give T8 a ladder-aware offset, deferred.
+
+## 2026-07-11 — 2b max capacity: readout quality solved, raster extraction is representation-limited (agent-run, ledger-verified)
+
+User directive ("solve the high-fidelity corner via 2-bit phase, max
+capacity — global readout quality and map extraction"); agent-run per
+this session's §8 exception. Main-session verification: the harness gate
+reproduced the archived capacity scripts row-for-row bit-exact (JOINT
+K=32 float med 0.033 / succ 0.76 / L1-hit 0.96; knee tables), and the
+banked school8 fixture row (0.954/93/301 segs) — ledger
+`scratch_capacity2b.log` + per-phase logs.
+
+**1. Capacity at 2b (80 paired probes, stata + school8).** Member-level
+2b code noise is NIL for readout: 2b-mem ≡ float at every K (and better
+on school8 at K≥96). The knee is SUPERPOSITION (float succ 0.94→0.72
+over K 32→128); the first genuinely-2b limit is BUNDLE-level
+quantization of the K-sum, which binds only at K≥64–96 on a clean map
+(paired +0.012→+0.061 by K=128) and never binds (≤128) on the
+drift-warped school store. 6b ≡ float throughout.
+**AMENDMENT to the banked story:** "2 bits costs one octave of capacity
+(K* 32 vs 64)" does NOT survive 80 paired probes — the archived data
+reproduces bit-exact, but that inference was p90-threshold noise at 40
+unpaired guesses. The conservative ≤32-segments-per-read RULE stands
+(float itself softens beyond 48–64); the REASON is amended to
+superposition-only. Prior-free global joint decode: knee K≈32–48 on
+both datasets, float ≡ 2b; school's succ ceiling ~0.8 at every K is the
+twin-room alias (the banked environment wall, not a store property).
+
+**2. Deadband × readout: snapping WASHES for decode quality** (≥4
+phases tie float everywhere; 2ph hurts) — the e2e nph=4 deadband win
+lives at the accept-gate/closure layer, exactly as banked. The real
+readout-tail effect in the "2b" arm is **nmag=1 magnitude flattening**
+(crosstalk whitening): present at 8/16/64 phases too (school K=64 p90
+0.52→0.14–0.18; stata K=96 0.51→0.30), replicated at 80 probes.
+
+**3. Map extraction (the centerpiece): a quantified NEGATIVE with a
+mechanism.** GT-free matched-filter imaging (GT = scoring label only;
+rand-phase NULL ≈ 0.5): occupancy AUC tops out at 0.63–0.69 (best-F1
+0.39–0.50) and is FLAT in K (K=8→all costs 0.04–0.06) and FLAT in bits
+(float→2b ≤0.05). Cell-level raster extraction is
+REPRESENTATION-limited — 240-component Fourier aperture per read ×
+multi-pass fine-ring phase decoherence (fine-rings-only imaging is the
+WORST reader, −0.06..−0.13) × line-content ghost combs — not
+capacity-limited. A 2b bundle carries as much extractable raster as
+float; neither is thresholdable occupancy at 0.1–0.2 m. The map's
+fidelity lives in CORRELATION reads (cm registration, ~3 cm global
+decode), not raster geometry; the deployable "map view" stays the
+signed local field (webvis refold / the live fabric image).
+
+**4. Max-capacity recipe (UP5K).** school8-scale: per-segment
+2b/no-relo/oct60 store (301 segs ≈ 31% SPRAM) + a readout layer of
+⌈301/32⌉ = 10 group vectors (2b sum-quantized, 76–114 B each) ≈ **0.8–
+1.1 KB** → global joint decode med 0.03 m, L1-hit 0.88–0.96, local
+reads succ ≥0.94 (clean env). **Operating point: K=32 per readout group
+(≤48 measured-safe), ⌈S/32⌉ groups.** Beyond it: bundle-quantization
+tail first (clean maps, K≥64), then superposition; on aliased envs the
+twin-alias ceiling binds at every K. Do not budget raster extraction.
+
+Audits: the win-shaped "2b ≥ float at large K" was decomposed via the
+nph ladder (it is the magnitude flattening, not the snap) and
+LOSO-audited (self-tie Δ ≈ +0.0002 — no self-echo); one invalid AUC row
+(rank-tie artifact on clipped zeros) excluded and documented. Scripts:
+scratch_capacity2b*.py/log (gitignored).
+
+## 2026-07-11 — live-system verification vs ground truth (map samples read off the silicon)
+
+`scratch_livegt.py` scores the RUNNING live system through its own HTTP
+endpoints (fabric map image + fresh direct-mode viewpoint readouts) against
+the analytic dynenv world (GT = scoring only). At kf ~1300, pass 8:
+
+- **Localization: verified.** Fabric-loc 4.5–6.2 cm vs GT (python SLAM
+  5.5 cm), state `tracking`, 260/260 live encodes bit-exact, at the 8th
+  perturbed pass with nothing ever reset.
+- **Image vs GT: reproduces the capacity-study ceiling — after fixing a
+  scoring confound.** Naive all-pixel rank-AUC read 0.390 (below chance)
+  because probe coverage is path-anchored: wall pixels 56% covered vs
+  free 89% (IMG_RAD=2.4 m from interior anchors), and uncovered pixels
+  score 0. Covered-only: **rank-AUC 0.609, best-F1 0.31** — in line with
+  the banked representation-limited ceiling (0.63–0.69). Ridge
+  LOCALIZATION is good: 56% of GT wall samples have a strong ridge
+  within 0.5 m, and those sit at **p50 0.133 m ≈ one image pixel** —
+  correlation-sharp, raster-soft, exactly the banked verdict, now
+  reproduced on silicon.
+- **Direct first-return visibility: the weak reader, quantified.** Fresh
+  fabric readouts (120 rays × 43 ranges × 3 picks): hits land p50
+  0.80 m from the nearest GT wall, 81% > 25 cm — the per-ray-max
+  first-return criterion triggers early on interior energy (furniture
+  sidelobes + coarse-ring fill). Readout-refinement agent dispatched
+  (fabric-exact offline emulation via match_int) targeting the reader,
+  the first-return criterion, and the probe-coverage recipe.
+
+**Ledger correction (found by the FPGA-implementation review):** the
+top_match build on disk — and the FLASHED bitstream — carries **6/8
+MAC16, 4931 LC** (the S_XY xm/ym products silently LUT-mapped in the
+post-E_MWAIT-fix rebuild; nextpnr 28.97 MHz @ 24). The second-burst
+entry's "4716 LC, 8/8 DSP" describes the earlier rebuild. Bit-exactness
+is unaffected (all sweeps passed on this bitstream — a LUT multiplier
+computes the same product); the lesson is DSP-inference instability
+across rebuilds → add a DSP-count assert to the build flow (roadmap #4).
+
+## 2026-07-11 — optimization review round: four read-only agents (python/FPGA × implementation/algorithm), consolidated
+
+Full reports in the session transcripts; ranked digests + cross-checks:
+
+**Cross-agent consensus:** the fabric datapath is ~100× under budget; the
+binding costs are (1) the WIRE choreography (per-candidate 32 B replies,
+µs-paced writes, 16 ms FTDI stalls on small acks) and (2) python trig in
+the 11-encodes-per-match frontend. Both sides converge on the same
+architectural move: grid auto-sweep + on-fabric totals/argmax.
+
+**FPGA-algorithm (top: build the auto-sweep command first).** 0x08 grid
+descriptor + on-fabric Re-sum totals stream (4 B/cand) or argmax reply
+(winner + 3×3 neighborhood + margin telemetry, ~42 B): locate 49 ms →
+5–8 ms/kf, kills the paced-host requirement; ~350–500 LC. Then: SPRAM
+map residency (512 segs/SPRAM, segment switch → 0; school8 fits the
+already-burned SPRAM), frozen-Q-in-SPRAM encode/match fusion (also
+deletes the stage-A barrel shifter = a 36 MHz enabler), staged on-fabric
+tracking loop (v1 host-predicted; margin-collapse = coast + flag, NEVER
+auto-widen — §5 wall), ε-dither twin as band telemetry (report, never
+decline — the front-consensus fence), de-skew = model-first experiment.
+Ring-subset early termination PARKED (rings are interleaved, not
+sequential; prune at grid level instead).
+
+**FPGA-implementation (top: pipeline the measured 35.75 ns path).**
+icetime attributes it: first_acc select cone (~13.5 ns) → 3-operand
+32-bit accumulate (~15 ns). Fix = pre-registered one-hot write enables +
+a pd=p0−p1 pipeline stage (+1 drain cycle) + one-hot est FSM + merged
+reply streamers → expected 36 MHz closure for the match build (20.1 →
+13.4 µs/cand). Also: xm/ym into the 2 idle DSPs (−215 LC + inference
+determinism + build assert); half-wave az table VERIFIED numerically
+exact (round-half-even is sign-symmetric; π/2 shift grid-aligned) → 6
+EBRs freed (ang ROMs into EBR, M-store into EBR, 3 free for
+FIFO/argmax/twin) with a loud symmetry assert in gen_luts.py; rot90
+folded into the cis ADDRESS (i^mc·cis(a) ≡ cis(a+(mc<<6)), verified
+exact) removes the SPRAM→mux→DSP cone; candidate FIFO reusing the point
+FIFO (128 cands, zero new EBR) → 9.4k cand/s unpaced at 3 Mbaud; UART
+6 Mbaud exact both clocks (12 M needs an RX rewrite — parked); match
+8→4 cyc/angle only after the wire is fixed. SB_HFOSC rejected (±10%
+breaks framing).
+
+**Python-implementation (top quick win: host-serial merges).** Single
+UART conversation per keyframe (prepend clear, append npts/readback —
+same bytes, one 16 ms stall instead of 2–3) + PACE 200→160 µs
+(device-validated) ≈ 25–45 ms/kf on the live loop, class bit-exact-safe,
+host files only. Biggest single lever repo-wide: cos/sin encode kernel
+replacing np.exp(1j·φ) — measured bit-EQUAL on this platform (±1100 rad
+probe grid) and ~25–30% of frontend compute; platform-gated startup
+assert, shipped-core maintenance pass required. Also: threading overlap
+(SLAM ∥ serial), sampler vectorization (bit-equal), memoized
+world_vec_seg (the KeyframeStore lazy pattern), _gn structure reuse.
+Measured do-NOT list: 14 zgemv→zgemm is NOT bit-equal (band cost for
+0.03 ms); der_fine stays banked-negative; c64 matcher arithmetic ≠ the
+banked c64-store evidence.
+
+**Python-algorithm (top experiment: per-ring bit allocation for the 2b
+store).** nph = {16,16,4,4} over the octave ladder (~3 b/phasor mean):
+fine rings keep veto-statistic fidelity (the banked per-ring-scale
+mechanism), mid/coarse keep the deadband — aimed at the stata-lean gap
+(2.122 vs 0.202), the one open per-regime compromise; multi-log gate,
+fixed global allocation. Then: 8-base exact-permutation fine stage
+(11→8 encodes/match, matcher+cmatcher share bases; exact algebra ≠ the
+banked E1 first-order negative — band-vs-band framing), adaptive
+run-length chord integrals (terms ~ scene complexity), bit-exact
+frozen-map caching + spatial-index candidate generation (the cells hash
+is maintained but never used for lookup), branch-and-bound coarse sweep
+(argmax-identical), veto-retry second chain + relax cadence sweep
+(school8-p0 precision as the guard), FHRR capacity-derived caps (chain
+sum vs the K*≈32 knee), batched separable imaging.
+
+Adopted into the roadmap now: build the auto-sweep+argmax command with
+the accumulate-path pipeline and xm/ym DSP fix in one RTL pass (items
+converge); host-serial merges + PACE 160 into live.py; per-ring bit
+allocation queued as the next python experiment. The four full reports
+remain the reference for the rest.
+
+## 2026-07-11 — v5 RTL pass: the batched-sweep FIFO command on silicon (crash class eliminated, 6.6k poses/s unpaced)
+
+Adopts the consolidated roadmap's converged top item. `encoder_match2.v`
+(v5; v4 stays frozen per ledger discipline) + `enc_top_m2.v` +
+`top_match2.v`:
+
+- **cmd 0x08 batched sweep**: `mode cnt` + cnt × 6-byte candidates,
+  buffered through the SHARED point FIFO (2 words each, ≤120/batch; the
+  point-drain arm is hard-gated while a batch is pending). Replies
+  stream back-to-back per candidate: full 32-byte per-ring partials, or
+  4-byte ring-summed Re totals (the deployed unit-weight argmax
+  criterion computed on-fabric). **No host pacing invariant — the
+  OS-write-coalescing overwrite crash class (two live-server crashes
+  today) is structurally dead.**
+- Timing fixes from the measured v4 paths: pd = p0−p1 pipeline stage +
+  pre-registered ONE-HOT accumulate enables (the 35.75 ns path), rot90
+  folded into stage-B with the mc SPRAM sampled one phase early (the
+  DSP-input cone), xm/ym as REGISTERED full-width products (+1 encode
+  state, 68 cyc/pt) — the form that infers MAC16 deterministically;
+  **the build flow now asserts SB_MAC16 == 8** (the v4 6-DSP silent
+  regression cannot recur). Sim caught two of my own pipeline bugs
+  before silicon (drain one cycle short; an extra enable-delay stage
+  misaligned with the pd register — sacc[k] briefly got ring k+1's sum).
+- Placement: 30.49 MHz @ the 24 constraint (1.27× margin), 5155/5280
+  LC, 8/8 DSP, 30/30 EBR, 1/4 SPRAM. The limiter MOVED to the
+  SPRAM-out→negate→rot90-mux stage-B cone (~30.6) — 36 MHz needs the
+  stage-B split or the reviewer's mc-prefetch cis-address fold (filed).
+- **On device: everything bit-exact** — legacy 0x07 path unchanged
+  (hw-match 22c), batch full mode 22c + 441c, batch totals 22c + 441c
+  vs `match_int`; encode re-acceptance spot 414/414 + school-p5 150/150
+  zero mismatches. Throughput (441-cand sweep, ZERO pacing): **totals
+  152 µs/cand = 6 596 poses/s; full 263 µs/cand = 3 803/s** (vs 279 µs
+  paced / 16 ms naive). Deploy-shaped: ~500 evals/kf ≈ 76 ms through
+  the bench UART; wire floor now dominated by the 20 µs match + reply
+  bytes, as designed.
+- live.py switched to batch totals mode (locate / wide re-search / map
+  probe / direct viewpoint queries); selftest on hardware: enc 24/24,
+  fx err 3.2 cm, direct-vs-cached visibility agreement 0.15 m — all
+  gates unchanged.
+
+## 2026-07-11 — VSA-translation experiments: the resonator IS line sweeps of the existing silicon primitive (agent-run, ledger-verified)
+
+User directive ("move as much of the system as possible into VSA
+operations"); ledger `scratch_vsa.log` spot-verified (bit-exact pin,
+deploy-chain medians, ops counts, determinism re-runs).
+
+**Design insight that makes it practical:** this polar lattice is
+ALREADY elementwise-separable in x/y — T(Δ)_j = exp(i·k_jx·Δx)·
+exp(i·k_jy·Δy) — so resonator translation factors are native axis
+phasors, and the HARD-cleanup resonator (RES-H) collapses to
+ALTERNATING 1-D LINE SWEEPS of bit-exact `match_int` evaluations, i.e.
+the existing fabric primitive (composable with cmd 0x08 line batches
+today). Bonus algebra pinned: rot(θ+π) = conj(rot(θ)) — the π branch is
+an i32 sign flip, one codebook covers the full rotation group.
+
+- **RES-H (adopt-shaped):** in-window same-argmax 93–98%
+  (classroom/spot/stata), ~2.4 iterations, 245 → ~45 candidate
+  evaluations (5×); disagreements score-neutral-or-better (ratio
+  1.00–1.04). Deploy-shaped tracking chains: median 0.0613 m BOTH arms
+  at 71 vs 348 CE/kf (4.9×). Prior-free rotation: 100% heading recovery
+  (±3°) at 408 vs 5 880 CE (14.4×). Ops crossover ≈ 5×5×5 window;
+  advantage grows with volume (53× at wide-search scale). Basin
+  failures are score-DETECTABLE traps (ratio ~0.55 → gate+escalate);
+  RES-H4 multi-start = negative (traps are true local maxima). School8
+  twin check (fenced): twin/genuine ratio 0.976 — NOT relocalization,
+  the §5 wall stands.
+- **RES-S soft cleanup: mechanism-note** (≤1-cell ~97% but blurs exact
+  argmax and needs a phasor-normalization primitive it doesn't earn).
+- **Analytic Newton refine (adopt-shaped; translation only, the E1
+  rotation fence kept):** gradient/Hessian = k-weighted inner products
+  of the matcher's own integrand (ssp_flow-equivalent, FD-pinned).
+  Surface-peak fidelity 0.01 mm vs 2.3 mm parabolic-on-int; buys a 2×
+  coarser sweep: sweep24+Newton2 tracks identically (med 0.0613) at
+  HALF the frontend CE/kf (175 vs 348). Fabric cost: one (k_jx, k_jy)
+  coefficient ROM into the existing accumulator tree.
+- **Pose bind-chain probe (mechanism-note):** a pure phasor pose chain
+  (permute + d/dθ tangent + bind) tracks SE2 to <1 mm over 1000 steps
+  at float64; 8b phase registers drift 1–3 cm; ≤6b slips catastrophically
+  (sub-bin deadband) — confirms the i32-accumulator/2b-frozen-store
+  split from the other side.
+- **Fixture-level bound worth keeping:** the 2b partial-overlap segment
+  peak sits med 5.9 cm from geometric alignment (content pull) — this
+  floors what ANY argmax engine or refiner can do vs GT on this store
+  format; deploy-chain medians (0.0613) sit on it.
+
+Follow-ups filed: RES-H as 0x08 line-batches in the live tracker (host
+change only), the (k_jx,k_jy) ROM for on-fabric Newton steps, and the
+wide-search escalation gate using the score-detectability of traps.
+
+## 2026-07-11 — map-readout refinement: first-return visibility 0.80 → 0.07 m; the 2 m ghost-comb mechanism; min3 ridge reader (agent-run, ledger-verified)
+
+Fabric-exact emulation (every probe through `match_int` semantics,
+batch path asserted bit-exact per run); the classroom fixture
+reproduces the LIVE baseline bit-for-bit (image row = scratch_livegt
+numbers; the three picks 1.865/0.526/0.664) — results transfer 1:1 to
+silicon. Ledger `scratch_readout.log`.
+
+1. **Image readers (host combos of the per-ring partials the fabric
+   already returns; zero fabric cost).** The representation AUC ceiling
+   is CONFIRMED at silicon level (nothing beats ~0.63 at honest
+   coverage) — but readers move RIDGE quality: **min3** (min of rings
+   1–3) lifts ridge coverage 56→71% (classroom), 65→96% (school8),
+   79→97% (stata) at p50 ≤ 0.12 m, and wins outright on
+   heavily-bundled mosaic reads. Fine-ring-alone ≈ chance (the drift-
+   decoherence signature, reproduced live); stencils hurt the live map
+   (tight-map-only, as the capacity study said). One flagged non-result:
+   a stata AUCgt 0.718 row is a 46%-coverage selection, not a ceiling
+   break.
+2. **First-return visibility: 0.798 → 0.072 m p50 (9% > 25 cm), held-out
+   school8 0.037–0.047.** Mechanism ISOLATED: the matched octave ladder
+   (λ = 0.25..2, ×2) is all-ring coherently aliased at exactly **2 m** —
+   long walls cast interior ghost ridges rivaling the true wall (ghost
+   1.01 vs wall 0.62 at wall−2 m). No profile-shape rule fixes it.
+   The fix: a **self-certified free-space mask** ray-carved at freeze
+   from the system's OWN pass-1 scans at its OWN poses (GT never
+   enters; 0.30 m cells, stop 0.45 m short of hits — 121 B classroom /
+   1.0 KB school8, O(area)) vetoes ghost peaks; the fabric correlation
+   read then contributes the cm placement (range-error early-bias
+   84% → 1%). Attribution clean via a mask-only control (0.143 —
+   the mask kills ghosts, the fabric read doubles the sharpness).
+   **Negative banked:** the 2b relo-ring field is a content-centroid
+   dome for in-room queries (float ≡ 2b) — no wall contrast; relo rings
+   stay anchor/L1-decode only.
+3. **Coverage recipe:** IMG_RAD 3.6 + input-fold bounds → wall coverage
+   0.58→1.00 (classroom) / 0.72→0.98 (school8) at 1.6× probes; the (B)
+   scoring confound disappears (AUCall 0.390→0.581). Query radius must
+   STAY 2.4 (3.6 lets hits land late on exterior teeth).
+4. Offline loops: exact-int batch imaging 753k probes/s (34×); float
+   separable GEMM ≈ 9.5M pixel-evals/s at 1.1% rel-l2 (corr 0.99994).
+
+Adopting into live.py: IMG_RAD 3.6 for the map probe, per-ring image
+replies (sum for display + min3 layer for ray-marching), free-mask
+carving at freeze, and the peak-walk + mask-veto + fabric-refine
+first-return rule (constants frozen on classroom, school8-verified).
+
+## 2026-07-11 — position⊗time trajectory memory: NEGATIVE for adoption, four mechanism notes (agent-run, ledger-verified)
+
+User-directed VSA thread ("bind positions with time, reconstruct time
+samples, perform loop closure"); ledger scratch_postime.log (fixtures
+reproduce fr101 1.881 and school8 0.954/93 exactly; deterministic;
+time-leak audit structural). Design: P(x)⊙T(t) bundles over
+consecutive-K windows, D=360 (point decode needs the incommensurate
+relo rings — the MAIN octave band is jointly 2 m-periodic), uniform
+time-rung ladder permuted across components (unpermuted 2–3× worse).
+
+- Time→position reconstruction: float p50 1–5 cm through K=32, breaks
+  by K=64 — the superposition knee again; 2b bundles break at K=16–32
+  (point-ATOM reads cost 1–2 octaves, unlike segment-content reads —
+  mechanism: readout-template richness; no contradiction with the
+  capacity entry).
+- Position→time revisit candidates LOSE to the pose-array proximity
+  search everywhere (classroom F1 0.68 vs 0.98; school8 0.11–0.35 vs
+  0.49–0.87). Measured bound worth keeping: on fr101, same-place pairs
+  sit 2.3–5.8 m apart in est/fin frames — ANY position-derived
+  candidate generator is bounded by pairwise pose consistency (the
+  verification wall seen from the pose side).
+- Footprint: the int16 pose list dominates the fidelity-footprint plane
+  at every usable operating point (the 2b vector wins bytes only where
+  its decode is broken).
+- Mechanism notes: nmag=1 magnitude flattening replicates as crosstalk
+  whitening on the TIME spectrum (third independent surface); one-sided
+  vs centered time rungs = a group-delay trade with no universal
+  winner; the K=32 detection optimum has a SECOND cause (window-flood
+  multiple comparisons punish small K); hierarchical coarse-first time
+  decode fails exactly like the banked spatial version — binding time
+  changes the readout axis, not the selection statistic.
+
+Verdict: do not adopt; the pose array stays. The thread's value is the
+mechanism notes + the pose-side wall bound.
+
+## 2026-07-11 — hybrid point/integral sampler (user formulation): NEGATIVE as a regime-split remover, with a new cascade-density mechanism (agent-run, ledger-verified)
+
+User spec: chords that pass the bridging gate become exact sinc-integral
+segments at mass (w_i+w_{i+1})/2; undrawn chord sides return half-weight
+r·dθ points at the endpoints — mass-conserving by construction, point-
+formulation in the no-chord limit, integral in the all-chord limit.
+Implementation `scratch_hybrid.py:pack_hybrid` (one seg-pack; degenerate
+segments = points); gate imported verbatim (63.4°, no retuning). ALL
+consistency selftests pass: gate-never → BIT-EXACT the E2 point pack
+(array-identical, no ULP caveat); gate-always → segint + boundary
+halves (≤3e-16); intensity: the hybrid uniquely restores FULL scan mass
+(1.0× vs bridge2/segint's 0.79–0.95×). Banked anchors reproduce
+bit-for-bit (stata 0.196/74, E2 1.659/9, fr101-E2 1.569).
+
+Verdict — NOT a win (criteria: stata≈bridged AND fr079-band≈E2 AND spot
+tie): spot ties, fr079-band matches E2's class (med 2.60 vs 2.77), but
+**stata inherits the point collapse (1.664/9 vs bridged 0.196/74)** —
+the sensor-regime split stays. Drawn-chord fraction 0.59–0.87 across
+datasets (mostly-integral operation, as intended).
+
+**The mechanism (control ladder, each arm audited):** not the
+half-weight endpoints (drawn-only control collapses too, 4.930/9, and
+is strictly worse on fr079/corridor — the endpoint restoration is the
+CORRECT part of the design); not the mass convention (gapmass deeper,
+1.320/1); not the harness class (bridge2-through-SegIntSLAM reproduces
+0.196/74 with identical counters). Per-scan encodes are
+cosine-1.000 IDENTICAL to bridge2 on all 6 rings — yet sessions
+bifurcate (hybrid 9 accepted/15 veto vs bridge2 74/3 at equal coh_ref).
+**The discriminator is bridging DENSITY: 2 sub-points per chord
+survives stata's closure cascade; every 1-term-per-chord pack starves
+it** — a per-scan-invisible, session-level property, echoing the banked
+recurrent-frontend sensitivity (BFC). Prediction filed: the banked
+"GROUP/8 run-length decimation is lossless" (synthetic-bench) should
+FAIL stata e2e for the same reason — dispatched as a test.
+
+Honest positives: the integral family narrows fr079's WORST draw ~2×
+(segint band [2.15..2.54] vs E2 [2.21..4.86]) at equal medians; the
+hybrid's fr101 median 1.174 ≈ E2's 1.026. No compute win (segment terms
+cost ~2× point MACs).
+
+## 2026-07-11 — per-ring bit allocation: NEGATIVE as a recipe; stata-lean is BAND-dominated (banked-premise amendment); the asymmetry residue (agent-run, independently audited)
+
+RingStoreSLAM (subclass; per-ring nph over the matched band, relo
+pinned; lean pipeline). All harness gates passed (stata/fr101/spot lean
++ school8 bench rows reproduced; neutral arm max|dpose|=0 after fixing
+a REAL implementation trap worth keeping: a broadcast float64 nph
+vector breaks bit-faithfulness on the c64 store via NEP-50 promotion —
+5.9e-6 phase divergence, ABOVE the 1e-6 cascade-chaos threshold; rows
+must be assembled from scalar quantizer calls). Independent read-only
+audit: CLEAN.
+
+**AMENDMENT to the banked story:** stata's lean-2b "failure" (2.122/11)
+is a bad ε-draw — uniform-2b's own band is [0.17..2.99] med 1.48 with
+loops 11–56, a30's band overlaps it almost entirely, and **uniform-6b
+itself collapses at ε=1e-3** (1.18/17, 2.15/13). The banked "stata
+needs the 6b tier" is an ε≤1e-6 basin property, not a store-fidelity
+tier. stata-lean joins the band-dominated logs; no fixed allocation
+stabilizes the cascade. (fr079 additionally pays median +1.3–3.4 for
+ANY reallocation; fr101 all arms in-band; spot all tie.)
+
+**Mechanism (reproducible-ε ordering + the attribution arm):** at
+ε∈{0,1e-6} loop counts order strictly u2b {11,11} < a30[16,16,4,4]
+{24,51} < u6b {71,71} — but **x40 [64,64,4,4] STARVES in every draw
+(≤14 loops, dies at the cmatcher pose gates before the veto)**. So the
+gap is NOT fine-ring code noise alone: fine-ring fidelity has an
+in-family optimum (~16 phases) that only exists while mid/coarse keep
+the nph=4 deadband; overshooting fine bits kills the loop match. More
+store fidelity is not monotone. The inverted control [4,4,16,16]
+collapsed everywhere (stata 3.730/7; school8 precision 0.59, admits
+wrong closures) — as predicted.
+
+**The adopt-flavored residue:** on the deploy-shaped low-drift aliased
+env (school8-p0), the asymmetric fine-favoring family raises closure
+PRECISION 0.78 → 0.80–0.84 at ~1.5× loops (a30/a35, 180–210 B/seg)
+while uniform-6b DROPS it to 0.74 — the asymmetry (fine fidelity +
+mid/coarse deadband), not bits per se, carries it. Filed as the lever
+if the spot/school class ever shows precision pressure; stata-class
+multi-pass drift is not fixable by any fixed allocation.
+
+## 2026-07-11 — exact branch-and-bound coarse sweep: PROVEN, then correctly NOT adopted (agent-run, ledger-verified)
+
+An admissible per-block bound tighter than Lipschitz (exact
+single-sinusoid interval max per feature off one elementwise product;
+proof in scratch_bnb.log): identity gate 4033/4033 recorded real
+matches argmax-identical with 0 fallbacks; full fr101/stata/spot runs
+BIT-IDENTICAL (max|Δpose| = 0, no ε-band needed). Two reusable
+measured facts: (1) Accelerate/AMX zgemv bits DEPEND ON THE CALL'S ROW
+COUNT (~1.5e-15 relative between subset paths — "same BLAS shape" is
+unattainable for true subsets; exactness must come from guard-band +
+verbatim-fallback construction, guard 7 orders above measured
+deviation); (2) pruning power lives in the λ≥0.5 rings — the λ=0.25
+ring is Nyquist-matched to the 0.06 m grid by design and cannot prune
+above cell scale.
+
+Bottom line: evaluates 2–6.5× fewer cells (best on the target platform,
+spot 0.154×) yet runs 2.6–5× SLOWER wall — AMX makes the dense
+289×240 gemv nearly free (6.7 µs) while bound math is memory-bound
+numpy; the coarse sweep is ~1% of the encode-dominated host match (the
+59%-of-MACs framing was MAC count, not wall). NOT adopted host-side.
+The candidate-count result matters exactly where per-candidate cost is
+wire/fabric-bound — and there the per-anchor bound needs 240-element
+access (wire-dead over 0x08; the per-ring-partial bound variant prunes
+poorly, 0.60–0.81 — honest negative). Fabric candidate reduction stays
+with RES-H line sweeps / an on-fabric argmax unit, converging with the
+VSA-translation verdict.
+
+## 2026-07-11 — cascade-density prediction test: GROUP transfer-failure CONFIRMED, mechanism REPLACED (supersedes today's hybrid entry's density story; agent-run, independently audited)
+
+Harness gates passed (banked synth-1024 rows reproduce to the digit —
+the GROUP/8 claim STANDS ON ITS BENCH; probe layer bit-exact,
+max|dpose| 0). Ledger scratch_density.log.
+
+1. **Prediction confirmed:** GROUP/2/4/8 all collapse stata e2e
+   (3.4/1.8/3.4 ATE, 8–13 loops vs bridge2 0.196/74), and the GROUP/8
+   collapse is ε-band STABLE (identical at 1e-6 and 1e-3 × 2 seeds) —
+   a deep basin, not a draw. The banked "mass-exact GROUP decimation,
+   lossless" is bench-valid but MUST NOT transfer to stata-class
+   sensors.
+2. **Mechanism refuted and replaced.** n1 (ONE term per chord)
+   SURVIVES at 0.194/74 — the predicted collapse limit doesn't
+   collapse. The ladder knee is n3→n4 with collapse on the MORE-points
+   side; the half-chords control (same term count as n1) collapses. The
+   variable that orders the cosine-1.000 family is **r0-encode distance
+   from the exact-integral pack**: ≥ ~3e-3 survives (n1 3.5e-2, b2
+   7.6e-3, segint-lone-arc 4.5e-3 — whose "counterexample" dissolves:
+   rerun, its accept sequence is IDENTICAL to bridge2's), ≤ ~2e-3
+   collapses (n4, n5, exact segint-lone-pt = 0). The exact-integral
+   limit itself sits in stata's bad basin; sampling discreteness is
+   what rescues. n4/n5 are ε-boundary arms (rescued in 3/4 flip draws
+   — PROTOCOL §6 framing); the good basin and the e2/GROUP collapses
+   are deep.
+3. **Gate localization:** not the named gates — collapsed arms starve
+   at the cmatcher displacement PRE-gate (56–68/75 attempts vs 10/75;
+   coh-veto nearly silent); ignition-then-flameout for the boundary
+   arms. The bifurcation lives in chain-bundle matcher basin quality —
+   session-level, recurrent-frontend (BFC-class), invisible to per-scan
+   cosine/energy. Today's earlier "2-sub-points-per-chord is the
+   discriminator" story is SUPERSEDED by this entry.
+4. **Adopt-shaped incidental:** n1 = bridge2-class accuracy at HALF the
+   encode terms (911 vs 1734, band-stable on stata) — multi-log suite
+   validation dispatched before any adoption talk.
+
+**Addendum — tracker-gate calibration: local surface observability does
+NOT separate lost from healthy (measured).** With per-kf diagnostics
+logged on the certified-revert runs (corridor/orbit + office/reverse
+healthy, corridor/reverse lost): best single statistic (per-ρ margin
+< 0.77·spread) catches 83% of lost keyframes at 11% false-flags on
+healthy ones — a false odometry-hold every ~2 s, exactly the v2
+regression mechanism; curvature thresholds are worse (den_x p50 on
+HEALTHY corridor tracking is 0.010·spread — the v2 blind constant 0.04
+flagged nearly everything). Healthy-but-degenerate and lost-and-
+degenerate keyframes present the SAME local surface; correctness is not
+a per-keyframe surface property. Commit-policy gating from local
+observability joins the banked walls; recovery needs temporal/structural
+evidence instead (the RES-H study's remit).
+
+**Addendum — readout recipe live-integration verified on silicon (with
+two integration lessons).** The study recipe needed two fixes found by
+GT-scored hardware selftests: (1) the free-space carve BLEEDS — rays
+passing tangentially near walls mark wall-adjacent cells free (measured:
+22/38 true-wall peaks wrongly vetoed) — fixed by un-freeing cells within
+0.35 m of observed hit endpoints; (2) marching the min3 layer with a
+naive first-crossing threshold re-admits the 2 m combs the mask exists
+to kill (2.1 m p50 vs GT) — the cached path now marches the sum layer
+WITH the mask veto. Also ported the study's exact peak rule (scipy
+prominence on a smoothed, below-padded profile — my hand-rolled ±3-
+sample window rejected broad ridges) and its maskfb boundary-fallback
+tier (rays whose wall response is comb-inverted or beyond query
+coverage). Verified on hardware, GT-scored: direct-from-phasor hits
+p50 0.150 / p90 0.472 m (baseline 0.80/2.03), cached 0.224/0.715;
+60/60 rays produce hits (42 peak-tier + 18 boundary-tier). Live server
+relaunched with the verified stack.
+
+## 2026-07-11 — cascade scheduling: veto-retry REJECTED (recall-collapse feedback), shipped 4/25 cadence CONFIRMED (agent-run, reconstructed-and-verified ledger)
+
+Resumed post-quota-kill; the ledger was reconstructed from surviving
+per-arm outputs and VERIFIED (independent rescore identity, loop
+recount from slam.edges, read-only code audit: the retry harness is
+verbatim try_constraint + rank selection, bit-exact parity when
+inert; all baseline gates reproduce banked numbers incl. fhw 0.981/559
+and school8 both seeds).
+
+**H1 second-chain veto-retry: REJECT.** Neutral/no-op where vetoes are
+rare (fr101 +2 edges neutral; spot zero vetoes; school8 precision guard
+unchanged; fr079 ε=0 bit-identical) — but on fhw, the one log with
+hard-veto pressure, the 24 admitted second-chain edges (longer-lever,
+non-proximity chains) perturb anchors and TRIPLE primary vetoes
+(36→96): loops 559→385 (−31%), ATE 0.981→1.028. A recall/stability
+positive-feedback failure, not a precision one — the do-no-harm
+asymmetry again: the retry only ever fires where the cascade is already
+stressed, and its edges make the stress worse.
+
+**H2 attempt/relax cadence: shipped 4/25 is the flat ridge.**
+attempt_every dominates: a8 halves recall (fr101 3.15); a2 outruns
+relaxation at r≥25 (2.24/3.00). a2/r10 is nominally best on both logs
+(fr101 1.695, stata 0.192) but is the aggressive-relo profile the gates
+forbid — flagged for a possible full-suite band study, NOT adopted.
+
+## 2026-07-11 — quota-killed studies harvested from completed worker runs (n1 suite; FHRR caps) — banked from verified ledgers
+
+Both agents died at the session limit AFTER their runs completed; rows
+verified (n1: predecessor row re-derived byte-identical + gate anchors;
+caps: interim rows already cross-checked in-ledger).
+
+**n1 sampler suite validation: NOT suite-safe — the regime split is
+ABSOLUTE ENCODE DENSITY.** Gates passed (all banked anchors). Dense
+scans (n1 ≥ ~800 terms/scan): EQUAL or better — stata 0.194/74 ≡ b2,
+spot identical counters, synth mixed+corridor identical, school8-s11
+BETTER incl. precision .53→.72. Sparse 180° logs (156–321 terms): belg
+band-SEPARATED regression (n1 [4.85..5.42] vs b2 [2.33..2.68], one draw
+loses ALL loops), fr101 band-median worse AND loses its hallmark
+ε-robustness (the point-citable log becomes banded), fr079 worse
+median. The knee-distance observable (encode-collapse axis) is SAFE
+everywhere (min 7× above the ~3e-3 knee) — necessary-not-sufficient;
+the sparse failures are chain-bundle basin scatter from too few terms
+per scan. Verdict: REJECT for the suite; FILED as a dense-head deploy
+option (the 1024-beam target regime: equal-or-better at half the
+encode terms — needs school8-s12 + fhw band + an audit before any
+adoption). Missing when killed: fhw band, school-s12.
+
+**FHRR caps: cap=32 (the theory-adjacent value) binds nowhere = free
+no-op; cap=16 harmful-ish (fhw-lean eps0 3.03); cap=8 MIXED with one
+striking regime win — stata-lean band [0.17..2.99] med 1.48 →
+[0.13..0.30] med 0.29 (n=5), the first knob observed to STABILIZE
+stata-lean's cascade** (mechanism-consistent: fewer drifted far chain
+members → cleaner chain-bundle basin at the density study's
+pre-gate). Not a default: fr079-shipped band median 8.37→10.35 at
+cap=8; fr101-lean eps0 2.14 vs 1.13 (unbanded). FILED: "chain-cap 8 as
+the stata-lean stabilizer" needs fr101-lean/spot-lean bands + audit.
+Theory section (already banked interim): naive iid FHRR capacity
+REFUTED; spatially-ordered members + landscape variance explain the
+measured knee. CELL_CAP/recent_aids theory comparison: not completed.
+
+Threads left open by the limit (next session): RES-H temporal-statistic
+tracker study (nothing built), bit-exact frozen-map caching (nothing
+built), n1's two missing cells, caps' two missing bands.
+
+## 2026-07-11 — day consolidation (the autonomous burst, closed out)
+
+One session took the iCE40 track from "encoder accepted at 12 MHz" to a
+LIVE, GT-verified, self-recovering system, and ran seventeen
+agent-executed studies around it. Deploy-integrated today: the 36 MHz
+encoder corner + 24 MHz encoder+matcher silicon (both bit-exact,
+DSP-count asserted), the 0x08 batched-sweep transport (6.6k poses/s, no
+pacing invariants, crash class eliminated), the live endless-replay
+system (looping perturbed feeds, interpolated bridges, fabric
+localization 3–6 cm through 8+ passes, encode cross-checks 100%
+bit-exact throughout), the verified map-readout stack (free-space mask
++ peak/veto/fallback first-return: 0.15 m direct visibility vs GT), and
+the GT-wall overlay + trajectory-battery instrumentation
+(scene-change/handoff/observability per keyframe).
+
+Verdict ledger of the day: adopted (batched transport, readout stack,
+RES-H/Newton as filed fabric candidates, wobble/reverse stressors);
+rejected with mechanism (per-ring bits, veto-retry, hybrid sampler as
+split-remover, B&B host-side, pos⊗time memory, observability commit
+gates, oct36/45, GROUP-on-real-sensors, RES-S, ring-subset
+early-termination); amended banked claims (stata-lean band dominance,
+"2b costs one octave" → superposition-only, GROUP bench-only,
+6b-tier = basin property); superseded (cascade-density → integral-
+proximity basins); new hard bounds (2b content-pull 5.9 cm floor,
+pose-frame consistency 2.3–5.8 m, 2 m ghost combs, AMX row-count
+nondeterminism, NEP-50 quantizer trap). FINDINGS.md carries the
+four section-reshaping findings; SotA/fpga_design.md carries the
+deploy addenda + in-place retractions. Open next: RES-H temporal
+tracker study, frozen-map caching, n1's two missing cells, chain-cap-8
+validation, 36 MHz match build, on-fabric argmax.
+
+## 2026-07-11 — v6 RTL: rot90-as-cis-address fold + ON-FABRIC ARGMAX, accepted on silicon
+
+`encoder_match3.v` / `enc_top_m3.v` / `top_match3.v` (v5 files frozen):
+
+- **The fold**: i^mc·cis[a] ≡ cis[(a+64·mc)&255] — verified EXACT on the
+  shipped ROM for all codes × all 256 addresses before any RTL — moves
+  rot90 into the cis ROM address (8-bit add). The mc SPRAM retimes to a
+  4-phase PREFETCH (codes land in registers one angle ahead; 5-cycle
+  prologue, 488 cyc/cand) and stage-B becomes register-to-register (the
+  conj negate folded into stage-A; the v5 limiter cone — SPRAM→negate→
+  mux→DSP — is structurally gone). Both sim paths bit-exact unchanged.
+- **On-fabric argmax** (0x08 header mode bit1): the fabric keeps the
+  running best ring-summed total + candidate index (strict >, first-max
+  = np.argmax over send order) and replies SIX BYTES per batch. On
+  silicon: 442-candidate sweep with a deliberate duplicate-winner tie —
+  index, total, and tie-break all EXACT; **144 µs/cand = 6 951 poses/s**
+  through the bench UART, reply cost eliminated.
+- Deploy-build slimming to fit (the argmax + prefetch additions hit the
+  5280-LC ceiling; LC count also proved FREQ-dependent — 5280@36 vs
+  5297@24 packing): legacy acked-point path retired (0x02≡0x05), bare
+  0x07 safely discarded, single-best argmax (margin telemetry deferred),
+  est back to 4 bits. Final: 5148/5280 LC, 8/8 DSP (asserted), 30/30
+  EBR, 1/4 SPRAM; placed 31.6 MHz @ the 24 constraint (1.32×). 36 MHz
+  remains placement-pressure-bound (~150 LC liberation filed: streamer
+  merge, one-hot est experiment).
+- **Acceptance**: batch full + totals modes bit-exact on the folded
+  datapath (22c); hw-argmax exact incl. tie; spot 414/414 + school-p5
+  150/150 replays zero-glitch; live selftest green.
+- **live.py tracker on argmax mode**: locate() = one argmax batch + a
+  3×3 refine batch (sparse tot grid; downstream unchanged) — selftest
+  IDENTICAL accuracy (fx 3.2 cm, same recenters) at a 6-byte tracking
+  downlink. The deploy localization loop is now: scan up, argmax down.
+
+## 2026-07-12 — anneal-by-time-binding (negate→rematch→reencode): the CYCLE works on explicit frozen-code history at low drift; the TIME-BOUND MEMORY as its store is DEAD (scratch_anneal.py, self-run)
+
+User purpose behind pos⊗time (clarified after the banked NEGATIVE): bind
+measurements to time keys so past scans can be READ OUT, NEGATED from the
+map, RE-MATCHED against the rest-map, and RE-ENCODED at the corrected
+position — continually on random past scans, and backwards along a loop
+at closure. The banked study tested retrieval/detection, not this cycle;
+this study tests the cycle itself under increasingly honest memory
+assumptions. `python3 scratch_anneal.py` → `scratch_anneal.log`.
+
+Setup: 8×6 m room + interior wall with two doorways; K∈{16,32,64} scans
+(60 beams, 2π) on a closed loop; drift = RMS-scaled random walk ∈
+{0.4, 0.8, 1.2} m; matcher-tier lattice (4 matched rings × 60, D=240);
+scan 0 pinned as gauge anchor; 8 anneal passes, random order; 3 seeds.
+Metrics: cos(M, M*) raw and gauge-aligned (cosA, mirrors align_se2
+convention), per-scan pose error, gauge-free dispersion, ghost count
+(err grew >0.5 m). Selftests: sweep recovers an injected offset exactly;
+FHRR unbind identity exact; A1 oracle arm converges cos→1.000;
+deterministic bit-equal. Anti-oracle: GT touches sensor physics, scoring,
+and the fenced A1 diagnostic only. Favorability caveats (all lean TOWARD
+the proposal): translation-only drift, full-visibility single room (no
+aliasing), iid time keys (no rung-ladder decode noise), no odometry links.
+
+Arms and results (3 seeds each; representative numbers):
+- A1 oracle-erase + oracle-repos (DIAGNOSTIC): converges cos 0.51→1.000.
+  Harness sanity only.
+- A2 oracle float history + match-repos: at drift 0.4 the anneal WORKS —
+  cosA 0.990–0.999, dispersion 0.36→0.01–0.04 m, 0 ghosts: the loop's
+  internal warp is fully annealed into a rigid gauge offset. At drift 0.8
+  it BREAKS (ghosts 11–14/15 at K=16, 26–29/31 at K=32; dispersion ~2 m;
+  scans comb-lock at ±ring offsets). Basin edge between 0.4 and 0.8 RMS —
+  the banked fine-lattice basin (~0.25–0.5 m) + 2 m octave combs, again.
+- A2h frozen 2b per-scan codes (60 B/scan) + float code-sum map + per-scan
+  offsets (erase exact; correction = phase op on frozen code — the
+  project's own frozen-content principle applied per scan): at 0.4 the
+  anneal works with consensus limited by 2b phase noise — cosA 0.68–0.76
+  (= the one-time quantization ceiling), dispersion 0.07–0.15 m, 0–1
+  ghosts. At 0.8–1.2 bistable: mostly comb-locks, occasionally recovers
+  fully (K=16 s13 @1.2: err 1.01→0.28 m). THE deployable form of the idea.
+- A2q 2b map REQUANTIZED per touch: dead even at drift 0.4 (errors grow
+  0.36→0.5–0.8, ghosts at every K). Mechanism isolated vs A2h: per-touch
+  whole-map requantization is the killer, not the 2b code storage.
+- A3 the actual proposal (spatial map + time-bound bundle Mt=Σ T_k⊙V_k;
+  decode conj(T_k)⊙Mt, spatial-domain cleanup, erase, rematch, re-add,
+  patch Mt): DEAD at every cell. Cleanup reconstructions p50 0.6–1.7 m;
+  pose errors explode to 4–15 m; ghosts ≈ all annealed scans. Capacity
+  arithmetic: K scans × 60 points = 960–3840 atoms per bundle vs the
+  banked superposition knee (~32–48) → 20–80× over capacity. The banked
+  knee, scaled by constellation size.
+- A3r naive raw-decode subtraction: cos 0.60→0.15 in 8 passes. FHRR
+  unbinding is LOSSLESS — the decode carries the entire memory re-phased,
+  so subtracting it injects noise at ‖noise‖/‖signal‖=√(K−1) (measured
+  3.78 vs theory 3.87 at K=16). Negate-after-unbind without cleanup is
+  self-destruction, mechanically.
+
+Side answer (user question, same thread): matching the current measurement
+NEVER unbinds the map by an integral over time. The deployed matcher (and
+every arm here) matches against the pure spatial bundle (on-fabric: the
+frozen 2b codes; sweep 0x08). Σ_k conj(T_k)⊙Mt would reconstruct that same
+spatial map PLUS K(K−1) re-phased cross-terms (‖noise‖/‖signal‖≈√K) — a
+strictly worse copy at identical footprint. Windowed ladder integrals
+(banked postime "in-span read", 1.43 vs 0.16 member-units) act as a time
+FILTER, but for matching you want the whole map anyway. Time-binding
+therefore forces a DUAL STORE (spatial for matching + time-keyed for
+retrieval) — 2× footprint before its capacity problem even starts.
+
+VERDICT: the annealing PURPOSE is partially achievable, but time binding
+is the wrong memory for it. (a) The negate→rematch→reencode cycle is
+mechanically sound and fully anneals in-basin warp (≲0.4 m RMS) given
+EXPLICIT history — deployable as frozen 2b per-scan codes + offsets,
+consensus 7–15 cm. (b) The time-bound superposed store fails at 20–80×
+over the capacity knee, and its naive form self-destructs (√(K−1) noise
+injection). (c) The regime where annealing is NEEDED (post-closure,
+meters) is exactly where the cycle comb-locks; gross correction must stay
+rigid-per-segment (shipped O(D) phase ops along the loop) — the cycle
+could at most POLISH post-closure residuals if they are already ≲0.4 m.
+(d) Explicit history beats superposed history AGAIN (third instance:
+pose list vs pos⊗time; imaging cache vs re-decode; now anneal codes vs
+time-bound bundle). Adoption: nothing changes in deploy; if sub-segment
+annealing is ever wanted, the A2h recipe (O(T) at 60 B/scan + 8 B offset)
+is the measured starting point, gated on drift ≲0.4 m RMS.
+
+## 2026-07-12 — fidelity-space lattice scaling ("increase both"): angles cap at 60, the LADDER is the lever; coarse extension kills the combs; fine floor = sensor coherence length; REPLICATED-AND-LARGER on stata (scratch_biglat{,2,3}.py, self-run)
+
+Context (user directives): the standalone architecture splits VSA spaces —
+the on-chip SLAM/matcher space stays oct60 D=240; a SECOND encode-only
+fidelity space is folded per segment on-fabric, streamed out (2b codes),
+and decoded on the laptop (position display + map readout). That lifts the
+D=240 fabric-matcher constraint from the fidelity store, so: does a bigger
+polar lattice buy readout fidelity? Sweep "both" axes (scales × angles),
+then "go smaller — 1 cm and up, 16+ scales".
+
+Method: school8 fixture (real-pipeline drift-warped store, ATE 0.954, 301
+segs, 1935 kf; exact GT walls as scoring labels) re-folded on each lattice
+with poses FROZEN (pure representation comparison); paired probes (n=40);
+metrics = local-read K-curve, prior-free global joint decode (generalized
+cumulative coarse→fine over any ladder + fine matcher), raster extraction
+AUC (mosaic imaging, GT scoring-only), analytic PSF (fwhm / worst sidelobe
+/ 2 m comb amplitude), bytes/segment (2b, vec+der). GATE: shipped lattice
+reproduced the banked capacity2b rows exactly (curve float 0.029/0.123,
+2b 0.030/0.129; extract AUCin 0.6088 / AUCgt 0.5524) through the
+generalized matcher/imager before any new cell was read. Harness code
+imported from the validated capacity2b/capacity2 stack; lattices patched
+only via ssp_lattice.set_polar; shipped globals restored after each run.
+
+School8 sweep (AUCgt float/2b-mem/2b-SUM-K32; local32 f/2b med; joint32
+med/succ/L1; PSF fwhm/side/comb; B/seg 2b):
+
+  oct4x60      240  152 B | .260/.21/.18 | .029/.030 | .029/.82/1.00 | .5524/.5283/.5186
+  oct4x120     480  272 B | .260/.21/.18 | .029/.029 | .029/.82/1.00 | .5282/.5009/.5108
+  oct4x180     720  392 B | .260/.21/.18 | .031/.029 | .030/.82/1.00 | .5186/.4973/.5080
+  hoct7x60     420  266 B | .280/.18/.09 | .027/.028 | .030/.80/1.00 | .5886/.5520/.5398
+  hoct7x120    840  476 B | .280/.18/.09 | .026/.025 | .028/.80/1.00 | .5682/.5238/.5349
+  span9x120   1080  612 B | .180/.11/.08 | .026/.025 | .028/.80/1.00 | .5644/.5218/.5348
+  span11x120  1320  748 B | .280/.25/.01 | .026/.025 | .026/.82/1.00 | .5817/.5481/.5565
+  span11x180  1980 1078 B | .280/.25/.01 | .028/.029 | .030/.80/1.00 | .5762/.5447/.5508
+  span9x60     540  342 B | .170/.12/.08 | .027/.026 | .030/.80/1.00 | .5858/.5482/.5389
+  hoct9x60     540  342 B | .340/.35/-.00| .032/.032 | .028/.80/1.00 | .6005/.5695/.5600
+  span11x60    660  418 B | .280/.27/.01 | .030/.026 | .029/.80/1.00 | .5984/.5662/.5591
+  span14x60    840  532 B | .145/.21/.03 | .030/.027 | .030/.80/1.00 | .5996/.5669/.5603
+  span18x60   1080  684 B | .075/.18/.05 | .028/.028 | .031/.78/1.00 | .5974/.5682/.5583
+
+Ladders: oct4 = shipped matched band 0.25–2 m; hoct7 = half-octave 0.25–2;
+hoct9 = hoct7 + {2.83, 4}; span9/11 = ±fine {0.125, 0.177} / +coarse;
+span14/18 = fine end pushed to 4.4 cm / 1.1 cm (user cell).
+
+Verdicts (school8):
+1. ANGLES CAP AT 60. ×120/×180 hurt extraction monotonically on EVERY
+   ladder (oct4: .5524→.5282→.5186; hoct7 .5886→.5682; span11
+   .5984→.5817→.5762) and buy nothing on reads/joint/PSF. Content sits
+   within a few m of each anchor — 60 half-circle angles already cover the
+   annuli; extra angles add correlated crosstalk to the imaging sum. (The
+   e2e matcher angle findings — even-count wall normals, 113-refuted —
+   are a different mechanism; nothing anywhere pays for >60.)
+2. THE LADDER IS THE LEVER. Half-octave densification +.036 AUCgt;
+   +coarse {2.83, 4 m} another +.012 and the 2 m octave ghost comb is
+   ANNIHILATED (PSF comb .18→−.00; the banked interior-ghost mechanism
+   attacked at its root). Winner school8: hoct9x60 .6005/.5695/.5600.
+3. FINE FLOOR = SENSOR COHERENCE LENGTH (registered prediction CONFIRMED).
+   With σ_r = 2 cm, ring coherence e^{−(2πσ/λ)²/2} predicts λ ≤ 4.4 cm
+   dead: span14/span18 tie hoct9 on every store metric while only the
+   NOISE-FREE analytic PSF sharpens (fwhm .340→.075). Sub-coherence rings
+   are dead weight (+342 B/seg for nothing). λ_min ≈ 2πσ_r ≈ 12.6 cm is
+   the floor — our 0.125 m ring sits exactly on it.
+4. The banked "aperture-limited" extraction mechanism is AMENDED: it is
+   RADIAL ALIAS STRUCTURE, not raw aperture — D grew 8× (240→1980) with
+   zero-to-negative gain whenever growth was angular or sub-coherence.
+5. Local reads and prior-free joint decode are FLAT in the lattice on
+   school8 (.026–.032 med; L1 1.00 everywhere; succ ~0.80 = the twin-room
+   alias ceiling, a store-independent env property — banked). Also note:
+   the no-relo generalized joint decode hits L1 1.00 at K=32 WITHOUT the
+   5.3/12.8 anchor rings — a rigid 2D shift only realigns axis-aligned
+   components, so the 1D "×2 ladder joint-aliases at 2 m" intuition does
+   not produce a global degeneracy in 2D.
+
+STATA PHASE 2 (the 113-precedent discipline: real data, floorplan GT,
+before banking; fixture ATE 0.196, 229 segs):
+
+  oct4x60      240  152 B | loc32 .022/.020 | joint .025/.85/.93 | .5714/.5674/.5853
+  hoct9x60     540  342 B | loc32 .028/.027 | joint .027/.95/.95 | .6685/.6566/.6723
+  span11x60    660  418 B | loc32 .022/.022 | joint .023/.90/.95 | .6677/.6553/.6712
+
+REPLICATES AND IS 2–3× LARGER ON REAL DATA: extraction +.096–.097 AUCgt
+(float .5714→.6685), 2b +.088–.089, SUM32 +.086–.087; prior-free global
+decode success .85→.95 (hoct9) / .90 (span11), L1 .93→.95. AND the
+capacity tail extends: local-read p90 at K=96/128 collapses from
+.506/.475 (float) and .300/.742 (2b) at oct4x60 to .104–.150 on span11x60
+— the whitening-across-rings effect scales the usable K band on real
+data. span11x60 recovers hoct9's local-read dilution entirely (.022/.022
+= baseline) at an extraction tie; hoct9 keeps the joint-succ edge.
+
+RECIPE (fidelity space; matcher space untouched): span11x60 PRIMARY
+(D=660, 418 B/seg 2b vec+der; 11 rings 0.125–4 m half-octave × 60 angles)
+— extraction +.096, joint succ +.05, K-tail extended, local reads intact;
+hoct9x60 LEAN (D=540, 342 B/seg) — max extraction/joint-succ, −6 mm local
+read. Fine end stops at 0.125 m (coherence floor); do not add angles.
+On-fabric encode notes: half-octave = ONE extra projection pass (√2-scaled
+angle LUTs) then octave bit-slices as today; open-segment accumulator at
+D=660 = 10.6 KB of SPRAM (int32 I/Q, vec+der); der costs NO new projection
+(cross_a = ±u_{a∓30}, the index-shift identity — per-ring 2π/λ scale
+applied at laptop decode); bit-slice envelope caps λ_min ≈ range/128
+(~8 cm at 10 m) — moot given the noise floor. Streams at ~130 B/s at
+0.3 seg/s. Ledgers: scratch_biglat.log / biglat2.log / biglat3.log;
+stores cached per-lattice in the session scratchpad.
+
+## 2026-07-12 — v7 standalone ("dumb-cable") golden model: INTEGER TRACKER ≡ LIVE HOST TRACKER to 2 mm (ice40/host/solo.py)
+
+User requirement: the chip must run SLAM standalone (host = sensor cable;
+pose streamed out — it is tracked on-chip anyway; map codes dumped on
+request). v7 golden model built on the accepted v3–v6 goldens (imported,
+never edited): SoloTracker = FabricLoc ported to pure ints — anchor table
+(U-unit xy, TAU/960 heading, Q15 cos/sin ROM mapping), rel/pose via
+round-half-up Q15 rotates, 7×7×5 sweep around the int-composed odometry
+prediction, first-max argmax, one edge-recenter retry, INTEGER parabolic
+sub-grid refine (guarded trunc-toward-zero divide, RTL: small serial
+divider off the critical path), EMA gate as ema += (score−ema)>>6 with
+commit at 29·(ema>>6) (≈0.45) and relock at 35·(ema>>6) (≈0.55),
+re-search every 12 lost kf on 15×15×7. Fold path (v7b): encode_int_at =
+integer SE2 point transform (Q15 rotate + U translate) INSERTED between
+the az→xy and u-projection stages — fold-at-pose lives in POINT space,
+reusing the encoder verbatim; derivative vector costs NO new projection
+(cross_a = ±u_{a∓30} index-shift identity; per-ring 2π/λ scale applied at
+laptop decode); freeze = mcode_int comparator (|I|≥|Q| + signs), proven
+≡ G.mcode_from_vec including the tie. Selftests: mcode equivalence (4096
+random + forced ties), identity-transform encode bit-equal, fold→match
+convention (peak at −t, 4 mm wander at 1500 pts = content noise), Q15
+round-trip.
+
+PARITY BENCH (the acceptance): live.FabricLoc (float, the deployed host
+logic) run OFFLINE through a fabric shim over the same golden match_int,
+BOTH trackers fed the identical item stream (looped Feed, per-pass noise,
+3 passes, GT scoring only):
+  classroom/orbit (26 segs, 555 kf): solo med 0.053 p90 0.077 | live
+    0.053/0.077 | TRACE DIFF med 0.002 p90 0.004 max 0.099
+  mixed/orbit (67 segs, 1278 kf):    solo 0.082/0.131 | live 0.082/0.128
+    | TRACE DIFF med 0.002 p90 0.007 max 0.424
+The integer contract reproduces the deployed tracker to quantization
+noise (2 mm median). The earlier 5.3-vs-3.2 cm concern was PROTOCOL (the
+banked live selftest scores a different window/reference), not a defect:
+live itself scores 0.053 on this protocol. Note: without the integer
+parabolic refine the med is unchanged and only p90 moves 0.079→0.077 —
+the refine is nearly free on accuracy here but kept (matches live
+semantics; the rho-snap bias hypothesis for the gap was WRONG — the gap
+was protocol).
+
+v7 RTL scope validated by this model: resident map store (2b codes +
+anchor table in the free SPRAMs; 35 KB school8-scale), on-chip candidate
+grid generator feeding the existing 0x08/argmax machinery, EMA/commit
+FSM (shift-add only + one small divider), point-space fold pass (4 Q15
+mults/point + existing encode datapath), sign-comparator freeze. Next:
+RTL (top_solo variant), sim gate vs solo.py bit-exact, then hw-replay.
+
+## 2026-07-12 — BSC vs FHRR at EQUAL BITS (dimension-compensated, user fairness conditions): phasor group vectors dominate by ~4× bundle capacity; BSC knee K*≈8–16 vs phasor 32–48 (scratch_bsc.py)
+
+User challenge to the banked binary verdict: it compared bit-widths at
+fixed D — a fair spatter-code test needs DIMENSION COMPENSATION, FINE
+codebook resolution, and a MULTI-SCALE kernel stack. This cell meets all
+three: global relocalization on the school8 fixture (same paired probes
+as capacity2b/biglat), one 480-BIT vector per group on both sides.
+Phasor side = the banked 2b-SUM K=32 group vector (240 comps × 2b; joint
+med 0.035, succ 0.70, L1 0.90). BSC side = majority bundle of
+XOR-bound (position ⊗ content) pairs at 480 bits; position codes =
+binarized multi-scale random-Fourier (9 kernel scales = the winning
+0.25–4 m ladder), codebook decode at 2 cm atoms over the same ±8 m
+domain/locality prior as the joint decoder; content codes = 480-bit SRP
+of the translation-invariant MAIN-band magnitude profile (measured
+descriptor quality: 0.852 bit-agreement query-vs-stored — NOT the
+bottleneck; B1 ≈ B2).
+
+  BSC K=  1 (301 vecs, 17.6 KB): med 0.000  succ@0.10 1.00   <- pipeline valid
+  BSC K=  4 ( 76 vecs,  4.5 KB): med 0.014  succ 0.78
+  BSC K=  8 ( 38 vecs,  2.2 KB): med 0.020  succ 0.75
+  BSC K= 16 ( 19 vecs,  1.1 KB): med 0.105  succ 0.50
+  BSC K= 32 ( 10 vecs,  0.6 KB): med 3.336  succ 0.07        <- collapse
+  PHASOR 2b-SUM K=32 (10 vecs, 0.74 KB): med 0.035, succ 0.70 (banked)
+
+VERDICT: at equal bits and matched K=32, phasor 0.70 vs BSC 0.07 succ —
+the binary bundle needs ~4× the vectors (K≤8) to function, and even then
+carries meter-scale p90 tails (K=8 p90 1.02). MECHANISM: majority-bundle
+per-bit agreement decays as 0.5 + √(2/πK)/2 (~0.57 at K=32 → ~34-bit
+signal gap), which drowns under the extreme-value tail of the fine
+codebook (~4k effective independent atoms); the phasor bundle instead
+accumulates crosstalk coherently in the correlation sum (superposition
+SNR with full complex geometry, further whitened by nmag flattening).
+Fairness notes: binarized-RFF is the strongest standard BSC position
+code family (smooth multi-scale Hamming kernels); exhaustive codebook
+argmin is the optimal decode for bundle-vs-codebook; same locality prior
+both sides; K=1 control proves the pipeline. Combined with the banked
+arithmetic-knee result (8-bit ops required) and the structural argument
+(no continuous translation/derivative/frozen-content transforms in XOR
+algebra), the full picture: BSC-style density is already harvested where
+it wins (2b store, i^mc multiply-free map operand) and loses everywhere
+else it was given a fair shot. Ledger: scratch_bsc.log.
+
+## 2026-07-12 — v7b self-mapping golden bench: fully standalone SLAM works; beats odometry 3.9× on revisit-rich worlds, odometry-grade on long tours; gated folding REJECTED (solo.py selfmap)
+
+The user's 5-min scenario end-to-end at golden level: NO python SLAM
+anywhere — odometry boot (5 kf), then the integer tracker localizes
+against segments the integer mapper itself froze (fold at committed
+poses, 5-kf segments, ungated), map growth stops after pass 1, replay
+tracks the self-built map. GT scoring only; raw dead-reckoning chain
+reported as the honest baseline.
+
+  classroom/orbit: 37 self-frozen segs | mapping med 0.072 p90 0.093 |
+    replay med 0.073 p90 0.099 max 0.175 | RAW ODO med 0.281 p90 0.468
+    -> 3.9× better than dead reckoning, fully standalone; ~2 cm worse
+    than tracking a python-SLAM-built map (0.053) — the frontend gap.
+  mixed/orbit: 85 segs | mapping 0.853/1.636 | replay 0.887/1.630 |
+    RAW ODO 0.900/1.886 -> odometry-grade: the self-map is odometry-
+    anchored; on a long single loop the tracker cannot beat the gauge
+    it inherited (internally consistent, globally warped — the anneal
+    study's gauge lesson in system form). Stable, never diverges
+    (replay ≈ mapping err; 1 relock, no runaways).
+
+GATED FOLDING (fold only on committed kf) REJECTED: starvation feedback
+— segments freeze rarely -> coverage gaps -> more holds -> fewer folds
+(mixed: 32 segs, 1149 holds, err 0.85->1.31 mapping / 2.15 replay).
+Same do-no-harm feedback class as the banked cascade veto-retry.
+
+RTL scope implications: v7a (standalone localization, preloaded map) is
+fully golden-proven at host parity; v7b (standalone mapping) is stable
+and demo-grade on revisit-rich floors as-is; closing the gap to python
+pass-1 quality (classroom 0.008) needs the sliding local-map frontend
+port (per-kf fine registration against RECENT/open content + innovation
+gating) — filed as v7.1, not required for the 5-min demo. GATE_FOLD
+constant documents the rejected branch in solo.py.
+
+## 2026-07-12 — spare-SPRAM sample reservoir (random-overwrite history + opportunistic re-match-and-refold): NEGATIVE on this system, with the mechanism pinned (solo.py bench_reservoir)
+
+User proposal: use free SPRAM as a reservoir of past samples — per kf,
+with chance p, overwrite a random slot (age mix decays exponentially,
+tau ~ N/p kf: the user's mem/chance lever — 16 slots @ p=0.25 -> tau≈64
+kf); opportunistically re-match a stored sample against the matured map
+and re-fold at the improved pose (correction segments, quantized once —
+A2h-compatible, no negate/requant; matcher space untouched).
+
+Implementation (golden, solo.py): 16 slots of raw scan ints + seed pose
++ state tag; every 4th kf re-match one random slot — two-stage (coarse
+re-search -> fine 7x7x5 + integer parabolic) + DO-NO-HARM gate (accept
+only if matched score strictly beats the stored capture pose re-scored
+against the same segment — GT-free). Scoring = fold registration error
+(capture vs refold, paired; GT scoring-only).
+
+  classroom/orbit: 62 acc/122 rej | cap 0.073 -> refold 0.086 med
+    (improved 19%); hold-captured 0.023 -> 0.081 (degraded)
+  mixed/orbit:    153/272 | 0.914 -> 0.939 (improved 55% = coin flip)
+  mixed/reverse (hold-rich, 960 holds): 203/218 | 1.596 -> 1.645;
+    hold-captured 2.887 -> 2.930 (no repair — map gauge itself warped)
+  BLACKOUT DIAGNOSTIC (forced 20-kf blind windows every 150 in replay,
+  labeled): classroom cap med 0.053 -> refold 0.086 (blind-window
+  captures only 3-5 cm off — BELOW the refold floor); mixed unchanged.
+
+VERDICT: NEGATIVE for adoption on this system. Mechanism (three parts):
+(1) REFOLD FLOOR ~8 cm (content-pull + rho-snap + grid) sits ABOVE
+capture errors wherever the map is good — tracked captures 5-7 cm, even
+20-kf-blind captures 3-5 cm (locally excellent odometry); (2) where the
+map is bad (long-tour gauge warp), re-matching reproduces the map's own
+gauge — cannot recover truth; (3) the do-no-harm SCORE gate does not
+select GT improvement (accepted refolds GT-neutral-to-worse; 2/3
+rejection rate yet no quality lift) — the banked COMMIT-POLICY WALL
+extends to re-registration: score-vs-map cannot distinguish "better
+aligned to truth" from "regressed to the map's bias", because capture
+and map are the SAME estimator (common-mode errors). The anneal study's
+in-basin win (A2/A2h) required externally-injected drift between content
+and gauge — the live loop has none.
+
+Surviving design notes: (a) tau = N/p confirmed as the reservoir age
+lever; (b) state-tagging slots (hold/relock capture) is the right
+GT-free selector shape IF a platform ever exhibits the required window
+(bad odometry + good map — e.g. heavy wheel slip); the SPOT hardware
+check is the only path to revisit. Default: spend the spare SPRAM on
+map capacity / the fidelity space instead. Ledger: solo.py constants
+RES_N/RES_P/RES_Q/BLACKOUT document the arms.
+
+### Webvis integration (2026-07-12, uncommitted): recipe ladders in the interactive simulator
+
+demo/index.html sandbox gains a LADDER select (Encoder group): oct6
+(existing), span11 √2 (RECIPE), hoct9 √2 (recipe lean), phi — sandbox
+scale = real/2.5 (fine ring 0.05 ≙ 0.125 m), so span11 doubles density
+on the existing oct endpoints exactly. Selecting a recipe ladder snaps
+angles to 60 (the measured cap); the lattice chip now shows D (+ B/vec
+in binary mode). Intel/real-data lattice stays PINNED (oct60) per the
+6daccc1 lesson. Validation: jsc parse clean (SyntaxError control
+verified), 46/46 $() ids defined, makeLattice smoke through the real
+code path (span11 D=660, hoct9 D=540, finite k-vectors); rotation=
+permutation is ring-independent (phi ladder = the standing self-test).
+
+Addendum (same session): span15g ladder added per user ("bump largest
+size >16 m"): span11 + octave coarse extension {3.2, 6.4, 12.8, 25.6}
+(15 rings, D=900@60). lam_max 25.6 m > the 16x10 m sandbox worlds ->
++-12.8 m single-ring unambiguous window covers the whole floor = global
+anchor with ZERO coarse ambiguity (real-scale analog x2.5: 8-64 m
+anchors on a ~40 m floor). Thermometer gate verified safe: MIN_SCALES=3
+coarsest rings never fade (the gate anti-aliases FINE rings on sparse
+far returns — opposite direction). Smoke: D=900/15 rings/lamMax 25.6
+through the real makeLattice; parse + 46 ids still green.
+
+### Webvis top-room glitch (user report): corr surface AUDITED CONSISTENT; root cause = deploy-UNFAITHFUL global-bundle 2b store in binary mode; FIXED with per-segment freeze semantics
+
+User: tracking glitches entering the top room of the sandbox "room"
+world, worst in FPGA/binary mode. Audit: the correlation surface IS
+matched properly — score(δ)=Re Σ conj(M)·S·e^{iW(guess+δ)} (peak-at-
+alignment convention verified), the odometry-prior penalty is applied
+in place to the same array the argmax reads, bestSurf keeps the
+winning-θ slice, and binary mode passes the identical quantized map to
+match and panels. No display/optimizer mismatch.
+
+Root cause (headless jsc repro, fold-at-GT diagnostic, oct60, room
+world, patrol orbit + top-room pass, 5 paired probe offsets): binary
+mode quantized the WHOLE global accumulation (quantMapView on hundreds
+of superposed scans — far past the banked bundle-quantization knee);
+the dominant main-room phase rounds away weak/new-room contributions.
+  probe (top room)   float 0.018 | global-2b 0.024-0.033 | seg-2b 0.009-0.024
+  probe (main ctrl)  float 0.015-0.020 | global-2b 0.043-0.045 | seg-2b 0.021-0.030
+  first entry (no top content): float 0.024 | global-2b 0.076 (at the
+  ±0.10 search-box edge = the visible glitch)
+The real fabric freezes 2b codes per ~6-kf SEGMENT and the map is
+their sum. FIX (demo/index.html, uncommitted): binary mode now keeps
+an open float segment accumulator + a frozen sum of per-segment 2b
+codes (freeze every SEG_KF_SB=6 kf; decay applied to both; sbQ := 
+frozen+open so matcher and panels stay identical). Old single-caller
+quantMapView(global) removed; parse + 46 ids green.
+
+Float-mode residual glitchiness at entry is the KNOWN corridor-regime
+wall (the top strip is 12x2.5 m, two parallel walls -> along-axis
+slide) + doorway-turn error under the constant-velocity guess — which
+is FAITHFUL to the shipped lidar-only pipeline (odometry fusion exists
+behind the prior-γ slider for the FPGA-live analogue). Not patched:
+blind gates are the tracker-v2 regression class.
+
+## 2026-07-12 — golden-ratio ladders (user: "phi recipe, 1 cm .. >2 m"): NEGATIVE on real data — the school8 2b edge was a synth artifact; √2 recipe stands (scratch_biglat4.py)
+
+Cells: phi13x60 = 0.01->3.22 m (13 rings, D=780, 494 B/seg; 6 rings below
+the 12.6 cm coherence floor — registered dead) and phi8x60 = 0.125->3.63 m
+(8 rings, D=480, 304 B/seg; phi spacing per se, no dead rings). phi =
+maximally incommensurate ratios (slowest CF convergence).
+
+school8: phi13 .5902/.5784/.5538, phi8 .5818/.5721/.5572 (AUCgt f/2b/SUM),
+comb annihilated both (.03/-.03), local/joint flat. The 2b arms BEAT every
+sqrt2 ladder's 2b (best .5695) by +.003-.009 — a candidate "quantization-
+error decorrelation" mechanism, flagged borderline (an order below the
+banked ladder effects) and sent to phase 2 per the 113 discipline.
+
+STATA (phase 2): the edge INVERTS —
+  phi13x60: .5793/.5590/.6011 | joint .030/.85/.93 | local .026/.026
+  phi8x60 : .6063/.5943/.6287 | joint .029/.88/.88 | local .028/.023
+  vs hoct9x60 .6685/.6566/.6723 (joint .95/.95), span11x60 .6677/.6553/
+  .6712 (joint .90/.95): phi loses float by -.06, 2b by -.06, joint succ/
+  L1 by .05-.07. Only local reads tie.
+
+VERDICT: phi ladders NEGATIVE for the fidelity recipe; the sqrt2 half-
+octave family stands (span11x60 primary / hoct9x60 lean). The school8
+phi-2b edge joins the phi-prime angle recipe (2026-07-10) as the second
+golden-ratio synth-sandbox artifact refuted on real data — mid-band ring
+PLACEMENT luck on school8 geometry, not a store mechanism. phi's comb
+annihilation replicates (incommensurability does kill the alias) but the
+sparser mid-band (ratio 1.618 vs 1.414) costs more extraction than the
+comb kill buys — density in the content band is the binding constraint.
+Webvis: phi8/phi13 stay in the ladder selector labeled REFUTED (negative-
+showcase convention). Ledgers: scratch_biglat4.log, biglat4_stata.log.
+
+## 2026-07-12 — v7.1 best-of-K segment matching (solo): STRICT WIN for localization (beats the live host tracker), REGRESSION while self-mapping a drifting map — mode rule adopted (solo.py K_TRY)
+
+The mixed-world self-mapping gap analysis pointed at segment handoffs
+(banked doorway battery: segment-switch = 1.6-3x glitch lift; the live-v2
+raw-score handoff REGRESSED and was reverted). v7.1 insight: in the 2b
+code domain every segment vector has norm sqrt(D) (phase-only codes), so
+raw totals ARE comparable across segments — the float-domain thrash
+mechanism does not apply; add incumbent HYSTERESIS (challenger must beat
+the last-used segment by 66/64 ~ 3%) against residual flapping.
+Implementation: SoloTracker._sweep_seg factored out; K_TRY nearest
+segments swept per kf, best effective score wins; K_TRY=1 preserves v7.0
+bit-parity (gate re-verified: classroom 0.053/0.077, trace diff 2 mm).
+
+LOCALIZATION vs a coherent (python-built) map, K=3 — strict win on BOTH
+worlds and better than live FabricLoc on the identical stream:
+  classroom: med 0.049 p90 0.063 max 0.234, holds 0
+             (K=1: 0.053/0.077/0.264, holds 34; live: 0.053/0.077/0.266)
+  mixed:     med 0.080 p90 0.104 max 0.466, holds 6
+             (K=1: 0.082/0.131/0.876, holds 55; live: 0.082/0.128/0.876)
+SELF-MAPPING, K=3: classroom IMPROVES (med 0.060 p90 0.079 max 0.092,
+holds 113->0) — the handoff mechanism exactly as predicted; mixed
+REGRESSES (0.853->1.436 mapping, 155->434 holds): on a gauge-warped
+self-built map, adjacent segments carry INCONSISTENT gauges and best-of-K
+mixes them (gauge mixing, not thrash).
+
+ADOPTED RULE (v7 contract): K=3 whenever the map is gauge-coherent
+(preloaded/frozen — the 5-min demo readout mode), K=1 while self-mapping
+a drifting map. RTL cost: K sweeps/kf (3 x 245 cands x 488 cyc ~ 0.36 M
+cyc ~ 15 ms @24 MHz — real-time at kf rate) + one 32x6 multiply for the
+hysteresis bonus. last_aid tracked incl. relock path.
+
+## 2026-07-12 — line-prior map cleanup (matching pursuit with exact line atoms): reads the store at 5 cm; GT-frame precision is WARP-bound; per-segment decode is mandatory (scratch_lineprior.py)
+
+User directive: "try cleanup methods (e.g. a line prior)". Method: peak-
+guided matching pursuit with EXACT line-segment atoms (closed form
+A_d = e^{i W_d.c} sinc(W_d.h)); greedy subtract of the LS-projected atom;
+stop at tau x first peak. Scored: line precision (sampled line points ->
+nearest GT wall) + recall (GT wall length within 0.15 m), school8
+fixture, span11x60 recipe store (+oct4x60 control), float + 2b arms.
+
+1. GLOBAL-bundle pursuit (301 segments superposed — past the knee) is the
+   WRONG object: prec p50 0.42-0.54, recall 0.05-0.20. The peaks are the
+   banked low-AUC raster's crosstalk.
+2. PER-SEGMENT pursuit (deploy-shaped: each streamed segment decoded in
+   its own +-4 m domain, 5-6 scans ≪ knee): recall 0.68-0.72, prec p50
+   0.283-0.393 (float/2b). +CROSS-SEGMENT CONSENSUS (keep lines
+   corroborated by another segment within 0.20 m/15deg): prec p50 0.226
+   float / 0.295 2b at recall 0.59-0.60.
+3. Fine atom refine (perp offset x orientation micro-search) moved p50
+   only 0.296->0.283 — placement quantization is NOT the limiter.
+4. DECOMPOSITION (the decisive check): the same consensus lines scored
+   against the map's OWN gauge (input-scan cells): p50 0.048 m. The
+   0.226 GT-frame figure is the fixture's store WARP (ATE 0.954), which
+   bounds every readout equally. The pursuit reads the store at 5 cm.
+   The p90 tail (~1.4 m, BOTH frames) = genuine junk atoms (secondary/
+   clutter fits) — amp-threshold/refit filters are the filed follow-up.
+
+VERDICT: line-prior cleanup WORKS as a parametric readout — ~2.9k lines
+≈ 50 KB replace the raster view at 5 cm store-gauge precision and 0.6
+recall, and it composes with the fidelity stream (per-segment decode on
+the laptop). It does NOT beat the banked visibility readout's 0.150
+GT-frame p50 on a clean live map — that comparison needs the same map
+gauge (live classroom ATE 0.008 vs fixture 0.954); on equal footing the
+methods are complementary (visibility = first-return points; pursuit =
+parametric lines + compaction). Adoption: laptop display-layer option;
+webvis/live integration + junk-tail filters filed. Ledgers:
+scratch_lineprior*.log (3 runs).
+
+## 2026-07-12 — sample-replay-augmented frontend on REAL data: median wins are real and transfer; closure-graph variance and the aliasing wall forbid default adoption; per-environment OPT-IN banked (scratch_replayfront.py)
+
+User observation (webvis): the per-frame sample replay made the sandbox
+system more stable. Ported to the pipeline as ReplaySLAM (subclass;
+shipped core untouched): per kf, replay one random reservoir slot —
+re-match against local_bundle with the frontend matcher + frontend gate,
+refine the stored pose in place on strict correlation improvement, fold
+at the stored pose (weight 0.3) into the nearest segment; save snapshots
+p=0.25/kf with the refined slot protected from overwrite. Arms: OFF
+(gate), R0 (match-only control), R1 (folds restricted to the frontend
+recency window — the shipped philosophy), R2 (unrestricted cross-pass).
+N=16, one fixed config, rseed 11 (+12/13 band on fr101).
+
+GATES: OFF reproduced the banked suite EXACTLY on all four logs (fr101
+1.881/53, fhw 0.981/559, belg 2.644/1, stata 0.202/99). R0 ≡ OFF on all
+four — the extra matching + slot refinement alone is a true no-op; folds
+are the only active ingredient.
+
+  fr101: OFF 1.881 | R1 band {1.396, 1.648, 4.412} (med 1.115/1.303/
+         1.492 — BETTER than 1.551 in EVERY draw; loops 28/55/52)
+         | R2 2.461 (loops 57)
+  fhw:   OFF 0.981 | R1 0.241 (med 0.841->0.218 — 4x) | R2 0.701
+  belg:  OFF 2.644 | R1 4.283 | R2 2.324 (med 1.859->1.274; 1-9 loop
+         noise log — single draws)
+  stata: OFF 0.202 | R1 0.246 (loops 99->83) | R2 14.949 (loops 99->8
+         — CATASTROPHE)
+
+VERDICT: NOT a default — the multi-log gate fails (flagship stata loses
+mildly at R1; fr101 carries a 4.4 tail draw; belg single-draw loss).
+BANKED AS PER-ENVIRONMENT OPT-IN (same status as hex-for-belgioioso):
+R1 on open, dense-closure, low-aliasing halls — fhw-class, exactly the
+webvis sandbox regime — is a 4x lever.
+
+Mechanism (three parts): (1) The median wins are REAL and transfer —
+replay folds improve typical frontend registration on fhw and on every
+fr101 draw (the user's webvis observation, confirmed on real data).
+(2) The cost channel is CLOSURE-GRAPH INTERFERENCE: replay-folded
+content enters segments at replay-time gauge; graph corrections assume
+per-segment gauge purity, and the mixed content shifts candidate/veto
+statistics — closure counts destabilize (fr101: 28-55 across replay
+seeds; the tail draws are closure-pattern draws). fhw tolerates it
+because 400+ dense closures re-pin the gauge continuously. (3) R2's
+stata catastrophe is the VERIFICATION WALL in system form: unrestricted
+cross-pass re-folding is un-vetoed cross-pass alignment; on the aliased
+flagship it fuses wrong-pass content and collapses the closure graph
+(99->8). The frontend-recency law (old passes reach the pose only
+through gated loop edges) gains its strongest confirmation — 74x.
+
+Follow-up in flight: w-dose probe (RES_W 0.3->0.1 globally on fhw+fr101)
+— does the median win survive with the closure-variance suppressed?
+Ledger: scratch_replayfront.log (all arms, gates, bands).
+
+### n1 suite — the two open cells were already in the resumed ledger; open item CLOSED (scratch_n1suite_school.out, _band_fhw.out)
+
+The banked n1 verdict ("dense-head deploy option, missing school-s12 +
+fhw band") is completed by cells the resumed run had already produced:
+school8-p0-s12: b2 0.749/115 loops/prec 0.62 vs n1 0.682/113/0.62 — n1
+equal-or-better on the second seed (dense-regime safety confirmed;
+s11's precision lift 0.53→0.72 stands as the bigger effect). fhw band
+(point/interp family): n1 {1.669 eps0, 2.022, 1.200, 2.811} vs b2
+{2.837, 2.921, 2.543, 2.801} — n1 sits below b2's ENTIRE band in 3 of 4
+draws, the one sparse-family log where n1 helps as a band. AMENDED
+regime read: dense (≥800 t/s) = safe/better incl. both school seeds;
+sparse = worse (belg band-separated, fr079, fr101) EXCEPT fhw (156 t/s,
+largest knee margin AND largest basin swing — knee-distance stays
+necessary-not-sufficient). NOT-suite-safe verdict unchanged; the
+dense-head option is now fully evidenced.
+
+### v7 RTL sim-gate fixture: generated and round-trip VALIDATED (ice40/host/solo_vectors.py)
+
+The top_solo acceptance fixture now exists in the v3-v6 shape: from the
+golden on a deterministic classroom feed — build/solo_map.hex (26 segs,
+SPRAM image, 4 codes/byte LSB-first), solo_anchors.hex (16 B/entry:
+x_u i32, y_u i32, ah_q i16, cq i16, sq i16 — cs values proven equal to
+cs_of(ah)), solo_feed_k{1,3}.bin (220 kf: n_pts + (az,r_mm,w) points +
+pred pose) and solo_expect_k{1,3}.bin (pose + ai + score + state,
+17 B/record). VALIDATION: a fresh SoloTracker fed ONLY from the file
+images reproduces both expect streams BIT-EXACTLY (220/220 kf, K=1 and
+K=3). The RTL testbench consumes these directly; any deviation is a DUT
+bug by construction.
+
+### v7 RTL stage 1 — resident-map segment addressing: SIM GATE PASS (encoder_solo.v, tb_solo_bridge.v, solo_bridge.py)
+
+encoder_solo.v = the silicon-accepted v6 core + exactly 2 lines (mc_seg
+port; mc_a = {mc_seg, ...} for both write and prefetch paths) — SPRAM
+layout {seg[5:0], ring[1:0], j[5:0]}, one code/word, 64 segments/SPRAM
+(4-codes/word packing filed). Gate: encode a fixture scan (from the
+validated solo vector set), preload segments 8 AND 9 at their bases via
+the mc_we path, run 8 candidates interleaving the two segments:
+encode readback 240/240 bit-exact vs golden Q; all 32 per-ring partials
+bit-exact vs ssp_ice40.match_int with the respective segment's codes —
+the base switch is exact. Two tb lessons (documented in the tb): (1) mc
+preload must use the {ring, j} 64-stride layout, not linear 0..239 (the
+x-at-j>=48 signature); (2) after `clear`, wait !busy — start is only
+honored in S_IDLE (the dropped-point-0 signature: every component off
+by ~one point's mass). Also characterized: ring 3's final accumulate
+lands via the S_MD drain ON the m_done edge; single-shot matches with a
+halted engine are fine for reads AFTER m_done, and the tb runs
+candidates hot (2x back-to-back) matching deploy batch semantics.
+
+## 2026-07-12 — chain-cap-8 validation bands: the stata-lean STABILIZER is REAL (med 1.48→0.26 on fresh draws); spot no-op; fr101-lean mild cost — per-config option, not a lean default (scratch_postsuite.log)
+
+Open item closed with fresh eps-bands ({0, 1e-6, 1e-3 s1, 1e-3 s2}) via
+the CapSLAM harness (selftest: cap=None ≡ parent BIT-EXACT, shipped +
+lean, re-proven):
+  fr101-lean: none {1.132, 2.748, 1.670, 3.080} (med 2.21) vs cap8
+    {2.144, 2.808, 2.188, 2.921} (med 2.50) — band NARROWS (spread 1.95
+    →0.78) but loses the good draws; no benefit.
+  stata-lean: none {2.122, 2.988, 0.835, 0.170} (med 1.48) vs cap8
+    {0.288, 0.225, 0.133, 0.305} (med 0.26, max 0.31 vs 2.99) — the
+    harvested stabilizer claim REPRODUCES on fresh runs; first knob that
+    tames the stata-lean cascade.
+  spot-lean: {0.036-0.037} both arms, counters near-identical — chains
+    never reach 8 on the target platform; do-no-harm.
+ADOPTION: cap=8 = a per-config stabilizer for aliasing-heavy LEAN
+deployments (stata-class); NOT a global lean default (fr101-lean band
+floor 1.13→2.14). Matches the banked capacity story (chain sums past
+K≈8-16 at 2b dilute the loop-attempt matched filter on aliased maps).
+
+Addendum to the replay-frontend entry — w-DOSE INVERTS BY LOG:
+  fhw  R1 w=0.1: 1.032 (≈OFF 0.981; the 4x win at w=0.3 EVAPORATES)
+  fr101 R1 w=0.1: 1.231, med 0.942 (BETTER than OFF 1.881/1.551 and
+    better than every w=0.3 draw {1.40-4.41})
+No global dose wins both logs — the per-environment opt-in verdict
+stands, now with (environment, dose) as the option surface. Mechanism-
+consistent: fhw's win is content-mass-driven (needs full folds), fr101's
+is registration-refinement-driven (small nudges suffice; large folds
+destabilize its closure graph).
+
+### v7 RTL stage 2 — solo_tracker.v: FULL STEP LOOP 220/220 BIT-EXACT (sim gate PASS)
+
+The on-fabric tracker FSM (rtl/solo_tracker.v, ~500 lines: nearest-anchor
+serial d² scan over the anchor EBR; Q15 rel/pose transforms; 7x7x5
+candidate grid through the encoder_solo core with one edge-recenter
+retry; tot EBR + first-max argmax in golden candidate order; integer
+parabolic refine via a UNIT-PROVEN serial trunc divider; EMA commit gate
+29/64 shift-add; wrap960 heading branch select; hold path) replays the
+entire 220-kf classroom fixture BIT-EXACTLY against solo_expect_k1 —
+poses, segment ids, scores, and states, 11 holds included
+(tb_solo_step.v + solo_step.py; per-kf sh golden-fed in this pass).
+
+Three RTL defects found and fixed by unit isolation + golden-internal
+reconstruction (all banked as classes): (1) serial multiplier OR'd
+overlapping partial products (unit test caught; replaced with a
+registered combinational multiply for the semantics gate — any LC-lean
+serial substitute must pass the standalone MUL test first); (2) unsigned
+part-select poisoning — $signed() required on mul_p[31:0] in
+expressions or >>> degrades to a logical shift (two sites; additions
+are immune, shifts/compares are not); (3) registered-RAM read pipeline
+off-by-one — address at phase n is readable at n+2, and the pc capture
+one cycle early silently returned pa (making every parabolic offset 0;
+found by reconstructing the golden y-triplet). Plus one tb-only lesson:
+$readmemh silently truncates an undersized memory (feed array), turning
+later keyframes into x — size arrays to the fixture, not the estimate.
+
+Stage 3a (on-chip shift_for) implemented behind SH_ONCHIP: OR of |Q|
+over a 240-entry readback scan has the same bit-length as max|Q|, so a
+priority encode reproduces shift_for exactly (~245 cyc/kf); gate rerun
+in flight. Remaining for top_solo: re-search FSM (parametric grid reuse),
+K_TRY=3 loop, UART top + preload/pose-stream commands, then build + hw.
+
+Addendum: stage 3a (on-chip shift_for) VALIDATED — 220/220 kf bit-exact
+with SH_ONCHIP=1 (scratch_solostep2.log). The v7 chip-side step loop is
+now fully self-contained: raw points + odometry pred in, pose out, with
+encode (v6 silicon-accepted), resident-map matching (stage 1), the
+tracker FSM (stage 2), and the shift scan (3a) all golden-gated.
+
+## 2026-07-12 — 10h autonomous block: consolidation
+
+User directives: replay stabilized the webvis — real-data experiments;
+cleanup methods (line prior); rework docs to the deploy corner goals;
+various experiments; 10h, no agents. All threads ledger-verified; OFF/
+control gates reproduced the banked suite exactly wherever applicable
+(9 gates total, all green).
+
+BANKED THIS BLOCK: (1) replay-frontend suite — median wins real and
+transfer, fhw 4x at w=0.3, fr101 prefers w=0.1 (1.231/0.942), stata-R2
+catastrophe = the verification wall in system form; per-(environment,
+dose) OPT-IN, not default. (2) line-prior pursuit — per-segment decode
+mandatory; 5 cm own-gauge readout; GT-frame precision is store-warp-
+bound; webvis integration (cLines). (3) v7.1 best-of-K handoffs —
+strict localization win (beats the live host tracker), gauge-mixing
+regression while self-mapping; K=3 = coherent-map mode. (4) chain-cap-8
+— stata-lean stabilizer REAL (med 1.48→0.26), spot no-op, per-config
+option. (5) n1 open cells closed from the resumed ledger. (6) docs
+reworked: FINDINGS A5-A9, corner goals (dual-space + SOLO corner),
+README silicon status, EXPERIMENTS catalogue, no-gos extended. (7) v7
+RTL: stage-1 resident map, stage-2 full tracker FSM, stage-3a on-chip
+shift scan — ALL 220/220 bit-exact in sim; fixtures round-trip
+validated; three RTL defect classes banked (OR'd partials, unsigned
+part-select >>> poisoning, registered-RAM read off-by-one) + the
+$readmemh truncation tb trap. REMAINING top_solo: re-search FSM, K=3
+loop, UART top, build vs LC budget, hw-replay — spec pinned, fixtures
+and gates in place. Shipped core untouched throughout; nothing
+committed (user commits).
+
+### v7 RTL stage 3b — re-search + RELOCK: 160/160 BIT-EXACT on the kidnap fixture
+
+The grid FSM parametrized (fine 7x7x5/T=12 vs wide 15x15x7/T=48/rho-step
+2, argmax-only — one machinery, mode flag), lost12 counter with the
+every-12th-hold trigger, relock gate 35/64, grid-commit relock pose.
+Fixture: a 320 U diagonal kidnap kick at kf 60 on the classroom feed —
+the golden absorbs 0.25 m kicks through edge-retry + basin re-registration
+(robustness note: fine tracking swallows kidnaps below ~0.3 m), 320 U
+lands in the (absorption, re-search-reach ±336 U) window and produces
+116 tracking / 42 holds / 2 RELOCKS. Gate: 160/160 kf bit-exact incl.
+both relocks (solo_feed_rl / solo_expect_rl; scratch_solorelock.log).
+Two width/parametrization defects found by the gate: bix/biy 3-bit
+truncation at wide indexes (compile-silent), and the relock HEADING
+recompose using the fine grid's bir-2 instead of bir*rstep-Roff — the
+failure fingerprint (relock-only, heading-only, exactly +4 rho with
+poses and scores exact) identified the site immediately. K1 220-kf
+regression rerun after the edits: in flight (fine-path constants
+identical by construction).
+
+The v7 chip-side tracker contract is now FULLY sim-gated: encode (v6
+silicon-accepted) + resident map + tracker FSM (all states, both grids)
++ on-chip shift scan. Remaining for top_solo: K_TRY=3 outer loop, UART
+top (preload/pose-stream/map-dump), yosys/nextpnr build vs LC budget,
+hw-replay.
+
+### Cleanup pass + web-demo rework (2026-07-12, post-block; gate-verified behavior-neutral)
+
+k1 regression after stage-3b: 220/220 PASS (the relock edits left the
+classroom gate untouched). CODE CLEANUP: solo_tracker.v header rewritten
+to the gated reality (stages 2/3a/3b, parametric grid, wide-aware relock
+heading) + dead regs removed (pb unused, committing write-only);
+tb_solo_bridge's stale ring-3-timing note corrected (the x was the
+preload-addressing bug; ring 3 lands on the m_done edge — double-run
+kept as a behaviour-neutral hot-batch exerciser); solo.py header carries
+the gate status + the stale no-refine line fixed; solo_step.py usage
+documented (suffix arg). POST-CLEANUP GATES: solo selftest ok, k1
+prefix 8/8, relock fixture 160/160 — all bit-exact. WEBVIS REWORK:
+sandbox controls reorganized into "Encoder" (thermometer/point/hex/
+angles) + "Deploy recipes (banked 2026-07-12)" (ladder incl. refuted-phi
+showcases, segment-faithful binary FPGA store, sample replay) with
+verdict-carrying tooltips; replay-fold legend chip added to the world
+caption; parse + 46 ids green throughout. live.html deliberately
+untouched (hardware-facing UI, validated in use — churn without a
+hardware retest is risk for no gain).
+
+## 2026-07-12 — cleanup formulations program, part 1 (P1/P2/P4): two both-log WINS (3b dead-zero store; coherence-weighted read), one refuted prediction (amplitude pruning), one dial (CLEAN gain) — scratch_cleanups.py
+
+Program from the cleanup-formulations synthesis (taxonomy + 5 laws).
+GATE: the pursuit baseline reproduces banked EXACTLY (raw 3449 ln p50
+0.283 rec 0.68; +consensus 2942/0.226/0.60; own-gauge 0.048) — after
+catching a PARAMETER-SHADOWING defect my gain edit introduced (a local
+`gain = amp²·na²` energy variable shadowed the new loop-gain parameter,
+turning deflation into res -= energy·amp·atom; all arms bit-identical =
+the fingerprint; banked defect class: parameter shadowing in hot loops,
+caught by the reproduction gate doing exactly its job).
+
+P1 (CLEAN loop gain + OMP refit) — PREDICTION REFUTED, DIAL BANKED:
+  gain=.25 (k=48): +cons 9892 ln, p50 0.308, rec 0.71 — a recall/
+    precision DIAL (+0.11 recall, −0.08 precision, 3.4x components),
+    not a win; own-gauge unchanged (0.049).
+  OMP joint refit + prune 0.15·median: ZERO atoms pruned — bit-identical
+    to baseline. The junk tail carries HEALTHY joint amplitudes (clutter
+    energy): with micro-refine already nil, the tail is now proven
+    MODEL-limited — no amplitude or placement criterion can remove it;
+    competing atom types (point/corner, P5) are the only lever left.
+
+P4 (dead-zero store) — BOTH-LOG WIN; 3b BEATS FLOAT ON BOTH LOGS:
+  (full-map imaging protocol; local32 med/p90 alongside)
+  school8: 2b .5662 -> mask@.10 .5705 -> mask@.20 .5846 -> 3b(nmag2,
+    dead) .6065 — ABOVE float-full .5984; local p90 .157->.112 at 3b.
+  stata:   2b .6553 -> .6566 -> .6593 -> 3b .6691 — ABOVE float .6677;
+    local med improves at mask@.20 (.020).
+  Mechanism: nmag=1 flattening has NO zero level (dead=True divides by
+  zero there — the deploy-shaped fix is a D-bit liveness mask at
+  +D/8 B/vec, or one true-zero magnitude bit = 3b/comp). Zeroing
+  sub-noise components removes junk phasors that even the FLOAT store
+  carries — quantized-with-liveness > float, both fixtures.
+
+P2 (coherence-weighted Wiener read) — BOTH-LOG WIN; the banked static-
+reweighting negative is SUPERSEDED by its adaptive form:
+  GT-free observable: per-ring mean |cos| over overlapping world-frame
+  segment pairs (<4 m). school8 profile has the warp signature (fine
+  rings lowest: .47/.41); stata profile lower overall (less pairwise
+  content overlap in corridors — the observable conflates overlap and
+  coherence; weights still land correctly).
+  school8 AUCgt: raw .5984 -> w=Cr .6068 -> w=Cr² .6144 (+.016)
+  stata:         raw .6677 -> .6716 -> .6730 (+.005)
+  Regime-consistent: strong on the warped store, small-positive clean.
+
+STACK (P4+P2, mechanism independence confirmed ~additive):
+  school8 .5984 float -> .6212 (3b-dead + Cr²; F1 .166->.187, +13%)
+  stata   .6677 float -> .6751
+READ-SIDE RECIPE for the fidelity stream: 3b dead-zero freeze +
+Cr²-coherence-weighted imaging (+ per-segment pursuit for parametric
+views). P3 (primitive-space gauge relaxation) in flight; P5 (corner/
+point atoms) is the tail lever. Ledgers: scratch_cleanups*.log.
+
+### P3 (primitive-space gauge relaxation): NEUTRAL, mechanism banked
+
+1646 line correspondences over 301 sequence-adjacent segment pairs;
+damped LS corrections come out TINY (|t| med 0.037 m, p90 0.088; |dth|
+p90 3.0 deg) and GT-frame precision is unchanged (0.226->0.233, recall
+0.60->0.61; own-gauge preserved). MECHANISM: adjacent segments already
+share their gauge (built consecutively against the same local map) —
+their line-to-line residuals are pursuit noise, not warp. The store's
+warp is SLOW (accumulates across passes); only long-range/cross-pass
+constraints see it, and those are exactly what the frontend-recency law
+forbids without verification (the wall, from the primitive side). Warp
+correction remains the closure backend's job. The machinery survives as
+a MERGE tool (aligned-line fusion for display), not a corrector.
+
+## 2026-07-12 — cleanup program part 2 (P5/P7): dictionary expansion NEGATIVE (energy-greedy can't model-select); the DRIVEN-PATH VETO is the tail-slayer — integrated into decode.py and the webvis (scratch_cleanups.py p5/p7)
+
+P5 (point + 90-deg corner atoms competing in the energy selection) —
+NEGATIVE as formulated: points claimed ~nothing (7/301 segments —
+energy selection structurally favors extended atoms; a point can never
+out-score a line on amp²·‖a‖² against extended residual, so greedy
+energy CANNOT do model selection without a complexity penalty); corners
+claimed 640 but degraded everything slightly (cons 0.234/1.508/0.58 vs
+0.226/1.413/0.60). Survivors: complexity-penalized selection filed;
+corner atoms remain analytic and available.
+
+P7 (driven-path veto — the physics-prior family, cleanup law 2): a line
+crossing the anchor trail cannot be a wall (the robot swept that
+space). Post-filter on the baseline pursuit:
+  school8: +cons p50 0.226 -> 0.087, p90 1.413 -> 0.731, recall
+    0.60 -> 0.59 (764 junk lines died; own-gauge 0.048 -> 0.042) —
+    the tail that survived amplitude pruning, micro-refine, and
+    dictionary expansion collapses under the physics prior.
+  stata: p50 0.110 -> 0.101, rec 0.56 -> 0.54 (caveat: stata line-p90
+    is GT-COVERAGE-limited — floorplan GT covers ~24% of kf — so the
+    school full-coverage numbers carry the evidence).
+The cleanup-law reading holds exactly: the tail was never a FITTING
+problem; it needed information the correlation doesn't have, and the
+cheapest independent source was in the stream all along (the trail).
+
+INTEGRATIONS (user directive):
+- ice40/host/decode.py: path_veto(anchor trail) before consensus —
+  v7 classroom chip-dump decode improves p50 0.232 -> 0.105, p90
+  1.879 -> 0.615, recall held (10 cm walls from a PHASE-ONLY oct60
+  dump).
+- demo/index.html: the line-prior overlay now draws the CONSENSUS +
+  PATH-VETO view (replay trail = IN.poses, dirty-flagged recompute;
+  tooltip carries the banked numbers; parse + ids green).
+Read-side recipe final form: per-segment pursuit -> path veto ->
+consensus (+ Cr² Wiener imaging + 3b dead-zero store from part 1).
+
+### v7 build session part 1 — corner-tuned silicon: the lean core, the scale-tuned freeze, and the LUT wall (2026-07-12)
+
+User directive: "time for the v7 build session — tune towards the three
+corners of the opt triangle to necessitate solutions across the spectrum
+and then consolidate into our final demo", plus "follow up on ... the
+3-bit freeze" and "make sure to tune scales".
+
+FREEZE STORE TUNED (scratch_liveness.py, school8+stata x span11/oct4,
+gate: banked P4 rows reproduced to the digit). The dump-faithful arms
+(unit phasors, no der — exactly what decode.py consumes) separate the
+banked 3b-dead winner into its three ingredients:
+  - liveness alone (int rule: M = max|I|,|Q| + min>>1; alive iff
+    2M >= Mmax_ring): AUCgt school-oct4 .5097 -> .5579; theta sweep
+    1/4..5/8: 5/8 wins school but LOSES stata both lattices -> theta
+    = 1/2 by the multi-log rule.
+  - ring scales alone (Mmax_r amplitude): ~nil (.5097 -> .5142).
+  - liveness + scales: BEATS THE FLOAT STORE on extraction on both
+    fixtures (school span11 .6138 vs .5984 float; stata .6714 vs
+    .6677) — entirely integer, from the same freeze scan, 30 B + 8 B
+    per segment on the wire (scales as 5-bit exp + 8-bit mantissa,
+    serial normalize).
+  - caveat banked: the mask degrades LOCAL matcher reads (p90 .120 ->
+    .183 at theta=1/2, .373 at 5/8) — liveness/scales are DUMP-side
+    only; the on-chip matcher keeps raw 2b codes.
+Golden: solo.liveness_int (+ mapper freeze plane); RTL: freeze pass A
+(mcode + per-ring Mmax via the T_SH-style scan) + pass B (compare +
+bit-pack) + pass S (serial exp/mant) in top_solo.v.
+
+REFINE A/B (scratch_v7refine.log, classroom): localization med
+identical, p90 +2 mm without the divider; SELF-MAPPING IS BETTER
+WITHOUT IT (pass-1 0.072->0.051 med, replay 0.073->0.055) — the
+sub-grid offsets appear to inject gauge jitter into the fold. The lean
+build drops the divider + tot RAM (parameter REFINE=0; single-env
+evidence, classroom).
+
+CS_OF TABLE-DEFINED (defect found by the exhaustive fold check in
+gen_luts): the float form round(32767*cos) is NOT quarter-symmetric at
+exact-half points (np.sin(pi/6) = 0.4999999999999999 vs np.cos(pi/3) =
+0.5000000000000001 -> 16383 vs 16384). Golden cs_of is now DEFINED as
+the folded 241-entry table (== the RTL ROM structurally); deltas vs the
+float definition: 5/960 headings, +-1 LSB. Fixture regen + benches
+re-run under the new contract.
+
+THE LEAN CORE (encoder_lean.v — the S-corner solution the corner
+tension forced): the v6 4-ring parallel pipeline is a T-corner design
+(488 cyc/cand, 6.6k poses/s) where the solo task needs ~250 cand/kf at
+5 Hz — 500x less. Serializing the rings (ONE 256x32 acc memory pair,
+ONE weight tree, 2 shared MAC16 for r*az / fold rotate / u-projection /
+match products, az ROMs quarter-wave folded 8 EBR -> 1 with EXHAUSTIVE
+fold equality checks in gen_luts.py) gives:
+  encoder: 3361 -> 2034 LUT, 28 -> 6 EBR, 8 -> 2 MAC16;
+  ~11 cyc/angle encode (~668/pt), ~23 cyc/angle match (~1385/cand) —
+  budget at 24 MHz / 5 Hz = 4.8M cyc/kf >> ~2.1M used (encode x2 +
+  sweep + freeze).
+Tracker reworked to match (16x16 saturating mult == golden clip, ONE
+MAC16; grid offsets and *12 by shift-add; REFINE param; quarter-wave cs
+ROM + SE2 service CS/ROT/IROT for the top). GATES: old fixtures k1
+220/220 and rl 160/160 (regression, old core + edited tracker);
+lean-core stage-1 bridge 32/32 + encode readback 240/240; lean l1
+(REFINE=0 fixtures, table cs_of) 220/220 BIT-EXACT. Kidnap (lr) gate +
+top-level gate in flight at time of writing.
+
+CORNER BUILDS (yosys/nextpnr/icetime, UP5K):
+  T (v6 deploy, top_match3): 5142/5280 LC (97%), 30/30 EBR (100%),
+    8/8 DSP — maxed on EVERY axis; icetime 30.22 MHz (24 closes);
+    encoder-only build 40.32 MHz (36 closes). 488 cyc/cand.
+  S (lean core probe): 2694 LC, 6/30 EBR, 2/8 DSP, 1 SPRAM; 26.06 MHz
+    (24 closes). The datapath inverts the v6 resource profile.
+  F (full standalone SLAM top_solo: ingest+track+fold+freeze+dump):
+    DSP 3/8, EBR 9/30, SPRAM 3/4 — comfortable; LUT 7452/5280 = 1.41x
+    OVER. Attribution: encoder 2032 + tracker 2955 + top 2659 + uart
+    54. Hand-CSE of the inlined helpers bought ZERO (abc9 already
+    shares) — the mass is genuinely the ~26+33-state control FSMs'
+    scalar arithmetic and register-enable fabric.
+THE FINDING: the VSA datapath is NOT the wall — the scalar SE2/control
+plumbing is (tracker+top = 5614 LUT vs 2090 for encoder+uart+pll).
+Even localization-only (tracker+encoder = 4987 + any top) exceeds the
+device as parallel-word FSMs. The closure path writes itself: the lean
+core freed EXACTLY the resource (EBR 9/30, SPRAM 3/4) that a
+microcoded scalar engine spends (~650 LC engine + ucode in EBR, est
+~2.9k LC total system) — control must move from LUT fabric into the
+abundant memory. Filed as the v7.2 fit plan; the full-function RTL is
+sim-proven meanwhile (the gates above), so the demo runs bit-exact in
+sim and the v6 deploy build remains the flashable hardware today.
+
+### P5 successor — complexity-penalized atom selection: the mechanism confirmed, the trade measured (2026-07-12)
+
+User follow-up on the banked P5 negative ("energy-greedy can't
+model-select without a complexity penalty"). scratch_p5pen.py, same
+dictionary (line / 90-deg corner / point) and grids as P5, penalty in
+the SELECTION only (deflation keeps raw amps); school8 + stata; the
+en arm reproduces banked P5 to the digit (gate).
+
+  arm      school +veto p50/p90/rec     stata +veto p50/p90/rec   types (school)
+  en       .106 / .762 / .56            .103 / 4.899 / .53        7 pt / 640 co
+  en/df    .080 / .759 / .53            .101 / 4.803 / .47        762 pt / 474 co
+  en/sup   DEGENERATE (0 lines)         DEGENERATE                3612 pt / 0 co
+  aicc     .104 / .761 / .56            .104 / 4.790 / .52        182 pt / 615 co
+  (banked line-only + veto: school .087 / .731 / .59; stata .101 / .54)
+
+VERDICT: the P5 mechanism claim is CONFIRMED — dividing energy by df
+activates real model selection (points 7 -> 762, corner spam halves)
+and buys the best school precision seen (.080). But the P5-predicted
+risk is also now measured: points siphon wall amplitude — recall drops
+~6 points on BOTH logs. No dominance -> LINE-ONLY + PATH-VETO REMAINS
+THE DEPLOY RECIPE; en/df goes in the ledger as the honest
+"selection-sanity dial" (use when precision >> recall). en/sup
+(support-normalized energy) is a NO-GO FORM — energy density always
+favors the smallest atom (all-points collapse, both logs). aicc at
+lambda = 2*df*sigma^2 is numerically inert (penalty dwarfed by real
+atom energies).
+
+### v7 build session part 2 — the top gate closes; webvis inits on the deploy recipe (2026-07-12, push marker)
+
+TOP-LEVEL END-TO-END GATE (solo_top.py, 8-kf smoke): after two defect
+classes were run down, **8/8 pose frames AND the 116-byte map dump
+BIT-EXACT** through the full UART protocol (set-pose, mode, keyframes
+with points+d_q, pose frames, dump with codes+liveness+scales+anchors).
+The two defects (both now banked classes, isolated with tb-level SPRAM
+peeks after the pose-trace localized the divergence to "first tracked
+kf after the first freeze"):
+  1. PHANTOM KEYFRAME: K_TXP returned to K_IDLE on the same edge it
+     pulsed kf_ack; the parser clears kf_hdr a cycle later, so K_IDLE
+     consumed the STALE flag and started a phantom keyframe each time —
+     mid-run it self-synchronized into the next real keyframe (masking
+     itself), after the last one it hung the dump. Fix: K_KFEND
+     handshake-completion state.
+  2. DRAIN-RESET RACE: drain_done was evaluable while drain_rst was
+     still in flight, so rd_pt still held the TRACKING pass's count and
+     the FOLD replay "completed" instantly — every segment froze an
+     all-zero accumulator, i.e. all-code-0 (the +1-phasor "DC map"),
+     which PSEUDO-TRACKS (kf5 came out only ~6 cm off!). The honest
+     tell was the dump: real anchors, 0xFFFF liveness, zero codes.
+     Fix: !drain_rst in drain_done.
+Regression after both: smoke PASS bit-exact incl. dump; decode.py
+consumes the chip-written planes (liveness ON / scales ON autodetect;
+old-dump path regression-clean at the banked 0.105/0.615/0.42).
+lr (kidnap) LEAN GATE: **160/160 keyframes bit-exact -> PASS** (landed
+just before the push; an earlier partial 75/75 was my stray PID kill —
+lesson: check command args before kill). The lean-stack gate suite is
+now COMPLETE: bridge 32/32 + readback 240/240, l1 220/220, lr 160/160,
+top end-to-end incl. dump. IN FLIGHT at this push: the 220-kf full
+classroom tour + its dump -> decode.py numbers (part-3 entry when it
+lands).
+
+WEBVIS: now INITS ON THE DEPLOY RECIPE (user directive) — span11
+ladder @ 60 angles, segment-faithful binary FPGA store (int8 tables
+baked at start via mkTables(cfg.binary), same order as the cBin
+handler), sample replay ON; cfg defaults == DOM attributes == start
+sequence (asserted in the validation gate); the stale nAng=113 default
+(the refuted phi-prime count) is gone. Tooltips carry the freeze-store
+tuning, corner-build numbers, and the P5+ verdict. Parse + 52 ids
+green.
+
+Cleanup-pass note: last session's archive move of scratch_capacity2.py
+broke 12 importers (make_wvs/rebuild_store); restored to the root this
+session — archiving load-bearing scratch modules is now a known
+cleanup-pass defect class.

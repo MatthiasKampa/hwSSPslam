@@ -22,3 +22,9 @@ scratch_*.out
 # demo/replays/manifest.json stays tracked — it defines the embed set/order)
 demo/replays/replay_*.json
 scratch_*.md
+
+# ice40 build artifacts (bitstreams/pnr reports regenerate from rtl/)
+ice40/build/
+
+# scratch shell drivers (same class as scratch_*.py)
+scratch_*.sh
