@@ -7,24 +7,17 @@ data/*
 !data/README.md
 !data/fetch_datasets.sh
 
-# transient agent run logs
-scratch_*.log
-scratch_*.py
-scratch_*.out
+# ALL transient/throwaway session files (scripts, logs, outputs) live here —
+# see PROTOCOL.md rule on scratch hygiene
+scratch/
 
 # regenerable trajectory outputs (drivers/experiments write these; rpe.py
-# consumes them). The ~20 MB already tracked from earlier in the session is
-# left in place (git-ignore does not untrack); this only stops NEW ones from
-# accumulating as experiments run.
+# consumes them)
 *.npz
 
 # generated replay blobs (embedded into demo/index.html by --embed;
 # demo/replays/manifest.json stays tracked — it defines the embed set/order)
 demo/replays/replay_*.json
-scratch_*.md
 
 # ice40 build artifacts (bitstreams/pnr reports regenerate from rtl/)
 ice40/build/
-
-# scratch shell drivers (same class as scratch_*.py)
-scratch_*.sh
