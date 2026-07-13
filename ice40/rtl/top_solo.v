@@ -44,6 +44,11 @@
 //   0x28                    -> map dump: 0xD0, n_seg, then per segment
 //                              60 B codes + 30 B liveness + 8 B scales +
 //                              16 B anchor
+//   0x29                    -> RESET MAP (env switch): n_seg=0, the open
+//                              segment is discarded (seg_open/folded
+//                              cleared); stale SPRAM content becomes
+//                              unreachable and is overwritten as new
+//                              segments freeze; ack 0xA7
 //   0x30 n u16 + n x (az u16, r u16, w u8) + dx i16 dy i16 dh i16
 //                           -> KEYFRAME: encode-at-identity during ingest,
 //                              pred = pose (+) R(pose_h) d, step (n_seg>0
@@ -67,7 +72,7 @@ module top_solo #(
     // parser-owned
     reg [3:0]  prx = 0;
     reg        req_ping = 0, req_dump = 0, req_nseg = 0, req_pose = 0,
-               req_mode = 0;
+               req_mode = 0, req_mrst = 0;
     reg [3:0]  ack_code = 0;              // 1 -> 0x2C, 2 -> 0x2D
     reg [6:0]  n_seg_req;
     reg [1:0]  mode_req;
@@ -316,7 +321,7 @@ module top_solo #(
         p2_we <= 1'b0;
         if (req_done) begin
             req_ping <= 0; req_dump <= 0; req_nseg <= 0;
-            req_pose <= 0; req_mode <= 0; ack_code <= 0;
+            req_pose <= 0; req_mode <= 0; req_mrst <= 0; ack_code <= 0;
         end
         if (kf_ack) begin kf_hdr <= 0; kf_dq <= 0; end
         // 0x22 code-byte unpacker: 4 mc writes per byte
@@ -376,6 +381,7 @@ module top_solo #(
                 8'h25: begin prx <= P25; pbi <= 0; end
                 8'h26: prx <= P26;
                 8'h28: req_dump <= 1'b1;
+                8'h29: req_mrst <= 1'b1;
                 8'h30: prx <= P30A;
                 default: ;
                 endcase
@@ -565,6 +571,12 @@ module top_solo #(
             end else if (req_mode) begin
                 mapping_en <= mode_req[0]; stream_en <= mode_req[1];
                 ack_byte <= 8'hA6; req_done <= 1'b1; kst <= K_ACK;
+            end else if (req_mrst) begin   // env switch: fresh map
+                n_seg <= 0;
+                seg_open <= 1'b0;
+                folded <= 0;
+                frozen_kf <= 1'b0;
+                ack_byte <= 8'hA7; req_done <= 1'b1; kst <= K_ACK;
             end else if (req_ping) begin
                 ack_byte <= 8'hA5; req_done <= 1'b1; kst <= K_ACK;
             end else if (ack_code != 0) begin

@@ -6617,3 +6617,32 @@ pre-rework): after a long run the live trajectory had drifted upward by
 staleness under the frozen classroom map across many replay passes, or
 EMA-hold drift accumulation. The spot demo (real data, one tour +
 replay passes) is the deployment-shaped configuration anyway.
+
+### SPOT live loop semantics + the v7 RESET-MAP command (2026-07-13)
+
+User directives ("are you continually running dataset (with an
+interpolation at the end and perturbance of lidar from second loop
+on)?" — it wasn't — and "interp to close loop properly"). SpotFeed now
+mirrors the synthetic Feed's loop law on real data:
+  - BRIDGE: the measured 0.381 m + 24.1 deg end->start snap is closed
+    by 9 interpolated keyframes at the tour's own stride (0.038 m /
+    2.4 deg per step — verified continuous). Real data cannot
+    re-raycast, so bridge scans replay the nearest ENDPOINT scan
+    CIRCULARLY ROLLED to the interpolated heading — rotation-exact on
+    the 360x1024 head (the 24 deg discontinuity dies); residual
+    parallax <= ~0.19 m on 9 of 423 loop keyframes.
+  - PERTURBANCE from the second loop on: range noise (sigma =
+    S.RANGE_NOISE) + dropout per (pass, kf) with the Feed's stream law
+    (verified: max |dr| 0.067 m ~ 3 sigma, fresh dropouts) — the
+    localization passes never see the bytes that built the map; pass 0
+    maps the pristine recording.
+  - carve_freemask generalized via feed.scan_of(i) (synthetic:
+    verbatim rng regeneration; real: the recording) — the spot run had
+    crashed at the freemask after a CLEAN pass 1 + freeze +
+    calibration (0.2 cm / 0.14 deg residuals on real data).
+
+v7 RESET-MAP (user: "so we can switch envs"): 0x29 -> n_seg=0, open
+segment discarded, pose kept, ack 0xA7. GATE: 15-kf run with the reset
+injected at kf 7 — golden restarts with a fresh tracker+mapper —
+**15/15 pose frames + dump BIT-EXACT (dump contains ONLY the
+post-reset segment)**.

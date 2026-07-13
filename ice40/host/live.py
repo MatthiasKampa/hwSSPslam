@@ -244,6 +244,12 @@ class Feed:
         r[rng.random(self.n_beams) < S.DROPOUT] = np.inf
         return r
 
+    def scan_of(self, i):
+        """Pass-0 scan of kf i, REGENERATED (deterministic per-kf stream —
+        the freemask carve's original inline derivation, verbatim)."""
+        rng = np.random.default_rng(self.seed * 100003 + 0 * 7919 + i)
+        return self.scan_at(self.gt_loop[i], rng)
+
     def __iter__(self):
         while True:
             p = self.k_global // self.n_loop      # pass number, 0-based
@@ -276,32 +282,80 @@ class SpotFeed:
     banked lidar-only spot runs chain CV from own estimates; at these
     keyframe strides the matcher window covers the difference). item
     ['gt'] carries the WITHHELD odometry reference — display/eval ONLY.
-    Passes replay the same scans verbatim (real data: no per-pass noise
-    redraw); the tour is closed by wrapping to kf 0 (the spot loop
-    revisits its start), so there is no synthetic bridge (n_tour ==
-    n_loop, bridge always False)."""
+
+    LOOP SEMANTICS (mirrors the synthetic Feed): the end->start gap
+    (measured 0.381 m + 24.1 deg on this tour) is closed by an
+    INTERPOLATED BRIDGE. Real data cannot re-raycast, so each bridge
+    keyframe replays the nearest ENDPOINT scan CIRCULARLY ROLLED to the
+    interpolated heading — exact for the rotation part on a 360 x 1024
+    head (the 24 deg snap dies); the residual position parallax is
+    <= half the gap (~0.19 m) on ~9 of 414+9 keyframes. From the SECOND
+    loop on, scans are PERTURBED per pass (range noise sigma =
+    S.RANGE_NOISE + S.DROPOUT, deterministic per (pass, kf) — the
+    synthetic feed's redraw analog), so localization passes never match
+    the exact bytes that built the map. Pass 0 maps the pristine data."""
 
     def __init__(self, seed=11, laps=1, n_beams=1024, traj="orbit"):
         import ssp_spot as SP
         b = SP.make_bundle()
+        self.seed = seed
         self.keys = b["keys"]
         self.beam = b["beam"]
         self.gt_ok = b["gt_ok"]
         self.segs = []                    # no analytic walls (real data)
-        self.n_tour = self.n_loop = len(self.keys)
+        self.n_tour = len(self.keys)
+        gt = np.array([k[1] for k in self.keys], float)
+        # interpolated bridge last -> first (positions + shortest arc)
+        gap = float(np.linalg.norm(gt[0, :2] - gt[-1, :2]))
+        step = float(np.median(np.linalg.norm(np.diff(gt[:, :2], axis=0),
+                                              axis=1)))
+        nb = max(2, int(np.ceil(gap / max(step, 1e-3))))
+        t = np.linspace(0, 1, nb + 2)[1:-1]
+        bxy = gt[-1, :2] * (1 - t[:, None]) + gt[0, :2] * t[:, None]
+        bth = wrap(gt[-1, 2] + t * wrap(gt[0, 2] - gt[-1, 2]))
+        self.bridge = np.concatenate([bxy, bth[:, None]], 1)
+        self.bridge_t = t
+        self.n_loop = self.n_tour + nb
         self.k_global = 0
         self.odom0 = np.array(self.keys[0][1], float)   # boot datum only
+        self._dbeam = 2 * np.pi / len(self.beam)
+
+    def scan_of(self, i):
+        """Pass-0 scan of loop index i (recorded; bridge = rolled copy)."""
+        if i < self.n_tour:
+            return np.asarray(self.keys[i][0], float)
+        b = i - self.n_tour
+        src = self.n_tour - 1 if self.bridge_t[b] < 0.5 else 0
+        r = np.asarray(self.keys[src][0], float)
+        th_s = float(self.keys[src][1][2])
+        th_b = float(self.bridge[b, 2])
+        m = int(np.round(wrap(th_b - th_s) / self._dbeam))
+        return np.roll(r, -m)             # rotation-exact re-heading
+
+    def _perturb(self, r, p, i):
+        """Per-pass lidar redraw analog (p >= 1): range noise + dropout,
+        deterministic per (pass, kf) — same stream law as Feed."""
+        rng = np.random.default_rng(self.seed * 100003 + p * 7919 + i)
+        r = r.copy()
+        ok = np.isfinite(r)
+        r[ok] += rng.normal(0, S.RANGE_NOISE, int(ok.sum()))
+        r[rng.random(len(r)) < S.DROPOUT] = np.inf
+        return r
 
     def __iter__(self):
         while True:
             p = self.k_global // self.n_loop
             i = self.k_global % self.n_loop
-            r, gt, _t = self.keys[i]
-            yield dict(k=self.k_global, p=p, i=i,
-                       gt=np.array(gt, float),
-                       odom=self.odom0.copy(),
-                       r=np.asarray(r, float).copy(),
-                       bridge=False)
+            r = self.scan_of(i)
+            if p >= 1:
+                r = self._perturb(r, p, i)
+            if i < self.n_tour:
+                gt = np.array(self.keys[i][1], float)
+            else:
+                gt = self.bridge[i - self.n_tour].copy()
+            yield dict(k=self.k_global, p=p, i=i, gt=gt,
+                       odom=self.odom0.copy(), r=r,
+                       bridge=(i >= self.n_tour))
             self.k_global += 1
 
 
@@ -864,9 +918,8 @@ def carve_freemask(feed, poses, bounds, cell=0.30, stop=0.45):
     free = np.zeros((h, w), bool)
     hitpts = []
     for i, pose in enumerate(poses):
-        rng = np.random.default_rng(feed.seed * 100003 + 0 * 7919 + i)
-        r = feed.scan_at(feed.gt_loop[i], rng)   # pass-0 scan, regenerated
-        ok = np.isfinite(r)
+        r = feed.scan_of(i)      # pass-0 scan (synthetic: regenerated
+        ok = np.isfinite(r)      # deterministically; real data: recorded)
         rr = np.clip(r[ok] - stop, 0.0, None)
         ang = pose[2] + feed.beam[ok]
         for t in np.arange(0.15, 1.0 + 1e-9, 0.12):

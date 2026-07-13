@@ -440,8 +440,10 @@ New blocks (all integer, constants from solo.py):
     ≡ mcode_from_vec proven; write codes+anchor, clear accumulators,
     5-kf cadence; fold UNGATED (gated folding REJECTED — starvation)
   - UART: pose frame out per kf (x_u i32, y_u i32, h_q i16 + state
-    byte ≈ 11 B -> ~22-55 B/s); map dump cmd (codes+anchors); preload
-    cmd (v7a mode); fidelity segment stream (2b codes at freeze)
+    byte ≈ 11 B -> ~22-55 B/s); map dump cmd (codes+liveness+scales+
+    anchors); preload cmd (v7a mode); RESET-MAP cmd 0x29 (env switch:
+    n_seg=0 + open segment discarded, pose kept — gate: reset mid-tour,
+    dump contains only post-reset segments); fidelity segment stream
 
 LC risk: v6 deploy = 5148/5280 with host-streaming paths that solo
 mode retires (bare-0x07 path, FIFO cand ingest can shrink — grid gen

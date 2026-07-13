@@ -21,7 +21,11 @@ ring scales + anchor with table-cs_of). Emits:
 
 Then compiles tb_solo_top.v (encoder_lean + solo_tracker + top_solo) and
 diffs every pose frame and every dump byte. Usage:
-  solo_top.py [n_kf]        (default 60; 220 = the full classroom tour)
+  solo_top.py [n_kf] [reset_at]
+(default 60 kf; 220 = the full classroom tour. reset_at inserts the
+0x29 RESET-MAP command before that keyframe — the env-switch gate: the
+golden restarts with a fresh tracker+mapper, n_seg=0, the open segment
+discarded; the dump must contain only post-reset segments.)
 """
 import struct
 import subprocess
@@ -40,10 +44,11 @@ BUILD = ICE / "build"
 TOOLS = Path.home() / "tools" / "oss-cad-suite" / "bin"
 CELLS = TOOLS.parent / "share" / "yosys" / "ice40" / "cells_sim.v"
 N_KF = int(sys.argv[1]) if len(sys.argv) > 1 else 60
+RESET_AT = int(sys.argv[2]) if len(sys.argv) > 2 else None
 NSEG = 64
 
 
-def golden(n_kf):
+def golden(n_kf, reset_at=None):
     import live as LV
     import ssp_slam_loop as L
 
@@ -70,6 +75,14 @@ def golden(n_kf):
     n_seg = 0
     for kk in range(n_kf):
         item = next(it)
+        if reset_at is not None and kk == reset_at:
+            # env switch: RESET MAP. Chip: n_seg=0, open segment
+            # discarded, pose kept. Golden: fresh tracker + mapper.
+            send(bytes([0x29]))
+            wait(1)
+            trk = solo.SoloTracker(solo.FakeFab(luts), [], [])
+            mapper = solo.SoloMapper(luts)
+            n_seg = 0
         az, r_mm, w = G.scan_to_ints(item["r"])
         n = len(az)
         if odom_prev is None:
@@ -142,14 +155,16 @@ def golden(n_kf):
 
 
 def main():
-    words, exp, dump, n_seg = golden(N_KF)
+    words, exp, dump, n_seg = golden(N_KF, RESET_AT)
     with open(BUILD / "solo_topin.hex", "w") as f:
         for wv in words:
             f.write(f"{wv:04x}\n")
     (BUILD / "solo_topexp.bin").write_bytes(exp)
     (BUILD / "solo_topdump.bin").write_bytes(dump)
     print(f"top fixture: {N_KF} kf, {len(words)} stream words, {n_seg} "
-          f"segments, golden dump {len(dump)} B", flush=True)
+          f"segments, golden dump {len(dump)} B"
+          + (f", RESET at kf {RESET_AT}" if RESET_AT is not None else ""),
+          flush=True)
     subprocess.run([str(TOOLS / "iverilog"), "-g2012", "-o",
                     str(BUILD / "tbtop.vvp"), "-DLEAN",
                     "rtl/uart.v", "rtl/encoder_lean.v",
@@ -172,6 +187,9 @@ def main():
     bad = 0
     REC = struct.calcsize("<iiHBB")
     for k in range(N_KF):
+        if RESET_AT is not None and k == RESET_AT:
+            assert tx[off] == 0xA7, f"reset-map ack: {tx[off]:02x}"
+            off += 1
         hdr = tx[off]
         x, y = struct.unpack_from("<ii", tx, off + 1)
         h = struct.unpack_from("<H", tx, off + 9)[0]
