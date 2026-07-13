@@ -641,8 +641,9 @@ def bench_selfmap(env="classroom", traj="orbit", passes=3, seed=11):
 
 # ------------------------------------------------- bench: sample reservoir
 RES_N = 16          # slots (one spare SPRAM at ~2 KB/raw scan)
-RES_P = 0.25        # per-kf overwrite chance; decay tau ~ N/p kf (user
-                    # lever: linear in mem/chance)
+RES_EVERY = 20      # save EVERY 20th kf (deterministic cadence, user
+                    # 2026-07-13 — was rand 10-25%/kf); the SLOT draw and
+                    # the replay draw stay RANDOM; tau ~ N*RES_EVERY kf
 RES_Q = 4           # attempt one re-match every RES_Q kf (idle matcher duty)
 BLACKOUT = None     # DIAGNOSTIC: (period, len) forced blind windows in
                     # replay — the honest pathology (transient loss on a
@@ -713,8 +714,10 @@ def bench_reservoir(env="classroom", traj="orbit", passes=3, seed=11):
             if len(mapper.frozen) > n_before:
                 anc, codes = mapper.frozen[-1][0], mapper.frozen[-1][1]
                 trk.add_segment(anc, codes)
-        # reservoir write: random chance, random slot (exponential ages)
-        if rng.random() < RES_P:
+        # reservoir write: every RES_EVERY kf, RANDOM slot (the fixed
+        # cadence keeps the exponential age mix — the randomness that
+        # matters is WHICH slot dies, not WHEN a save happens)
+        if kk % RES_EVERY == 0:
             si = int(rng.integers(RES_N))
             slots[si] = (q, pose_q, item["gt"].copy(), st, kk)
         # reservoir re-match: one random occupied slot every RES_Q kf

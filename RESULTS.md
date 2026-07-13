@@ -6748,3 +6748,17 @@ SURVIVES a true calibration failure — loud [calib] FAILED line + auto
 remap (board session and UI stay alive) instead of a dead process.
 Verified: freeze at kf 24 -> calib OK 1/1 (0.9 cm) -> fabric tracking
 at 1.5 cm on the driven map.
+
+### Reservoir save cadence: every 20th frame (user directive, 2026-07-13)
+
+"instead of rand 10% go for every 20 frames instead. still rand
+overwrite and sample though. both on fpga and in websim." Applied in
+all three reservoirs: websim sandbox (RESV) + websim real-data (RMR) —
+RES_EVERY=20 deterministic save cadence with per-mechanism frame
+counters (reset with their buffers) — and the chip-side golden
+(solo.py bench_reservoir: kk % RES_EVERY == 0, was rand 0.25/kf). The
+randomness that matters is retained exactly where it matters: WHICH
+slot dies (random overwrite, refined-slot exclusion kept) and WHICH
+slot replays (random draw) — the fixed cadence still yields the
+exponential age mix, tau ~ N*RES_EVERY = 320 frames at N=16. solo
+selftest green; webvis core parses, no RES_P remnants.
