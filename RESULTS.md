@@ -6709,3 +6709,29 @@ decimals (the top bar no longer jitters — the old font stack resolved
 outside the map — previously a pick was permanent); reference-walls
 label now honest about real data (empty overlay). SSE reset event
 clears the client view on env switches.
+
+### Live demo: WASD driving for synthetic envs; map/view robustness (2026-07-13)
+
+User directives. DrivenFeed (live.py): browser-held key set (/drive
+endpoint sends the full pressed set on every change — robust to missed
+keyups), motion integrated at keyframe rate (full speed = the scripted
+tour's stride; A/D turn 1.6 rad/s), scans raycast from the driven pose,
+Feed's odometry noise model, pass-1 scans recorded for the freemask
+carve. The map freezes on the UI 'freeze map' action (/freeze pins
+n_tour to the driven count; a calibration sample is captured at the
+freeze keyframe so early freezes calibrate). env switch carries
+drive=1 for synthetic envs (spot stays replay). VERIFIED HEADLESS via
+endpoints: W = +2 m at cruise, W+A arcs with wrap-correct heading,
+freeze -> calib 2/2 (~1 cm on the driven map) -> fabric image ->
+localization tracking at 0.005 m.
+
+Client robustness (user-reported): (a) reset/env-switch left the map
+blank until a single SSE map_ready event — now the reset branch starts
+loadMap's pending-poll (recovers regardless of event races) and the
+canvas keeps drawing trails during the remap; (b) the view was fit
+from whatever partial data existed at page load (different position
+per reload, robot could leave the box) — replaced fitView/provisional
+with a unified content-derived view (union of map/world/trails/robot,
+padded, centered) that only refits when something leaves the box:
+deterministic across reloads once the map is up, and the robot can
+never wander outside the drawn area.

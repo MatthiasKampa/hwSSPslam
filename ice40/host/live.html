@@ -52,7 +52,10 @@
       <option value="office">office</option>
     </select>
   </label>
+  <label title="synthetic envs only: drive the robot yourself (W/S forward/back, A/D turn); the map freezes when YOU say so"><input type="checkbox" id="drivechk" checked> drive (WASD)</label>
   <button id="resetbtn" title="restart mapping from keyframe 0 in the current env (fresh python SLAM + frozen map; the board re-encodes per scan)">reset map</button>
+  <button id="fzbtn" style="display:none" title="driven mode: freeze the map now (python SLAM relax + 2b codes + calibration + fabric image), then keep driving with fabric localization">freeze map</button>
+  <span id="wasdchip" class="y" style="display:none">driving: WASD</span>
   <span id="ctlinfo"></span>
 </div>
 <div id="wrap">
@@ -84,11 +87,33 @@ const cv = document.getElementById('cv'), g = cv.getContext('2d');
 let MAP=null, view=null, trails={py:[],fx:[],gt:[]}, robot=null, pick=null, hits=[], WORLD=null;
 const $ = id => document.getElementById(id);
 
-function fitView() {
-  if (!MAP) return;
-  const w = MAP.w*MAP.step, h = MAP.h*MAP.step;
-  const s = Math.min(cv.width/(w+1), cv.height/(h+1));
-  view = {s, x0:MAP.x0-0.5, y0:MAP.y0-0.5};
+function unionBounds() {
+  let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity, has=false;
+  const eat=(x,y)=>{ if(!isFinite(x)||!isFinite(y)) return; has=true;
+    x0=Math.min(x0,x); y0=Math.min(y0,y); x1=Math.max(x1,x); y1=Math.max(y1,y); };
+  if (MAP){ eat(MAP.x0, MAP.y0);
+            eat(MAP.x0+MAP.w*MAP.step, MAP.y0+MAP.h*MAP.step); }
+  if (WORLD) for (const sg of WORLD){ eat(sg[0],sg[1]); eat(sg[2],sg[3]); }
+  for (const k of ['gt','py','fx']) for (const p of trails[k]) eat(p[0],p[1]);
+  if (robot) for (const r of [robot.gt,robot.py,robot.fx]) if (r) eat(r[0],r[1]);
+  return has ? [x0,y0,x1,y1] : null;
+}
+// STABLE content-derived view: fits the union of map/world/trails/robot,
+// centered; only refits when something leaves the box (so the display
+// sits at the same place for every client/reload once the map is up,
+// and the robot can never wander outside the drawn area).
+function ensureView() {
+  const b = unionBounds();
+  if (!b) return;
+  const pad = 1.5;
+  const inBox = view
+    && b[0] >= view.x0 && b[1] >= view.y0
+    && b[2] <= view.x0 + cv.width/view.s
+    && b[3] <= view.y0 + cv.height/view.s;
+  if (inBox) return;
+  const w = b[2]-b[0]+2*pad, h = b[3]-b[1]+2*pad;
+  const sc = Math.min(cv.width/w, cv.height/h);
+  view = {s:sc, x0:b[0]-pad-(cv.width/sc-w)/2, y0:b[1]-pad-(cv.height/sc-h)/2};
 }
 const W2C = p => [ (p[0]-view.x0)*view.s, cv.height-(p[1]-view.y0)*view.s ];
 
@@ -121,6 +146,7 @@ function drawTrail(t, color) {
 }
 function render() {
   g.clearRect(0,0,cv.width,cv.height);
+  ensureView();
   if (!view) return;
   drawMap();
   drawWorld();
@@ -153,16 +179,11 @@ function clearPick() {
 async function loadMap() {
   const m = await (await fetch('/map')).json();
   if (m.pending) { setTimeout(loadMap, 3000); return; }
-  MAP=m; fitView(); render();
+  MAP=m; view=null; render();
 }
 async function loadTrails() {
   const t = await (await fetch('/trails')).json();
   trails.py=t.py; trails.fx=t.fx; trails.gt=t.gt;
-  if (!MAP && t.gt.length>1) {   // provisional view before the map lands
-    const xs=t.gt.map(p=>p[0]), ys=t.gt.map(p=>p[1]);
-    const w=Math.max(...xs)-Math.min(...xs)+8, h=Math.max(...ys)-Math.min(...ys)+8;
-    view={s:Math.min(cv.width/w,cv.height/h), x0:Math.min(...xs)-4, y0:Math.min(...ys)-4};
-  }
   render();
 }
 function loadWorld() {
@@ -191,9 +212,27 @@ document.addEventListener('click', ev => {
 let envPending = false;
 $('envsel').addEventListener('change', async ev => {
   envPending = true;
+  const drive = $('drivechk').checked && ev.target.value !== 'spot' ? 1 : 0;
   $('ctlinfo').textContent = `switching to ${ev.target.value}…`;
-  await fetch(`/env?name=${ev.target.value}`);
+  await fetch(`/env?name=${ev.target.value}&drive=${drive}`);
 });
+$('fzbtn').addEventListener('click', () => fetch('/freeze'));
+// WASD capture (driven synth envs): send the FULL key set on any change
+// — robust to missed keyup events; ignored server-side unless driven.
+const pressed = new Set();
+function sendKeys() { fetch('/drive?keys=' + [...pressed].join('')); }
+window.addEventListener('keydown', ev => {
+  const k = ev.key.toLowerCase();
+  if (!'wasd'.includes(k) || ev.repeat) return;
+  if (/input|select|textarea/i.test(ev.target.tagName)) return;
+  pressed.add(k); sendKeys();
+});
+window.addEventListener('keyup', ev => {
+  const k = ev.key.toLowerCase();
+  if (!'wasd'.includes(k)) return;
+  pressed.delete(k); sendKeys();
+});
+window.addEventListener('blur', () => { pressed.clear(); sendKeys(); });
 $('resetbtn').addEventListener('click', async () => {
   $('ctlinfo').textContent = 'resetting map…';
   await fetch('/reset');
@@ -208,7 +247,8 @@ es.onmessage = ev => {
     MAP=null; trails={py:[],fx:[],gt:[]}; robot=null; view=null;
     clearPick(); WORLD=null; loadWorld();
     envPending=false; $('ctlinfo').textContent='';
-    render(); return;
+    loadMap();            // pending-poll until the new map lands (the
+    render(); return;     // canvas keeps drawing trails meanwhile)
   }
   if (s.k === undefined) return;
   $('pss').firstElementChild.textContent=s.pss;
@@ -223,6 +263,8 @@ es.onmessage = ev => {
   $('bridge').style.display = s.bridge? '':'none';
   $('status').textContent = s.status;
   if (s.env && !envPending) $('envsel').value = s.env;
+  $('fzbtn').style.display = (s.driven && !s.frozen) ? '' : 'none';
+  $('wasdchip').style.display = s.driven ? '' : 'none';
   robot = {gt:s.gt, py:s.py, fx:s.fx};
   trails.gt.push([s.gt[0],s.gt[1]]); trails.py.push([s.py[0],s.py[1]]);
   if (s.fx) trails.fx.push([s.fx[0],s.fx[1]]);

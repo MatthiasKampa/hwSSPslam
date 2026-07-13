@@ -273,6 +273,81 @@ class Feed:
             self.k_global += 1
 
 
+class DrivenFeed(Feed):
+    """WASD-DRIVEN synthetic feed (live demo): the browser holds the key
+    set (/drive endpoint), motion integrates at keyframe rate (full speed
+    = the scripted tour's stride), scans raycast from the DRIVEN pose,
+    odometry = true delta + Feed's noise model. Pass-1 scans are RECORDED
+    for the freemask carve (scan_of); the map freezes on the UI 'freeze
+    map' action (_req_freeze), which pins n_tour to the driven keyframe
+    count. No wall collision (you can drive through walls — the scans
+    are raycast from wherever you are)."""
+
+    def __init__(self, seed=11, laps=2, n_beams=1024, env="classroom",
+                 traj="driven"):
+        self.seed, self.n_beams, self.env, self.traj = (seed, n_beams,
+                                                        env, "driven")
+        self.driven = True
+        if env == "classroom":
+            self.segs = DE.classroom_segs(None)
+        else:
+            import ssp_synth as SY
+            self.segs = SY.WORLDS[env]()
+        sa = np.asarray(self.segs, float).reshape(-1, 2)
+        self.pose = np.array([sa[:, 0].mean(), sa[:, 1].mean(), 0.0])
+        self._bbox = (sa[:, 0].min(), sa[:, 0].max(),
+                      sa[:, 1].min(), sa[:, 1].max())
+        self.keys = set()
+        self.beam = -np.pi + np.arange(n_beams) * (2 * np.pi / n_beams)
+        self.n_tour = self.n_loop = 10 ** 9        # until the freeze
+        self.k_global = 0
+        self.odom = None
+        self._prev_gt = None
+        self._scans = []                           # pass-1 recordings
+
+    def set_keys(self, ks):
+        self.keys = set(ks) & set("wasd")
+
+    def _step_pose(self):
+        dt = DE.STEP / DE.ROBOT_V
+        v = (("w" in self.keys) - ("s" in self.keys)) * DE.ROBOT_V
+        om = (("a" in self.keys) - ("d" in self.keys)) * 1.6
+        self.pose[2] = wrap(self.pose[2] + om * dt)
+        self.pose[0] += v * np.cos(self.pose[2]) * dt
+        self.pose[1] += v * np.sin(self.pose[2]) * dt
+        m = 0.3                                    # stay near the world
+        self.pose[0] = np.clip(self.pose[0], self._bbox[0] - m,
+                               self._bbox[1] + m)
+        self.pose[1] = np.clip(self.pose[1], self._bbox[2] - m,
+                               self._bbox[3] + m)
+
+    def scan_of(self, i):
+        return self._scans[i]
+
+    def __iter__(self):
+        while True:
+            self._step_pose()
+            rng = np.random.default_rng(self.seed * 100003 + self.k_global)
+            gt = self.pose.copy()
+            r = self.scan_at(gt, rng)
+            if self.k_global < self.n_tour and len(self._scans) < 6000:
+                self._scans.append(r.copy())
+            if self._prev_gt is None:
+                self.odom = gt.copy()
+            else:
+                d = L.se2_mul(L.se2_inv(self._prev_gt), gt)
+                d[:2] += (rng.normal(0, DE.ODO_T, 2)
+                          + 0.02 * np.abs(d[:2]) * rng.normal(0, 1, 2))
+                d[2] += rng.normal(0, DE.ODO_R)
+                self.odom = L.se2_mul(self.odom, d)
+            self._prev_gt = gt.copy()
+            yield dict(k=self.k_global,
+                       p=0 if self.k_global < self.n_tour else 1,
+                       i=self.k_global, gt=gt,
+                       odom=self.odom.copy(), r=r, bridge=False)
+            self.k_global += 1
+
+
 class SpotFeed:
     """REAL-DATA feed: the SPOT Telluride tour (data/spot_telluride/
     scans.npz via ssp_spot.make_bundle — 1024 beams on the fabric's exact
@@ -1026,14 +1101,19 @@ class Live:
         Called from the run loop between keyframes (handler threads only
         set _req_reset/_req_env)."""
         if env is not None:
+            drive = bool(getattr(self, "_req_drive", False))
             self.feed = (SpotFeed(seed=seed, laps=laps) if env == "spot"
+                         else DrivenFeed(seed=seed, env=env) if drive
                          else Feed(seed=seed, laps=laps, env=env,
                                    traj=traj))
         else:
             f = self.feed
             self.feed = (SpotFeed() if isinstance(f, SpotFeed)
+                         else DrivenFeed(seed=f.seed, env=f.env)
+                         if isinstance(f, DrivenFeed)
                          else Feed(seed=f.seed, laps=2, env=f.env,
                                    traj=f.traj))
+        self._req_freeze = False
         self.slam = F.BandSLAM(robust=True, attempt_every=4,
                                relax_every=25, gap_kf=300, recent_aids=12,
                                spec=None, nph=0)
@@ -1127,6 +1207,8 @@ class Live:
             segs=len(self.slam.segvec), mem=round(self.slam.memory_kb(), 1),
             env=("spot" if isinstance(self.feed, SpotFeed)
                  else self.feed.env),
+            driven=bool(getattr(self.feed, "driven", False)),
+            frozen=self.fmap is not None,
             edge=0 if self.loc is None else self.loc.n_edge,
             fx_state=None if self.loc is None else self.loc.state,
             status=self.status)
@@ -1177,11 +1259,23 @@ class Live:
                     if ints is not None and item["k"] % CHECK_EVERY == 0:
                         self.fab.crosscheck(ints)   # readback is non-destructive
                     if self.fmap is None:
-                        if item["p"] == 0 and item["i"] in (
-                                self.feed.n_tour // 3,
-                                2 * self.feed.n_tour // 3,
-                                self.feed.n_tour - 2) and ints is not None:
+                        driven = getattr(self.feed, "driven", False)
+                        if item["p"] == 0 and ints is not None and (
+                                (not driven and item["i"] in (
+                                    self.feed.n_tour // 3,
+                                    2 * self.feed.n_tour // 3,
+                                    self.feed.n_tour - 2))
+                                or (driven and item["i"] % 137 == 100)):
                             calib_items.append((item, est.copy()))
+                            calib_items = calib_items[-3:]
+                        if getattr(self, "_req_freeze", False) and driven:
+                            # driven mode: the UI freeze pins the tour
+                            self.feed.n_tour = item["i"] + 1
+                            self.feed.n_loop = item["i"] + 1
+                            self._req_freeze = False
+                            if ints is not None:
+                                calib_items.append((item, est.copy()))
+                                calib_items = calib_items[-3:]
                         if item["i"] == self.feed.n_tour - 1:  # tour end: freeze
                             if self.slam.dirty:
                                 self.slam.relax()
@@ -1311,10 +1405,21 @@ def make_handler(live):
             elif self.path.startswith("/reset"):
                 live._req_reset = True
                 self._json(dict(ok=True))
+            elif self.path.startswith("/drive"):
+                from urllib.parse import parse_qs, urlparse
+                q = parse_qs(urlparse(self.path).query)
+                ks = q.get("keys", [""])[0]
+                if hasattr(live.feed, "set_keys"):
+                    live.feed.set_keys(ks)
+                self._json(dict(ok=True))
+            elif self.path.startswith("/freeze"):
+                live._req_freeze = True
+                self._json(dict(ok=True))
             elif self.path.startswith("/env"):
                 from urllib.parse import parse_qs, urlparse
                 q = parse_qs(urlparse(self.path).query)
                 name = q.get("name", ["classroom"])[0]
+                live._req_drive = q.get("drive", ["0"])[0] == "1"
                 if name in ("classroom", "mixed", "corridor", "office",
                             "spot"):
                     live._req_env = name
