@@ -6691,3 +6691,21 @@ distinguishes pi). Never fires in the healthy configuration; costs one
 python encode+match per committed kf. The final tracker posture: CV
 while tracking, FREEZE on holds, every-12th-hold re-search global in
 heading, local (+-0.47 m) in position.
+
+### Live UI rework: env switching + reset map + stable readouts (2026-07-13)
+
+User directives. live.py: the run loop gains a restart shell — handler
+threads set _req_reset/_req_env only; the loop applies them between
+keyframes (serlock held) via Live.reset_for (fresh feed/python SLAM/
+frozen map/tracker state; the BOARD stays — per-scan encode clears it).
+Endpoints /reset and /env?name={classroom,mixed,corridor,office,spot};
+/state carries the active env. VERIFIED LIVE: /reset restarted mapping
+kf 100 -> kf 0 with the encode cross-check counter continuing (26/26).
+live.html reworked: env select + reset-map button (select auto-syncs to
+the server env, guarded against fighting a pending switch); numeric
+readouts monospace + tabular-nums with fixed chip widths and fixed
+decimals (the top bar no longer jitters — the old font stack resolved
+-apple-system BEFORE the mono fonts); pick deselection (Esc or click
+outside the map — previously a pick was permanent); reference-walls
+label now honest about real data (empty overlay). SSE reset event
+clears the client view on env switches.

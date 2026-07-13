@@ -1020,6 +1020,42 @@ class Live:
         self.trail_gt = []
         self.status = "pass 1: mapping (python SLAM + fabric encode)"
 
+    def reset_for(self, env=None, traj="orbit", laps=2, seed=11):
+        """UI 'reset map' / env switch: fresh feed + python SLAM + frozen
+        map + tracker state; the BOARD stays (per-scan encode clears it).
+        Called from the run loop between keyframes (handler threads only
+        set _req_reset/_req_env)."""
+        if env is not None:
+            self.feed = (SpotFeed(seed=seed, laps=laps) if env == "spot"
+                         else Feed(seed=seed, laps=laps, env=env,
+                                   traj=traj))
+        else:
+            f = self.feed
+            self.feed = (SpotFeed() if isinstance(f, SpotFeed)
+                         else Feed(seed=f.seed, laps=2, env=f.env,
+                                   traj=f.traj))
+        self.slam = F.BandSLAM(robust=True, attempt_every=4,
+                               relax_every=25, gap_kf=300, recent_aids=12,
+                               spec=None, nph=0)
+        self.slam.store_dtype = np.complex64
+        self.fmap = None
+        self.loc = None
+        self.imgd = None
+        self.est_prev = None
+        self._odom_prev2 = None
+        self._fx_prev = None
+        self._fx_vel = np.zeros(3)
+        for a in ("freemask", "fm_trail"):
+            if hasattr(self, a):
+                delattr(self, a)
+        self.bench_log.clear()
+        with self.lock:
+            self.trail_py.clear()
+            self.trail_fx.clear()
+            self.trail_gt.clear()
+        self.status = "pass 1: mapping (python SLAM + fabric encode)"
+        self.broadcast(dict(reset=True))
+
     # ---- pass-1 python SLAM step (bench config, bridge2 sampler)
     def slam_step(self, item):
         r = item["r"]
@@ -1089,6 +1125,8 @@ class Live:
             enc=f"{self.fab.n_ok}/{self.fab.n_enc}",
             enc_bad=self.fab.n_bad,
             segs=len(self.slam.segvec), mem=round(self.slam.memory_kb(), 1),
+            env=("spot" if isinstance(self.feed, SpotFeed)
+                 else self.feed.env),
             edge=0 if self.loc is None else self.loc.n_edge,
             fx_state=None if self.loc is None else self.loc.state,
             status=self.status)
@@ -1119,98 +1157,107 @@ class Live:
     # ---- main loop
     def run(self, realtime=True, stop_after=None, image=True):
         dt_kf = DE.STEP / DE.ROBOT_V
-        calib_items = []
-        t_next = time.perf_counter()
-        for item in self.feed:
-            t0 = time.perf_counter()
-            est = self.slam_step(item)
-            with self.serlock:
-                ints = self.fab.encode(item["r"])
-                fx_pose = score = None
-                if ints is not None and item["k"] % CHECK_EVERY == 0:
-                    self.fab.crosscheck(ints)   # readback is non-destructive
-                if self.fmap is None:
-                    if item["p"] == 0 and item["i"] in (
-                            self.feed.n_tour // 3,
-                            2 * self.feed.n_tour // 3,
-                            self.feed.n_tour - 2) and ints is not None:
-                        calib_items.append((item, est.copy()))
-                    if item["i"] == self.feed.n_tour - 1:  # tour end: freeze
-                        if self.slam.dirty:
-                            self.slam.relax()
-                        self.freeze()
-                        self.status = "calibrating matcher geometry"
-                        self.calibrate(calib_items)
-                        if image:
-                            self.status = "probing map image from fabric"
-                            self.probe()
-                        self.loc.pose = est.copy()
-                        self.status = ("looping: python SLAM + fabric "
-                                       "localization")
-                elif ints is not None:
-                    pred = (self.loc.pose if self.loc.pose is not None
-                            else est)
-                    if getattr(self, "_odom_prev2", None) is not None:
-                        d = L.se2_mul(L.se2_inv(self._odom_prev2),
-                                      item["odom"])
-                        if (np.abs(d).max() < 1e-12
-                                and self.loc.pose is not None):
-                            # LIDAR-ONLY feeds (SpotFeed: odom deltas are
-                            # EXACTLY zero): constant-velocity pred from
-                            # the tracker's OWN history — the banked spot
-                            # posture. The velocity estimate updates ONLY
-                            # from tracking-state steps and DECAYS through
-                            # holds (translation 0.5x/kf — stops are
-                            # common; heading 0.9x/kf — pivots are
-                            # sustained). Without the decay, holds feed
-                            # the velocity back to itself and the pred
-                            # runs away at exactly the clamp rate
-                            # (measured: the kf-504 stop-and-pivot event,
-                            # +0.13 m/kf through 8 holds, then a
-                            # confident wrong relock 1.8 m off).
-                            if not hasattr(self, "_fx_vel"):
-                                self._fx_vel = np.zeros(3)
-                            if (self.loc.state == "tracking"
-                                    and getattr(self, "_fx_prev", None)
-                                    is not None):
-                                v = L.se2_mul(L.se2_inv(self._fx_prev),
-                                              self.loc.pose)
-                                n = float(np.hypot(v[0], v[1]))
-                                if n > 0.13:
-                                    v[:2] *= 0.13 / n
-                                self._fx_vel = v
-                            else:
-                                # FREEZE on holds: score collapses are
-                                # scene-driven and coincide with stops
-                                # (kf-504: score 124->46 at 3 cm error);
-                                # any residual velocity slides the pred
-                                # out of the re-search reach before the
-                                # scene recovers (measured 0.6 m in 8
-                                # holds with 0.5x decay).
-                                self._fx_vel = np.zeros(3)
-                            d = self._fx_vel
-                        pred = L.se2_mul(pred, d)
-                    self._fx_prev = (None if self.loc.pose is None
-                                     else self.loc.pose.copy())
-                    fx_pose, aid, score = self.loc.locate(ints, pred)
-            self._odom_prev2 = item["odom"].copy()
-            ms = (time.perf_counter() - t0) * 1e3
-            self.push_state(item, est, fx_pose, score, ms)
-            if item["k"] % 25 == 0:
-                st = self.state
-                print(f"[kf {st['k']:5d} pass {st['pss']}] "
-                      f"py {st['err_py']:.3f} m  "
-                      f"fx {st['err_fx'] if st['err_fx'] is not None else '-'}"
-                      f"  enc {st['enc']}  {st['ms']:.0f} ms", flush=True)
-            if stop_after is not None and item["k"] >= stop_after:
-                return
-            if realtime:
-                t_next += dt_kf
-                pause = t_next - time.perf_counter()
-                if pause > 0:
-                    time.sleep(pause)
-                else:
-                    t_next = time.perf_counter()
+        self._req_reset = False
+        self._req_env = None
+        while True:
+            calib_items = []
+            t_next = time.perf_counter()
+            for item in self.feed:
+                if self._req_reset or self._req_env:
+                    with self.serlock:
+                        self.reset_for(self._req_env)
+                    self._req_reset = False
+                    self._req_env = None
+                    break         # fresh feed iterator
+                t0 = time.perf_counter()
+                est = self.slam_step(item)
+                with self.serlock:
+                    ints = self.fab.encode(item["r"])
+                    fx_pose = score = None
+                    if ints is not None and item["k"] % CHECK_EVERY == 0:
+                        self.fab.crosscheck(ints)   # readback is non-destructive
+                    if self.fmap is None:
+                        if item["p"] == 0 and item["i"] in (
+                                self.feed.n_tour // 3,
+                                2 * self.feed.n_tour // 3,
+                                self.feed.n_tour - 2) and ints is not None:
+                            calib_items.append((item, est.copy()))
+                        if item["i"] == self.feed.n_tour - 1:  # tour end: freeze
+                            if self.slam.dirty:
+                                self.slam.relax()
+                            self.freeze()
+                            self.status = "calibrating matcher geometry"
+                            self.calibrate(calib_items)
+                            if image:
+                                self.status = "probing map image from fabric"
+                                self.probe()
+                            self.loc.pose = est.copy()
+                            self.status = ("looping: python SLAM + fabric "
+                                           "localization")
+                    elif ints is not None:
+                        pred = (self.loc.pose if self.loc.pose is not None
+                                else est)
+                        if getattr(self, "_odom_prev2", None) is not None:
+                            d = L.se2_mul(L.se2_inv(self._odom_prev2),
+                                          item["odom"])
+                            if (np.abs(d).max() < 1e-12
+                                    and self.loc.pose is not None):
+                                # LIDAR-ONLY feeds (SpotFeed: odom deltas are
+                                # EXACTLY zero): constant-velocity pred from
+                                # the tracker's OWN history — the banked spot
+                                # posture. The velocity estimate updates ONLY
+                                # from tracking-state steps and DECAYS through
+                                # holds (translation 0.5x/kf — stops are
+                                # common; heading 0.9x/kf — pivots are
+                                # sustained). Without the decay, holds feed
+                                # the velocity back to itself and the pred
+                                # runs away at exactly the clamp rate
+                                # (measured: the kf-504 stop-and-pivot event,
+                                # +0.13 m/kf through 8 holds, then a
+                                # confident wrong relock 1.8 m off).
+                                if not hasattr(self, "_fx_vel"):
+                                    self._fx_vel = np.zeros(3)
+                                if (self.loc.state == "tracking"
+                                        and getattr(self, "_fx_prev", None)
+                                        is not None):
+                                    v = L.se2_mul(L.se2_inv(self._fx_prev),
+                                                  self.loc.pose)
+                                    n = float(np.hypot(v[0], v[1]))
+                                    if n > 0.13:
+                                        v[:2] *= 0.13 / n
+                                    self._fx_vel = v
+                                else:
+                                    # FREEZE on holds: score collapses are
+                                    # scene-driven and coincide with stops
+                                    # (kf-504: score 124->46 at 3 cm error);
+                                    # any residual velocity slides the pred
+                                    # out of the re-search reach before the
+                                    # scene recovers (measured 0.6 m in 8
+                                    # holds with 0.5x decay).
+                                    self._fx_vel = np.zeros(3)
+                                d = self._fx_vel
+                            pred = L.se2_mul(pred, d)
+                        self._fx_prev = (None if self.loc.pose is None
+                                         else self.loc.pose.copy())
+                        fx_pose, aid, score = self.loc.locate(ints, pred)
+                self._odom_prev2 = item["odom"].copy()
+                ms = (time.perf_counter() - t0) * 1e3
+                self.push_state(item, est, fx_pose, score, ms)
+                if item["k"] % 25 == 0:
+                    st = self.state
+                    print(f"[kf {st['k']:5d} pass {st['pss']}] "
+                          f"py {st['err_py']:.3f} m  "
+                          f"fx {st['err_fx'] if st['err_fx'] is not None else '-'}"
+                          f"  enc {st['enc']}  {st['ms']:.0f} ms", flush=True)
+                if stop_after is not None and item["k"] >= stop_after:
+                    return
+                if realtime:
+                    t_next += dt_kf
+                    pause = t_next - time.perf_counter()
+                    if pause > 0:
+                        time.sleep(pause)
+                    else:
+                        t_next = time.perf_counter()
 
     def probe(self):
         g = np.array(self.trail_gt)
@@ -1261,6 +1308,19 @@ def make_handler(live):
                     self._json(live.state)
             elif self.path == "/map":
                 self._json(live.imgd or dict(pending=True))
+            elif self.path.startswith("/reset"):
+                live._req_reset = True
+                self._json(dict(ok=True))
+            elif self.path.startswith("/env"):
+                from urllib.parse import parse_qs, urlparse
+                q = parse_qs(urlparse(self.path).query)
+                name = q.get("name", ["classroom"])[0]
+                if name in ("classroom", "mixed", "corridor", "office",
+                            "spot"):
+                    live._req_env = name
+                    self._json(dict(ok=True, env=name))
+                else:
+                    self._json(dict(ok=False, err="unknown env"))
             elif self.path == "/world":
                 # ground-truth wall segments (display overlay only)
                 segs = np.asarray(live.feed.segs, float)

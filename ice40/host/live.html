@@ -2,26 +2,58 @@
 <meta charset="utf-8">
 <title>SSP live — FPGA in the loop</title>
 <style>
-  body { margin:0; background:#0e1116; color:#d6dae0; font:13px/1.45 -apple-system, "SF Mono", Menlo, monospace; }
-  #bar { padding:8px 14px; display:flex; gap:18px; flex-wrap:wrap; align-items:baseline; border-bottom:1px solid #232833; }
-  .chip b { color:#fff; font-weight:600; }
-  .g { color:#7ee787 } .y { color:#e3b341 } .r { color:#ff7b72 } .c { color:#79c0ff } .m { color:#d2a8ff }
+  body { margin:0; background:#0e1116; color:#d6dae0;
+         font:13px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  /* numeric readouts: monospace + tabular so the bar never jitters */
+  b, .num { font-family:"SF Mono", Menlo, Consolas, monospace;
+            font-variant-numeric: tabular-nums; font-weight:600; color:#fff; }
+  #bar { padding:8px 14px; display:flex; gap:16px; flex-wrap:wrap;
+         align-items:baseline; border-bottom:1px solid #232833; }
+  .chip b { display:inline-block; text-align:right; }
+  #pss b { min-width:2ch; } #kf b { min-width:6ch; }
+  #epyc b, #efxc b { min-width:6ch; }
+  #encc b { min-width:9ch; } #segsc b { min-width:3ch; }
+  #memc b { min-width:6ch; } #msc b { min-width:5ch; }
+  .g { color:#7ee787 } .y { color:#e3b341 } .r { color:#ff7b72 }
+  .c { color:#79c0ff } .m { color:#d2a8ff }
+  .g b { color:#7ee787 } .c b { color:#79c0ff } .m b { color:#d2a8ff }
+  .r b { color:#ff7b72 }
+  #ctl { padding:6px 14px; display:flex; gap:12px; align-items:center;
+         border-bottom:1px solid #232833; color:#8b949e; }
+  select, button { background:#161b22; color:#d6dae0;
+                   border:1px solid #30363d; border-radius:6px;
+                   padding:3px 10px; font:inherit; cursor:pointer; }
+  button:hover, select:hover { border-color:#8b949e; }
   #wrap { display:flex; gap:12px; padding:12px; }
   canvas { background:#05070a; border:1px solid #232833; border-radius:6px; }
   #side { max-width:330px; }
   #side p { margin:6px 0; color:#8b949e }
   #status { color:#e3b341 }
+  #fxs { color:#e3b341 }
 </style>
 <div id="bar">
-  <span class="chip">pass <b id="pss">–</b></span>
-  <span class="chip">kf <b id="kf">–</b></span>
-  <span class="chip c">python err <b id="epy">–</b> m</span>
-  <span class="chip m">fabric err <b id="efx">–</b> m <b id="fxs"></b></span>
-  <span class="chip g">fabric encodes bit-exact <b id="enc">–</b></span>
-  <span class="chip">segs <b id="segs">–</b></span>
-  <span class="chip">map <b id="mem">–</b> KB</span>
-  <span class="chip">kf time <b id="ms">–</b> ms</span>
-  <span class="chip y" id="bridge" style="display:none">BRIDGE (synthetic interp)</span>
+  <span class="chip" id="pss">pass <b>–</b></span>
+  <span class="chip" id="kf">kf <b>–</b></span>
+  <span class="chip c" id="epyc">python err <b id="epy">–</b> m</span>
+  <span class="chip m" id="efxc">fabric err <b id="efx">–</b> m <span id="fxs"></span></span>
+  <span class="chip g" id="encc">encodes bit-exact <b id="enc">–</b></span>
+  <span class="chip" id="segsc">segs <b id="segs">–</b></span>
+  <span class="chip" id="memc">map <b id="mem">–</b> KB</span>
+  <span class="chip" id="msc">kf <b id="ms">–</b> ms</span>
+  <span class="chip y" id="bridge" style="display:none">BRIDGE (interp)</span>
+</div>
+<div id="ctl">
+  <label>env
+    <select id="envsel">
+      <option value="spot">spot (real data)</option>
+      <option value="classroom">classroom</option>
+      <option value="mixed">mixed</option>
+      <option value="corridor">corridor</option>
+      <option value="office">office</option>
+    </select>
+  </label>
+  <button id="resetbtn" title="restart mapping from keyframe 0 in the current env (fresh python SLAM + frozen map; the board re-encodes per scan)">reset map</button>
+  <span id="ctlinfo"></span>
 </div>
 <div id="wrap">
   <canvas id="cv" width="860" height="860"></canvas>
@@ -30,14 +62,15 @@
     <p><span class="g">■</span> map readout — matched-filter image probed FROM THE FPGA
        (delta probe × stored 2-bit codes; brighter = wall evidence).</p>
     <p><label><input type="checkbox" id="gtwalls" checked>
-       <span style="color:#d6dae0">╌╌</span> ground-truth walls overlay
-       (the analytic world the scans are raycast from — display only;
-       compare against the fabric's green wall evidence).</label></p>
+       <span style="color:#d6dae0">╌╌</span> reference walls overlay
+       (analytic world for synthetic envs; empty on real data — there the
+       withheld odometry trail is the only reference).</label></p>
     <p><span class="c">■</span> python SLAM pose (shipped pipeline, never reset)<br>
        <span class="m">■</span> fabric localization (frozen 2-bit map, paced match sweeps on device)<br>
-       <span style="color:#555">■</span> ground truth ghost (display only)</p>
-    <p><b>Click anywhere</b> on the map: walls visible from that position
-       (first-ridge ray march on the fabric image).</p>
+       <span style="color:#555">■</span> reference ghost (display only)</p>
+    <p><b>Click</b> the map: walls visible from that position
+       (first-ridge ray march on the fabric image).
+       <b>Esc</b> or click outside the map clears the pick.</p>
     <p><label><input type="checkbox" id="direct"> query viewpoint
        <b>directly from phasor space</b> — every ray sample is a live
        fabric readout (~120 rays × 47 ranges of match probes; replay
@@ -112,6 +145,11 @@ function render() {
     }
   }
 }
+function clearPick() {
+  if (!pick) return;
+  pick=null; hits=[]; $('pickinfo').textContent='';
+  render();
+}
 async function loadMap() {
   const m = await (await fetch('/map')).json();
   if (m.pending) { setTimeout(loadMap, 3000); return; }
@@ -127,6 +165,9 @@ async function loadTrails() {
   }
   render();
 }
+function loadWorld() {
+  fetch('/world').then(r=>r.json()).then(w=>{WORLD=w.segs; render();});
+}
 cv.addEventListener('click', async ev => {
   if (!view) return;
   const r=cv.getBoundingClientRect();
@@ -140,20 +181,48 @@ cv.addEventListener('click', async ev => {
     + (res.mode==='direct' ? ` — direct from fabric in ${res.secs}s` : ' (cached fabric image)');
   render();
 });
+// deselect: Esc anywhere, or a click outside the canvas
+window.addEventListener('keydown', ev => { if (ev.key === 'Escape') clearPick(); });
+document.addEventListener('click', ev => {
+  if (!cv.contains(ev.target) && !ev.target.closest('#side, #ctl, #bar'))
+    clearPick();
+});
+// env switch + reset map
+let envPending = false;
+$('envsel').addEventListener('change', async ev => {
+  envPending = true;
+  $('ctlinfo').textContent = `switching to ${ev.target.value}…`;
+  await fetch(`/env?name=${ev.target.value}`);
+});
+$('resetbtn').addEventListener('click', async () => {
+  $('ctlinfo').textContent = 'resetting map…';
+  await fetch('/reset');
+});
+const fmt = (v, d) => (v===null||v===undefined) ? '–' : (+v).toFixed(d);
 const es = new EventSource('/events');
 es.onmessage = ev => {
   const s = JSON.parse(ev.data);
   if (s.probe) { $('status').textContent = 'probing map from fabric: '+s.probe; return; }
   if (s.map_ready) { loadMap(); return; }
+  if (s.reset) {          // env switch / remap: clear the client view
+    MAP=null; trails={py:[],fx:[],gt:[]}; robot=null; view=null;
+    clearPick(); WORLD=null; loadWorld();
+    envPending=false; $('ctlinfo').textContent='';
+    render(); return;
+  }
   if (s.k === undefined) return;
-  $('pss').textContent=s.pss; $('kf').textContent=s.k;
-  $('epy').textContent=s.err_py; $('efx').textContent=s.err_fx??'–';
+  $('pss').firstElementChild.textContent=s.pss;
+  $('kf').firstElementChild.textContent=s.k;
+  $('epy').textContent=fmt(s.err_py, 3);
+  $('efx').textContent=fmt(s.err_fx, 3);
   $('fxs').textContent = s.fx_state && s.fx_state!=='tracking' ? '['+s.fx_state.toUpperCase()+']' : '';
   $('enc').textContent=s.enc + (s.enc_bad? ` (${s.enc_bad} BAD!)`:'');
-  $('enc').parentElement.className = 'chip ' + (s.enc_bad? 'r':'g');
-  $('segs').textContent=s.segs; $('mem').textContent=s.mem; $('ms').textContent=s.ms;
+  $('encc').className = 'chip ' + (s.enc_bad? 'r':'g');
+  $('segs').textContent=s.segs; $('mem').textContent=fmt(s.mem, 1);
+  $('ms').textContent=fmt(s.ms, 0);
   $('bridge').style.display = s.bridge? '':'none';
   $('status').textContent = s.status;
+  if (s.env && !envPending) $('envsel').value = s.env;
   robot = {gt:s.gt, py:s.py, fx:s.fx};
   trails.gt.push([s.gt[0],s.gt[1]]); trails.py.push([s.py[0],s.py[1]]);
   if (s.fx) trails.fx.push([s.fx[0],s.fx[1]]);
@@ -161,6 +230,6 @@ es.onmessage = ev => {
   render();
 };
 document.getElementById('gtwalls').addEventListener('change', render);
-fetch('/world').then(r=>r.json()).then(w=>{WORLD=w.segs; render();});
+loadWorld();
 loadTrails().then(loadMap);
 </script>
