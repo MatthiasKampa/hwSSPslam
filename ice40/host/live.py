@@ -1173,7 +1173,9 @@ class Live:
                   f"|dth| {np.rad2deg(derr):.2f} deg  (aid {aid})",
                   flush=True)
             ok += (err < 0.08 and derr < np.deg2rad(4.0))
-        assert ok >= max(2, len(items) - 1), \
+        need = max(1, len(items) - 1) if len(items) < 2 \
+            else max(2, len(items) - 1)
+        assert ok >= need, \
             f"calibration failed ({ok}/{len(items)}) — geometry mapping wrong"
         print(f"[calib] OK {ok}/{len(items)} (convention sgn_d=-1)",
               flush=True)
@@ -1265,7 +1267,7 @@ class Live:
                                     self.feed.n_tour // 3,
                                     2 * self.feed.n_tour // 3,
                                     self.feed.n_tour - 2))
-                                or (driven and item["i"] % 137 == 100)):
+                                or (driven and item["i"] % 60 == 30)):
                             calib_items.append((item, est.copy()))
                             calib_items = calib_items[-3:]
                         if getattr(self, "_req_freeze", False) and driven:
@@ -1281,7 +1283,19 @@ class Live:
                                 self.slam.relax()
                             self.freeze()
                             self.status = "calibrating matcher geometry"
-                            self.calibrate(calib_items)
+                            try:
+                                self.calibrate(calib_items)
+                            except AssertionError as e:
+                                # demo server must NOT die: report loudly
+                                # and remap instead (the board session and
+                                # UI stay alive)
+                                print(f"[calib] FAILED — remapping: {e}",
+                                      flush=True)
+                                self.status = ("calibration FAILED — "
+                                               "remapping")
+                                with self.serlock:
+                                    self.reset_for(None)
+                                break
                             if image:
                                 self.status = "probing map image from fabric"
                                 self.probe()

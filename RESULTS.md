@@ -6735,3 +6735,16 @@ with a unified content-derived view (union of map/world/trails/robot,
 padded, centered) that only refits when something leaves the box:
 deterministic across reloads once the map is up, and the robot can
 never wander outside the drawn area.
+
+### Live demo hardening: early-freeze calibration crash (2026-07-13)
+
+User-triggered crash: freezing a DRIVEN map at kf 5 left ONE calib
+sample; it passed at 1 cm but the assert demanded >= 2 successes ->
+AssertionError killed the server. Fixes: (a) threshold is now
+sample-count-aware (1 sample -> 1 must pass; >= 2 samples keep the
+original at-most-one-failure rule), (b) driven calib sampling densified
+(every 60 kf from kf 30 + the freeze keyframe), (c) the demo server
+SURVIVES a true calibration failure — loud [calib] FAILED line + auto
+remap (board session and UI stay alive) instead of a dead process.
+Verified: freeze at kf 24 -> calib OK 1/1 (0.9 cm) -> fabric tracking
+at 1.5 cm on the driven map.
