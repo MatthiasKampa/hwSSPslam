@@ -6646,3 +6646,48 @@ segment discarded, pose kept, ack 0xA7. GATE: 15-kf run with the reset
 injected at kf 7 — golden restarts with a fresh tracker+mapper —
 **15/15 pose frames + dump BIT-EXACT (dump contains ONLY the
 post-reset segment)**.
+
+### Fabric tracking on real SPOT data: the stop-and-pivot cascade, run down (2026-07-13)
+
+The reworked live demo (SpotFeed) put the v6 board's frozen-map tracker
+on real data for the first time and it DIVERGED on pass 2 (fx 0.34 ->
+6.9 m) while the python SLAM held 5 cm on the same perturbed scans and
+every encode cross-checked (enc n/n — silicon exact; the failure was
+the tracking loop). The cascade, each step measured from the bench npz:
+
+1. ZERO-VELOCITY STALL: lidar-only feeds have odom deltas == 0, so
+   pred = last pose; the robot moves 0.043 m/kf; holds stall the chain.
+   Fix: constant-velocity pred from the tracker's own history (clamped
+   0.13 m — the banked spot posture). Result: locked 2-3 cm... until
+2. CV RUNAWAY THROUGH HOLDS (kf-504 event): the robot BRAKES (gtstep
+   0.13 -> 0.02) and the scene score halves (124 -> 46 AT 3 cm ERROR —
+   scene-driven, not pose-driven); holds fire; hold-poses feed the
+   velocity back to itself and the pred runs away at EXACTLY the clamp
+   rate (+0.13 m/kf), then the robot PIVOTS ~55 deg in place; at kf 512
+   a CONFIDENT WRONG LOCK 1.8 m off (EMA decayed; the corridor-
+   degeneracy wall in tracking form, on real data).
+3. Decay (0.5x/hold trans, 0.9x heading): rides the brake (err 0.02 ->
+   0.13 -> 0.04) but the pred had slid 0.6 m before decay caught up —
+   outside the re-search reach (+-0.35 m) — and the pivot exceeded its
+   heading window (+-18 deg): drift resumed UNDER state=tracking, so
+   relock never armed (fx-th settled ~167 deg).
+4. GLOBAL-IN-HEADING RE-SEARCH (all 60 rho steps, stride 2 — position
+   stays local, heading can pivot arbitrarily while stopped): necessary
+   but not sufficient alone (the slid center still missed).
+5. FREEZE-ON-HOLD (CV zeroed the moment a hold fires — score collapses
+   coincide with stops) + wider re-search box (+-0.47 m): **fx RMSE
+   5.31 -> 0.136 m, med 0.055, p90 0.224, max 0.489; heading p90
+   19.7 deg; states 319 track / 105 hold / 5 relock — the tracker now
+   rides the stop-and-pivot (err 0.02 -> 0.12 -> 0.03 through the
+   event).** py SLAM same pass: RMSE 0.048 — the frozen-map 2b fabric
+   tracker lands within ~3x of the full float SLAM on real data,
+   LIDAR-ONLY.
+
+Also added (inert safety net): a host-side pi-BRANCH AUDIT on commits
+(conjugated-query score of the antipodal interpretation — the
+half-circle lattice folds heading mod pi and the branch bookkeeping
+can in principle slip during pivots; the conjugate-wrap physics
+distinguishes pi). Never fires in the healthy configuration; costs one
+python encode+match per committed kf. The final tracker posture: CV
+while tracking, FREEZE on holds, every-12th-hold re-search global in
+heading, local (+-0.47 m) in position.

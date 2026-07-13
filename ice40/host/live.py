@@ -598,6 +598,30 @@ class FabricLoc:
         a = self.map.anchor[aid]
         pose = np.array([*(a[:2] + S._rot(a[2]) @ t_est), wrap(a[2] + phi)])
         score = float(tot[ir, ix, iy])
+        # pi-BRANCH AUDIT (host arithmetic only; real-data pivot finding,
+        # spot kf-504 event): the half-circle lattice folds heading mod
+        # pi and phi_from picks the branch nearest the prediction — a
+        # sustained in-place pivot can walk the bookkeeping across the
+        # boundary, after which the tracker CONFIDENTLY tracks the
+        # antipodal interpretation (observed: fx heading settled ~167
+        # deg wrong with state=tracking, so holds/relock never armed).
+        # The conjugated query scores the antipodal branch exactly (the
+        # conjugate-wrap physics distinguishes pi); a decisive win flips
+        # phi back. Costs one python match_int per committed kf.
+        if score > 0:
+            if not hasattr(self, "_luts"):
+                self._luts = G.make_luts()
+            Q = G.encode_int(*q_ints, self._luts)
+            Qc = Q.copy()
+            Qc[:, 1] = -Qc[:, 1]
+            cand = (int(dU[ix]), int(dV[iy]), int(rhos[ir]) % 60)
+            s_0 = int(G.match_int(Q, self.map.codes[aid], *cand, sh,
+                                  self._luts)[:, 0].sum())
+            s_pi = int(G.match_int(Qc, self.map.codes[aid], *cand, sh,
+                                   self._luts)[:, 0].sum())
+            if s_pi > 1.15 * max(s_0, 1):
+                pose[2] = wrap(pose[2] + np.pi)
+                self.n_piflip = getattr(self, "n_piflip", 0) + 1
         # score-gated commit: a weak peak means the prediction left the
         # basin (or aliased geometry) — HOLD on odometry instead of
         # snapping, and periodically run a wide re-search around the
@@ -625,15 +649,23 @@ class FabricLoc:
 
     def _research(self, pred, sh):
         """Wide coarse re-search around the odometry pose: +-0.35 m at
-        4.7 cm, rho +-6 steps — ~1.6k candidates, ~0.4 s, occasional."""
+        4.7 cm, rho GLOBAL-IN-HEADING (all 60 half-degree-lattice steps,
+        stride 2) — ~6.8k candidates, ~0.9 s, occasional (every 12th
+        hold). The +-6-step heading window lost sustained IN-PLACE PIVOTS
+        on real data (spot kf-504 event: ~5.8 deg/kf for ~10 kf = ~55
+        deg while position holds — fine reach +-6 deg, old re-search
+        +-18 deg; the tracker then wandered off a confident wrong basin).
+        Position stays local (the robot cannot teleport); heading can
+        pivot arbitrarily while stopped — relock must be global in
+        exactly that axis."""
         aid, _ = self.map.nearest(pred[:2])[0]
         self.fab.load_seg(aid, self.map.codes[aid])
         t_pred, phi_pred = self.map.rel(pred, aid)
         d0 = self.sgn_d * np.round(t_pred / U).astype(int)
         rho0 = self.rho_of(phi_pred)
-        dU = d0[0] + 48 * np.arange(-7, 8)
-        dV = d0[1] + 48 * np.arange(-7, 8)
-        rhos = [rho0 + r for r in range(-6, 7, 2)]
+        dU = d0[0] + 48 * np.arange(-10, 11)
+        dV = d0[1] + 48 * np.arange(-10, 11)
+        rhos = [rho0 + r for r in range(0, 60, 2)]
         cands = [(int(dx), int(dy), int(rho) % 60, sh)
                  for rho in rhos for dx in dU for dy in dV]
         tot = self.fab.bsweep(cands).astype(np.float64).reshape(
@@ -1119,8 +1151,47 @@ class Live:
                     pred = (self.loc.pose if self.loc.pose is not None
                             else est)
                     if getattr(self, "_odom_prev2", None) is not None:
-                        pred = L.se2_mul(pred, L.se2_mul(
-                            L.se2_inv(self._odom_prev2), item["odom"]))
+                        d = L.se2_mul(L.se2_inv(self._odom_prev2),
+                                      item["odom"])
+                        if (np.abs(d).max() < 1e-12
+                                and self.loc.pose is not None):
+                            # LIDAR-ONLY feeds (SpotFeed: odom deltas are
+                            # EXACTLY zero): constant-velocity pred from
+                            # the tracker's OWN history — the banked spot
+                            # posture. The velocity estimate updates ONLY
+                            # from tracking-state steps and DECAYS through
+                            # holds (translation 0.5x/kf — stops are
+                            # common; heading 0.9x/kf — pivots are
+                            # sustained). Without the decay, holds feed
+                            # the velocity back to itself and the pred
+                            # runs away at exactly the clamp rate
+                            # (measured: the kf-504 stop-and-pivot event,
+                            # +0.13 m/kf through 8 holds, then a
+                            # confident wrong relock 1.8 m off).
+                            if not hasattr(self, "_fx_vel"):
+                                self._fx_vel = np.zeros(3)
+                            if (self.loc.state == "tracking"
+                                    and getattr(self, "_fx_prev", None)
+                                    is not None):
+                                v = L.se2_mul(L.se2_inv(self._fx_prev),
+                                              self.loc.pose)
+                                n = float(np.hypot(v[0], v[1]))
+                                if n > 0.13:
+                                    v[:2] *= 0.13 / n
+                                self._fx_vel = v
+                            else:
+                                # FREEZE on holds: score collapses are
+                                # scene-driven and coincide with stops
+                                # (kf-504: score 124->46 at 3 cm error);
+                                # any residual velocity slides the pred
+                                # out of the re-search reach before the
+                                # scene recovers (measured 0.6 m in 8
+                                # holds with 0.5x decay).
+                                self._fx_vel = np.zeros(3)
+                            d = self._fx_vel
+                        pred = L.se2_mul(pred, d)
+                    self._fx_prev = (None if self.loc.pose is None
+                                     else self.loc.pose.copy())
                     fx_pose, aid, score = self.loc.locate(ints, pred)
             self._odom_prev2 = item["odom"].copy()
             ms = (time.perf_counter() - t0) * 1e3
