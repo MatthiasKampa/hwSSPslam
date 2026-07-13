@@ -210,7 +210,13 @@ module top_solo #(
     endfunction
     // seg*15 / seg*8 / seg*4 region address helpers
     function [13:0] live_base(input [5:0] sg);
-        live_base = A_LIVE + {4'b0, sg, 4'b0} - {6'b0, sg, 2'b0};
+        // 15s = 16s - s. (The first form here was 16s - 4s = 12s: segment
+        // liveness regions overlapped by 3 words and each freeze clobbered
+        // its predecessor's last words — caught by the 220-kf dump diff's
+        // fingerprint: words 12..14 wrong in every segment, codes/scales/
+        // anchors clean, poses 220/220. Single-segment smokes CANNOT see
+        // stride bugs — the gate needs >= 2 segments.)
+        live_base = A_LIVE + {4'b0, sg, 4'b0} - {8'b0, sg};
     endfunction
     function [13:0] anc_base(input [5:0] sg);
         anc_base = A_ANC + {5'b0, sg, 3'b0};

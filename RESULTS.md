@@ -6532,3 +6532,38 @@ Cleanup-pass note: last session's archive move of scratch_capacity2.py
 broke 12 importers (make_wvs/rebuild_store); restored to the root this
 session — archiving load-bearing scratch modules is now a known
 cleanup-pass defect class.
+
+### v7 build session part 3 — the 220-kf standalone demo closes bit-exact; chip-built map decodes at ~11 cm (2026-07-12/13)
+
+THE FULL GATE: 220-kf classroom tour through the UART top — **220/220
+pose frames AND the 5018-byte 44-segment map dump BIT-EXACT** vs the
+golden. En route it caught one more defect (now banked as a class):
+live_base decomposed seg*15 as 16s-4s (=12s) instead of 16s-s —
+segment liveness regions overlapped by 3 words, each freeze clobbering
+its predecessor's tail. The fingerprint was surgical: poses 220/220,
+codes/scales/anchors clean, ONLY liveness words 12..14 wrong in every
+segment. Single-segment smokes structurally cannot see stride bugs —
+multi-segment (>=2 freezes) is now the minimum dump gate (15-kf
+3-segment gate added, bit-exact). Address-helper audit after the fix:
+c60 (64k-4k), mul3 (2n+n), gmul (8v+4v), th29/th35, div*12 all correct
+— live_base was the only miss.
+
+THE LAPTOP SIDE (decode.py on the CHIP-SELF-BUILT map — no python SLAM
+anywhere in the loop; 44 segments, self-mapped poses, chip-frozen
+codes/liveness/scales):
+  raw 2b dump:      p50 0.112  p90 0.909  recall 0.45   C_r .20/.31/.46/.55
+  +liveness+scales: p50 0.200  p90 0.953  recall 0.56   C_r .31/.42/.58/.49
+Headline: the chip's OWN map decodes to ~11 cm median walls —
+essentially matching the python-SLAM-built 26-seg fixture (banked
+0.105) — the full standalone story holds end to end. The planes on the
+LINE-PURSUIT self-score act as a recall/precision dial (+11 recall,
+p50 0.112->0.200; per-ring C_r visibly cleaner .20->.31 fine rings) —
+consistent with the banked framing: the liveness+scales win was
+measured on the EXTRACTION/imaging metric (AUCgt, both fixtures);
+pursuit line-centers prefer the raw store. Both readings ship in the
+dump (planes are additive; the consumer chooses).
+
+v7 acceptance status vs the pinned spec: (1) sim gate COMPLETE (all
+stages incl. the full top + dump); (2) hw-replay — blocked on the
+v7.2 LC closure (7452 LUT vs 5280, microcode plan filed); (3) the
+5-min standalone demo runs bit-exact in sim with silicon semantics.
