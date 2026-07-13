@@ -41,9 +41,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import ssp_slam_carmen as C     # noqa: E402
-import ssp_fpga as F            # noqa: E402
-import ssp_datasets as DS       # noqa: E402
+import sspslam.frontend as C     # noqa: E402
+import sspslam.quantized as F            # noqa: E402
+import runners.datasets as DS       # noqa: E402
 
 RDIR = ROOT / "demo" / "replays"
 MANIFEST = RDIR / "manifest.json"
@@ -76,7 +76,7 @@ CONFIGS = {
 
 
 def _interp2(rr, beam):
-    import ssp_sampling as SP
+    import experiments.sampling as SP
     return SP.sample_interp(rr, beam, 2, 63.4)
 
 GT_NAMES = dict(gfs="GMapping-corrected reference",
@@ -84,7 +84,7 @@ GT_NAMES = dict(gfs="GMapping-corrected reference",
                 stata="floorplan-anchored GT (independent)",
                 exact="held-out reference (withheld odometry / synthetic GT)")
 
-# --- dynamic synthetic environments (ssp_dynenv.py) ------------------------
+# --- dynamic synthetic environments (sspslam/worlds_dyn.py) ------------------------
 # Registry of exportable dynenv arms. The bundle is BUILT by ssp_dynenv.make()
 # (ssp_datasets-shaped, eval='exact'): the scoring/display reference is the
 # SYNTHETIC GROUND TRUTH itself — exact poses, no external log. Config is
@@ -131,7 +131,7 @@ DYNENV = {
 
 
 def dyn_bundle(name, cap=None):
-    import ssp_dynenv
+    import sspslam.worlds_dyn as ssp_dynenv
     return ssp_dynenv.make(cap=cap, **DYNENV[name]["make"])
 
 
@@ -162,8 +162,8 @@ def export(name, cfg_name, cap=None, stride=None):
         kw["spec"] = F.IntSpec(2, 2, 0, unit_w=True) \
             if kw["spec"][0] == "q" else F.IntSpec(*kw["spec"][1:])
     if cfg.get("hex"):
-        import ssp_lattice
-        import ssp_hexreal as H
+        import sspslam.lattice_presets as ssp_lattice
+        import experiments.hexreal as H
         ssp_lattice.set_hex(cfg["hex"])
         base = H.HexSLAM
     else:

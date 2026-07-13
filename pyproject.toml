@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sspslam"
+version = "0.1.0"
+description = "Bounded-memory VSA/SSP 2D-lidar SLAM (research artifact)"
+requires-python = ">=3.11"
+# single source of truth for pins is requirements.txt (the scipy pin is
+# load-bearing -- see the note there)
+dynamic = ["dependencies"]
+
+[tool.setuptools]
+# only the shipped library installs as a package; runners/, baselines/,
+# experiments/ execute from the repo root via `python3 -m ...`
+packages = ["sspslam"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

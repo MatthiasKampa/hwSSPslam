@@ -20,4 +20,4 @@ scratch/
 demo/replays/replay_*.json
 
 # ice40 build artifacts (bitstreams/pnr reports regenerate from rtl/)
-ice40/build/
+hw/ice40/build/

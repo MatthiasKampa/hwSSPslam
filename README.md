@@ -9,7 +9,7 @@ phase multiplication, index permutation, inner products, and vector
 addition at a few bits per component. No occupancy grid, no point cloud,
 **no sensor history**, memory bounded by *area* rather than time. The
 Python in this repo is the bit-exact reference model for that datapath
-(`SotA/fpga_design.md` is the RTL hand-off; the browser demo replays the
+(`docs/sota/fpga_design.md` is the RTL hand-off; the browser demo replays the
 real pipeline).
 
 Concretely: every 5-keyframe segment of trajectory is a **fixed-size
@@ -34,8 +34,8 @@ hypervector) on a polar frequency lattice, and the algebra does the work —
    map content is an exact index permutation (conjugate wrap on the
    half-circle grid), and a per-segment derivative vector gives sub-grid
    angles to first order — so pose-graph corrections re-place frozen
-   content with O(D) phase ops, never re-encoding (`ssp_slam_loop.py`,
-   `ssp_bounded.py`).
+   content with O(D) phase ops, never re-encoding (`sspslam/lattice.py`,
+   `sspslam/bounded.py`).
 3. **Segment-integral encoding (sinc family).** The exact line integral of
    the plane wave along a chord, sinc(k·d/2)·e^{ik·c}, unifies three
    things: interpolation between beams, *principled* fine-ring blanking
@@ -43,7 +43,7 @@ hypervector) on a polar frequency lattice, and the algebra does the work —
    beam decimation** for dense heads (GROUP/8 = 2.5× fewer encode terms,
    lossless on the 1024-beam bench). Sampling structure is per-sensor-
    regime: wide-FOV dense heads need bridging (stata 0.196 vs 1.659),
-   sparse 180° heads prefer raw arc-weighted points (`ssp_sampling.py`).
+   sparse 180° heads prefer raw arc-weighted points (`experiments/sampling.py`).
 4. **Rigid temporal-segment bounded map.** Map content lives in ephemeral
    anchor-frame segments, frozen on anchor advance, evicted by spatial
    cell-cap — O(area), history-free, and the measured law behind it: a
@@ -54,36 +54,36 @@ hypervector) on a polar frequency lattice, and the algebra does the work —
    bits/phasor + per-ring scales) keep the *algebra* intact after
    quantization; building-scale maps fit 75–625 KB of BRAM, and on fr101
    the 2-bit + int8 pipeline *beats* the float baseline (1.13 vs 1.88)
-   (`ssp_fpga.py`).
+   (`sspslam/quantized.py`).
 6. **Perturbation-band acceptance methodology.** The closure cascade is a
    measured knife-edge (1e-4 relative map noise re-rolls discrete
    admission decisions, 100–1000× amplification), so config claims on
    sensitive logs are *bands over an ε-ladder*, not points — with the
    band's entry channel localized (frontend local-bundle reads) and a
    deterministic jitter-consensus mitigation that collapses it 14×
-   (`BandSLAM`, PROTOCOL §6, `ssp_stablegate.py`).
+   (`BandSLAM`, PROTOCOL §6, `experiments/stablegate.py`).
 7. **Aperture-failure admission classifier.** Loop candidates are gated by
    per-ring coherence *relative to the session's own accepted-match EMA*,
    then split by translation-Hessian anisotropy and off-peak ridge probes
    into well/ill tiers with smooth σ-inflation instead of hard vetoes —
    calibrated once, 9/17 of its constants measured flat (bakeable), the
-   rest per-environment registers (`ssp_bounded.py`, veto-scan entry).
+   rest per-environment registers (`sspslam/bounded.py`, veto-scan entry).
 8. **Encoder lattice results.** Octave rings beat random Fourier features
    10–20× at equal D; the golden-ratio ladder is uniquely catastrophic
    (additive resonance φ² = φ+1, mechanism falsified and re-established in
    the ledger); full-circle hex lattices with plain-shift permutation are
-   the non-Manhattan option (belg 2.07 vs 2.64) (`ssp_angles.py`,
-   `ssp_hexreal.py`).
+   the non-Manhattan option (belg 2.07 vs 2.64) (`experiments/angles.py`,
+   `experiments/hexreal.py`).
 
 > **Status: active research.** This repository is a live snapshot of an
 > ongoing agentic research session; more results land frequently. The full
 > experiment ledger — every finding, negative result, retraction, and
-> reviewer audit — is [`RESULTS.md`](RESULTS.md). Read it as a lab notebook
+> reviewer audit — is [`docs/RESULTS.md`](docs/RESULTS.md). Read it as a lab notebook
 > with an abstract on top.
 
 ## Headline numbers (deterministic, reproducible)
 
-ATE rmse vs RBPF-corrected references; `ssp_bounded_carmen.py <log>`:
+ATE rmse vs RBPF-corrected references; `runners/carmen.py <log>`:
 
 | log | ours | raw odometry | map memory | speed |
 |---|---|---|---|---|
@@ -136,13 +136,13 @@ exposed. fr101 (a dense-revisit building, 1.88 m held-out) is where the closure
 machinery pays off most; MIT demonstrates the revisit-density limit at scale.
 ACES and belgioioso are frank negatives of a *specific* kind — logs whose
 odometry is already excellent, where the scan-matching **frontend** (not loop
-closure) is what costs accuracy; see RESULTS.md "the frontend do-no-harm gap".
+closure) is what costs accuracy; see docs/RESULTS.md "the frontend do-no-harm gap".
 
 ## All mechanisms, end to end
 
 ### The ordinary (float) SSP pipeline
 
-**Sampling** (`ssp_sampling.py`, per sensor regime — see novel component 3):
+**Sampling** (`experiments/sampling.py`, per sensor regime — see novel component 3):
 wide-FOV dense heads bridge consecutive returns at the 63.4° occlusion gate
 (dr ≤ 2·tangential) with arc mass r̄·dθ, as n2/n3 midpoint sub-points or
 exact sinc integrals; sparse 180° heads use one arc-weighted point per hit
@@ -150,7 +150,7 @@ exact sinc integrals; sparse 180° heads use one arc-weighted point per hit
 a control. Non-bridged (silhouette) hits are always kept at full arc weight
 — dropping them was the measured source of the old frontend damage.
 
-**Encoder** (`ssp_slam.py`, `ssp_slam_loop.py`): φ(p) = exp(iWp) on 4
+**Encoder** (`sspslam/encoder.py`, `sspslam/lattice.py`): φ(p) = exp(iWp) on 4
 octave matched rings (λ = 0.25/0.5/1/2 m) × 60 half-circle angles (D = 240
 complex). Octaves are provably the right ladder; the golden-ratio ladder is
 uniquely catastrophic (additive resonance φ² = φ+1); ring count/λ_min is a
@@ -208,7 +208,7 @@ last accept, capped 0.30 m/6°) → factor σ from anchor lever arm
 clock → per-pair dedup (re-measured edges replace only if ≥3.5× weaker) →
 repeated same-region suppressions (3 within 3 m) cap the allowance clock.
 
-**Backend** (`ssp_bounded.py`): anchor pose graph; sequential edges at
+**Backend** (`sspslam/bounded.py`): anchor pose graph; sequential edges at
 measured frontend accuracy (0.03 m/0.3°, inflated to 0.10 m/1.5° over
 odometry-fallback spans); Cauchy IRLS + leave-one-out pruning of loop
 edges; analytic-Jacobian TRF solver whose 30-evaluation cap is a
@@ -216,7 +216,7 @@ edges; analytic-Jacobian TRF solver whose 30-evaluation cap is a
 Tikhonov alternative was built, swept, and rejected). Relax every 25 kf;
 afterwards all frozen content is re-placed by O(D) permutation + phase ops.
 
-**Optional extensions** (`ssp_hier.py`): HY4 hierarchical store (0.67×
+**Optional extensions** (`experiments/hier.py`): HY4 hierarchical store (0.67×
 memory, bit-identical) and drought relocalization against a global coarse
 vector (needs the relo rings; breaks closure droughts on sparse-revisit
 logs).
@@ -231,8 +231,8 @@ logs).
 
 ### The binary datapath (what changes for silicon)
 
-Same architecture; four substitutions (`ssp_fpga.py` is the bit-accurate
-model, `SotA/fpga_design.md` the RTL hand-off):
+Same architecture; four substitutions (`sspslam/quantized.py` is the bit-accurate
+model, `docs/sota/fpga_design.md` the RTL hand-off):
 
 - **Arithmetic**: every phase evaluation goes through an 8-bit cis ROM
   (256 entries × 2 × 7-bit signed); W·p as fixed-point MACs (W rows are
@@ -278,22 +278,22 @@ core (2034 LUT / 6 EBR / 2 DSP — the S-corner rewrite; the v6 pipeline's
 with on-chip SE(2) service, fold-at-pose, and a **tuned freeze store**
 (2b phase + liveness bit + per-ring scales, 38 B/segment — beats the
 float store on extraction on both tuning fixtures) dumped over UART and
-consumed by `ice40/host/decode.py`. UP5K fit: DSP/EBR/SPRAM comfortable;
+consumed by `hw/ice40/host/decode.py`. UP5K fit: DSP/EBR/SPRAM comfortable;
 the full function is 7452 LUT vs 5280 — the control fabric, not the VSA
 datapath, is the wall (microcoded-control closure filed as v7.2; the v6
 deploy build remains the flashable hardware). Live demo:
-`ice40/host/live.py`; interactive simulator with the recipe ladders and
+`hw/ice40/host/live.py`; interactive simulator with the recipe ladders and
 the sample-replay mechanism: `demo/index.html`.
 
 ## Quickstart
 
 ```sh
-pip install -r requirements.txt   # pins are load-bearing (see RESULTS.md)
+pip install -r requirements.txt   # pins are load-bearing (see docs/RESULTS.md)
 cd data && ./fetch_datasets.sh && cd ..
-python3 ssp_bounded_carmen.py data/fr101.log     # shipped deliverable + ATE
-python3 ssp_datasets.py run stata                # flagship: floorplan GT
-python3 ssp_synth.py bench                       # SPOT-proxy 360° GT bench
-python3 ssp_bounded.py quick                     # synthetic GT bench
+python3 -m runners.carmen data/fr101.log     # shipped deliverable + ATE
+python3 -m runners.datasets run stata                # flagship: floorplan GT
+python3 -m runners.synth bench                       # SPOT-proxy 360° GT bench
+python3 -m sspslam.bounded quick                     # synthetic GT bench
 open demo/index.html                             # browser demo (9 replays + sandbox)
 ```
 
@@ -301,26 +301,35 @@ Everything is deterministic: published numbers reproduce bit-exact.
 
 ## Repository map
 
-| file | role |
+Directory = role. The shipped algorithm lives in `sspslam/` (frozen — see
+`docs/PROTOCOL.md` rule 1); everything that was ever tried lives in
+`experiments/` with its verdict; everything transient lives in gitignored
+`scratch/`. Historical docs cite the pre-2026-07-13 flat filenames — the
+old→new table is `docs/RESTRUCTURE-MAP.md`.
+
+| path | role |
 |---|---|
-| `ssp_slam.py` | encoder, matcher, synthetic world/sim (the original study) |
-| `ssp_bounded.py` | **bounded-memory continual SLAM (deliverable)** + GT bench |
-| `ssp_bounded_carmen.py` | CARMEN-log driver (Intel/fr079/ACES/MIT) |
-| `ssp_fpga.py` | **FPGA track**: write-time quantized store (per-ring polar), integer front-path model, per-beam point encoding, perturbation-band harness, op/BRAM sizing |
-| `ssp_datasets.py` | dataset registry + the ONE shared run/eval harness (gfs / range-identity / floorplan-GT / exact-synth) |
-| `ssp_sampling.py` | sampling/encoding family: bridged sub-points, exact segment integrals, group decimation, blanking compensation |
-| `ssp_synth.py` | SPOT-proxy synthetic 360° bench (exact GT, seeded) |
-| `ssp_lattice.py` | lattice patching (polar/hex, any ladder) with exact restore |
-| `ssp_stata.py` | MIT Stata bag adapter (floorplan-anchored GT) |
-| `ssp_hier.py` | hierarchical/HY4 refinement + drought relocalization (R1–R4) |
-| `ssp_slam_loop.py`, `ssp_slam_carmen.py` | earlier unbounded pipeline (kept as stratigraphy) |
-| `ssp_scale_arrays.py` | WIP: spatially-anchored per-scale submap arrays |
-| `ssp_posefilter.py` | WIP: VSA pose-posterior (harmonic Bayes) filter |
-| `baseline_icp.py` / `baseline_csm.py` / `baseline_rbpf.py` | reference baselines, same harness |
-| `bench_loop.py`, `worlds.py`, `experiments.py`, `rpe.py` | benches, worlds, encoder sweeps, metrics |
+| `sspslam/` | **the shipped library (frozen)** |
+| `sspslam/encoder.py` | scan→SSP encoder, matcher, synthetic world/sim (the original study) |
+| `sspslam/lattice.py` | polar frequency lattice globals (`LAMS`,`N_ANG`,`W`,`ENC`), rotation index-permutation, relocalization; with `frontend.py` also the earlier unbounded pipeline (kept as stratigraphy) |
+| `sspslam/frontend.py` | CARMEN-log frontend / scan-matching pipeline |
+| `sspslam/bounded.py` | **bounded-memory continual SLAM (deliverable)** + GT bench |
+| `sspslam/quantized.py` | **FPGA track**: write-time quantized store (per-ring polar), integer front-path model, per-beam point encoding, perturbation-band harness, op/BRAM sizing |
+| `sspslam/lattice_presets.py` | lattice patching (polar/hex, any ladder) with exact restore |
+| `sspslam/worlds.py`, `sspslam/worlds_dyn.py`, `sspslam/bench.py` | synthetic worlds (static + dynamic) and the GT-edge closure bench |
+| `runners/` | **CLI entry points** (`python3 -m runners.<name>` from the repo root) |
+| `runners/carmen.py` | CARMEN-log driver (fr101/fr079/fhw/belg/…) |
+| `runners/datasets.py` | dataset registry + the ONE shared run/eval harness (gfs / range-identity / floorplan-GT / exact-synth) |
+| `runners/spot.py` / `runners/stata.py` | SPOT Telluride (target platform) and MIT Stata bag adapters |
+| `runners/synth.py` | SPOT-proxy synthetic 360° bench (exact GT, seeded) |
+| `runners/rpe.py` | relative-pose-error metric CLI over saved trajectories |
+| `baselines/` | ICP / CSM / RBPF / Scan-Context controls, same harness |
+| `experiments/` | one module per catalogued experiment — **`experiments/README.md` is the index with verdicts + run recipes**; notable: `sampling.py` (encoding family), `hier.py` (HY4, adopted), `scale_arrays.py`, `posefilter.py` |
+| `hw/ice40/` | FPGA track: `rtl/`, `host/` tools (incl. the live demo server `host/live.py`), `golden.py` integer golden model |
 | `demo/` | self-contained browser demo: interactive synth sandbox + 9 real-data replays (stata/fhw/fr101/fr079/belg incl. binary, hex, and the deploy-sampler configs) exported by `demo/export_replay.py` from the real pipeline — Python is the source of truth |
-| `SotA/` | literature scout notes (VSA/SSP theory, spectral registration, backends, golden-ratio sampling) |
-| `RESULTS.md` | **the ledger**: all findings, tables, negatives, audits |
+| `docs/` | `FINDINGS.md` (the synthesis — read this first), `RESULTS.md` (**the ledger**: all findings, tables, negatives, audits), `PROTOCOL.md` (experimental discipline), `RESTRUCTURE-MAP.md`, `sota/` literature notes |
+| `data/` | datasets (gitignored; `data/fetch_datasets.sh`) |
+| `scratch/` | ALL transient session scripts/logs (gitignored) |
 | `archive/` | superseded implementations kept for provenance |
 
 ## Datasets & acknowledgements
@@ -472,4 +481,4 @@ closest relatives come first, with a line on where this project departs.
 - Winkelmann et al. (IEEE TMI 2007) golden-angle radial MRI and Fibonacci
   lattices — the *positive* golden-ratio sampling tradition that the
   ladder-catastrophe result (φ² = φ + 1 additive resonance) cuts against;
-  the longer scouted list lives in `SotA/golden_dithering.md`.
+  the longer scouted list lives in `docs/sota/golden_dithering.md`.
