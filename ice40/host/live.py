@@ -267,6 +267,44 @@ class Feed:
             self.k_global += 1
 
 
+class SpotFeed:
+    """REAL-DATA feed: the SPOT Telluride tour (data/spot_telluride/
+    scans.npz via ssp_spot.make_bundle — 1024 beams on the fabric's exact
+    az grid, 5 Hz keyframes). LIDAR-ONLY POSTURE (anti-oracle): item
+    ['odom'] is a ZERO-MOTION chain anchored at the reference's first
+    pose, so the pass-1 guess degenerates to the previous estimate (the
+    banked lidar-only spot runs chain CV from own estimates; at these
+    keyframe strides the matcher window covers the difference). item
+    ['gt'] carries the WITHHELD odometry reference — display/eval ONLY.
+    Passes replay the same scans verbatim (real data: no per-pass noise
+    redraw); the tour is closed by wrapping to kf 0 (the spot loop
+    revisits its start), so there is no synthetic bridge (n_tour ==
+    n_loop, bridge always False)."""
+
+    def __init__(self, seed=11, laps=1, n_beams=1024, traj="orbit"):
+        import ssp_spot as SP
+        b = SP.make_bundle()
+        self.keys = b["keys"]
+        self.beam = b["beam"]
+        self.gt_ok = b["gt_ok"]
+        self.segs = []                    # no analytic walls (real data)
+        self.n_tour = self.n_loop = len(self.keys)
+        self.k_global = 0
+        self.odom0 = np.array(self.keys[0][1], float)   # boot datum only
+
+    def __iter__(self):
+        while True:
+            p = self.k_global // self.n_loop
+            i = self.k_global % self.n_loop
+            r, gt, _t = self.keys[i]
+            yield dict(k=self.k_global, p=p, i=i,
+                       gt=np.array(gt, float),
+                       odom=self.odom0.copy(),
+                       r=np.asarray(r, float).copy(),
+                       bridge=False)
+            self.k_global += 1
+
+
 # ------------------------------------------------------------- fabric side
 class Fabric:
     """Board wrapper: live encode + cross-check, M loads, localization
@@ -877,7 +915,8 @@ def _mask_free(mask, g):
 class Live:
     def __init__(self, laps=2, seed=11, port=None, env="classroom",
                  traj="orbit"):
-        self.feed = Feed(seed=seed, laps=laps, env=env, traj=traj)
+        self.feed = (SpotFeed(seed=seed, laps=laps) if env == "spot"
+                     else Feed(seed=seed, laps=laps, env=env, traj=traj))
         self.slam = F.BandSLAM(robust=True, attempt_every=4, relax_every=25,
                                gap_kf=300, recent_aids=12, spec=None, nph=0)
         self.slam.store_dtype = np.complex64

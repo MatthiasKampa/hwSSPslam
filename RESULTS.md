@@ -6567,3 +6567,53 @@ v7 acceptance status vs the pinned spec: (1) sim gate COMPLETE (all
 stages incl. the full top + dump); (2) hw-replay — blocked on the
 v7.2 LC closure (7452 LUT vs 5280, microcode plan filed); (3) the
 5-min standalone demo runs bit-exact in sim with silicon semantics.
+
+### Webvis: sample replay visualized on REAL DATA (2026-07-13)
+
+User directive. The sandbox reservoir mechanism now also runs on the
+real-data replay tab, on the JS-refolded panel map (RMR, own seeded
+rng so it never perturbs the sandbox stream): per replayed keyframe,
+one buffered snapshot is re-matched against the local segment bundle
+(rmBundle + the panel's viz matcher) and re-folded — score-improved
+refinements update the snapshot's stored pose; rehearsals fold at the
+stored pose. Rehearsal mass goes into the ANCHOR-FRAME segment store
+(rmReplayFold: nearest live anchor, rel = anchor^-1 o pose) so graph
+snaps re-place it exactly like normal folds, and sv.nf++ lets the
+line-prior overlay see rehearsed content. The replayed trajectory
+stays authoritative (poses are recorded; only map content anneals).
+Overlay: teal rings = refined, gray = rehearsal (fading 12-deep trail);
+the replay counter shows improved/total for whichever mode is active.
+Reset on cRes toggle, resetIntel/rmReset, and cBin rebuilds.
+
+VALIDATOR DEFECT FOUND AND FIXED: the parse/id gate selected the
+LARGEST <script> — which is the 25 MB replay DATA pack, not the 150 KB
+core; this session's earlier "parse green" checks were validating the
+data blob. The gate now keys on the __CORE_START__ marker and parses
+BOTH scripts (core + data) with the SyntaxError-injection control; the
+core (with all session edits) parses clean, 52 ids resolved. Defect
+class: max-by-size selection of embedded scripts.
+
+### Live demo reworked onto SPOT data; hw session notes (2026-07-13)
+
+User directive ("rework the demo to run with spot data anyway"). live.py
+gains SpotFeed (additive; the hardware pipeline untouched): the SPOT
+Telluride tour (414 kf, 1024 beams on the fabric's exact az grid, 5 Hz)
+replaces the synthetic raycast feed under env="spot". LIDAR-ONLY
+posture preserved (anti-oracle): item['odom'] is a ZERO-MOTION chain
+anchored at the reference's first pose, so pass-1 guesses degenerate to
+the previous estimate; the withheld odometry rides along as item['gt']
+for display/eval ONLY (gt_ok hygiene mask from the banked sorted-parquet
+fix). Passes replay the same scans verbatim; no synthetic bridge (the
+spot loop revisits its start). ssp_spot.DIR made cwd-independent
+(live.py runs from ice40/host — the relative path broke the first
+launch). Boot verified on hardware: fabric encode cross-checks green
+from kf 0 (enc n/n), pass-1 tracking ~0.01 m vs reference early on.
+Run: `python3 live.py serve 8642 1 spot`.
+
+HW session note (user observation, classroom synth on the v6 board,
+pre-rework): after a long run the live trajectory had drifted upward by
+~half the orbit ellipse before the USB cable was pulled. Not diagnosed
+(the session moved to spot data); filed — candidate mechanisms: map
+staleness under the frozen classroom map across many replay passes, or
+EMA-hold drift accumulation. The spot demo (real data, one tour +
+replay passes) is the deployment-shaped configuration anyway.

@@ -28,8 +28,8 @@ import ssp_slam as S
 import ssp_slam_loop as L
 import ssp_fpga as F
 
-DIR = Path("data/spot_telluride")
-CACHE = DIR / "scans.npz"
+DIR = Path(__file__).resolve().parent / "data" / "spot_telluride"
+CACHE = DIR / "scans.npz"      # cwd-independent (live.py runs elsewhere)
 N_BEAM = 1024
 STRIDE = 4                    # keyframe every Nth cloud (20 Hz -> 5 Hz)
 R_MIN, R_MAX = 0.3, 60.0
