@@ -413,3 +413,23 @@ Run: `python3 -m experiments.delayfuse [bench|selftest]`. IMU third tier
 filed for ISM330DHCX arrival. Multi-venue lattice gate lives in
 `sspax/realbench.py mv` (adopted: azel-oct6 D240, ring-coarse16 D1920 —
 see RESULTS).
+
+**Frozen-bank v2.2 weight semantics (2026-07-15)** — `experiments/frozenbank2.py`
+(subclasses frozenbank's FrozenBankSLAM; `_try_frozen` replicated with one
+changed branch): the FILED reconciliation measured — WELL/target-tier
+matches at full weight, marginal tier at `weak_mult` × the shipped
+inflation (mult=1 ≡ v2, reproduced bit-exactly on fr101 + belg; mult→∞ ≈
+v2.1). Verdicts: **mult=8 is the first single weight semantics to
+reconcile the historical conflict table** (fr101 **1.725** = best stable
+in project history, belg 2.041, fhw 0.655, stata-celld 0.210 in-band,
+spot 0.036, school ~no-op); fr101's mult=4 ATE 1.129 is a KNIFE-EDGE
+basin (neighbors 1.84/1.86 — audited, not a recipe); the response
+surface is non-smooth (per-venue mult tuning NOT sanctioned). **BUT
+fr079 crashes under EVERY variant** (OFF 5.523 ≡ acceptance; v2 12.1 /
+v2.1 9.0 / v2.2@8 10.6; celld inert — 0 freezes rejected, aliasing
+passes the 0.75 distinctiveness screen while poisoning the metric
+matches — the loop-closure wall inside this thread). STATUS: suite-
+default CLOSED for the mechanism; per-environment OPT-IN with v2.2@8 as
+the recommended form (fhw-class may opt up to strict/m16 = 0.242-0.250);
+fr079-class corridor logs EXCLUDED. Run: `python3 -m
+experiments.frozenbank2 sweep|confirm <mult>|venue <name> <mult> [policy]`.

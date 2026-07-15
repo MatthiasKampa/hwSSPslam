@@ -63,6 +63,13 @@ output of the unified nets' tracking heads at the pinned resolutions.
   replicates, translation regresses (+42%/+21% vs W_vis3d); the vision
   verify space stays W_vis3d (translation feeds the 26-42 mm ego
   service). Final: 2 adopted / 2 not.
+- FYI (deploy-side thread, peripheral to you): frozen-bank v2.2 knob
+  measured (experiments/frozenbank2.py) — mult=8 reconciles the old
+  fr101/belg conflict (fr101 1.725 = best stable ever) but fr079
+  crashes under EVERY weight semantics AND the distinctiveness screen
+  (the loop-closure wall inside this thread); suite-default closed for
+  a measured reason, per-environment opt-in stands. Full table in
+  RESULTS.
 
 == 1. REVIEW VERDICT on dc996a5 ==============================================
 

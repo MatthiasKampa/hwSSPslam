@@ -8273,3 +8273,58 @@ where the hand pick was scale-mismatched; one formula replaces the
 per-venue ladder choice. EXTENT_C refines when the other agent's
 densified lam_max*(extent) fit lands (msg P5); the learned thermometer
 head (P1) must now beat THIS rule, not just the fixed recipes.
+
+## 2026-07-15 — frozen-bank v2.2 (experiments/frozenbank2.py): the weight-semantics knob measured end-to-end; mult=8 reconciles the historical conflict table (fr101 1.725 = best stable ever) — and fr079 closes the suite-default door at the mechanism level
+
+The FILED reconciliation ("WELL-tier -> full weight, else soft"),
+implemented as ONE knob: WELL/target-tier matches (shipped
+_coh_response == 1.0) at full weight; marginal matches accepted at
+weak_mult x the shipped inflation. mult=1 IS v2; mult -> inf
+approaches v2.1. REPLICATION GATE PASSED: mult=1 reproduces banked v2
+bit-exactly (fr101 2.132, belg 2.042). Sweep (ATE; OFF = acceptance
+1.881 / 2.64 / 0.981 / 0.202):
+
+  mult     1(=v2)   2      3      4       5      6      8      16    v2.1
+  fr101    2.132  2.754  1.842  1.129*  1.856  1.841  1.725  2.078  1.827
+  belg     2.042  2.135  2.363  2.934   2.372    —    2.041  2.038  2.729
+  fhw      0.610    —      —    0.895     —      —    0.655  0.250  0.242
+  stata'   0.193    —      —    0.210     —      —    0.210  0.210  0.209
+  (stata' = celld policy)
+
+- *fr101 mult=4 ATE 1.129 audited per rule 4: KNIFE-EDGE basin
+  (neighbors 3/5/6 give 1.84/1.86/1.84) — not a recipe. The STABLE
+  band mult 3-8 is 1.73-1.86, ALL better than OFF 1.881 and the banked
+  best 1.827; best stable fr101 in project history = **1.725 @ mult=8**
+  (med 1.378 vs v2's 1.823).
+- **mult=8 is the first single weight semantics to reconcile the
+  fr101/belg conflict** (both win) + fhw 0.655 (1.5x) + stata 0.210
+  (inside the 0.193-0.225 variant band). Acceptance sweep at mult=8:
+  spot 0.036 (OFF 0.039), school_run2 med 1.062 (~OFF; scored window
+  return-leg-blind as banked) — and **fr079 10.635 vs OFF 5.523
+  (reproduces acceptance exactly): a 2x CRASH**.
+- fr079 attribution (never gated in the earlier frozen-bank rounds):
+  v2-soft 12.124 / v2.1-STRICT 9.024 / v2.2@8 10.635 — EVERY weight
+  semantics crashes it (73-151 aliased raw-raw closures pass even
+  strict admission). celld is INERT on fr079 (identical run, 0 freezes
+  rejected): corridor aliasing passes the 0.75 place-distinctiveness
+  screen while still poisoning the metric matches. This is the
+  project's loop-closure wall (FINDINGS §5-6) surfacing inside the
+  frozen-bank thread: admission, not weighting, is what fails on
+  aliased corridors, and no appearance-level screen fixes it.
+- celld ≡ cell bit-exactly on fr101/fhw/belg too — the distinctiveness
+  tau binds ONLY on stata in the entire suite (its anchor twins are the
+  only sub-0.75 aliases at the place-vector level).
+- The mult response is NON-SMOOTH everywhere (fr101 spike at 4, belg
+  dip at 4-5, fhw dip at 4): the IRLS relax basin-hops with edge
+  weight. Per-venue mult tuning is NOT sanctioned (rule 5).
+
+VERDICT: suite-default REMAINS CLOSED — now for a measured reason
+(fr079-class aliased corridors crash under every variant of the
+mechanism). Frozen-bank stays per-environment OPT-IN with **v2.2@8 as
+the recommended opt-in form** (revisit-rich venues: fr101 1.725 / belg
+2.041 / fhw 0.655; fhw-class halls may opt UP to strict or mult=16 for
+0.242-0.250); stata-class keeps celld (0.193-0.210 across semantics);
+fr079-class EXCLUDED. The weight-semantics question the v2/v2.1 round
+filed is now ANSWERED, not open: the reconciliation exists (mult=8)
+but cannot buy a suite-default because the failure that blocks it
+lives in admission, not weights.
