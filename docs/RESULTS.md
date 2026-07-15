@@ -8207,3 +8207,24 @@ entire first transaction (sim-only, silicon unaffected); fixed
 structurally with a function-ROM (evaluates at call time). Second
 sighting class of "tb stimulus/initialization races" — prefer
 function-ROMs over always@* muxes for boot-path constants.
+
+## 2026-07-15 — network geometry PINNED (user directive b): unified dual-objective nets at full/half sensor res; budget verified
+
+User: both CNNs train for full or half res; the vision CNN optimized
+for BOTH tracking and classification — SEGMENTED classification, so
+features are spatially encodable into the map. Encoded in
+TRAINING_PROGRAM.md ("Network geometry") + cnn_budget.py ARCHS:
+ONE net per modality, shared trunk, tracking head (weights +
+thermometer cutoff) @frame rate + per-cell seg/label head @keyframe
+rate; vision Y8 320x240/160x120, lidar ring raster 3x1024/3x512
+(rings-as-channels; BEV demoted to mechanism-study surface).
+Budget verdicts (cnn_budget.py): uni-trunk+track FULL 11.3 MMAC =
+fits @120 int8-packed 2x headroom (HALF 8x); 40-class seg head on the
+40x30x64 trunk 16.7 MMAC @5 Hz (32x headroom, 14k params EBR);
+lidar-track FULL 1024x3 2.5 MMAC @20 trivial; label head @kf trivial.
+CONSTRAINT surfaced: concurrent full+full line buffers (13.1 vision +
+22 KB lidar) + weights = 54.5 of 55 KB CNN-EBR — edge-exact int8;
+half-res lidar (11 KB) or BNN weights restores margin. msg.txt §0
+addendum re-shapes the other agent's P3 (unified lidar net at ring
+raster, two heads) and P4 (NYUv2 = seg head of the SAME vision net,
+resized to deploy res).

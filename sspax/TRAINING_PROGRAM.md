@@ -5,6 +5,41 @@ distinct regimes, for BOTH modalities** — and every trained artifact must
 fit the ECP5 budget (BNN/int8, streaming, Y8-gray input for vision, 3-ring
 range/BEV input for lidar) and pass the real-data gates below.
 
+## Network geometry (user 2026-07-15b): TWO nets, shared trunks, full/half res
+
+Binding constraints on every trained artifact from here on:
+
+1. **Input resolution is pinned to FULL or HALF sensor res** — train AND
+   gate at deploy geometry, never toy rasters:
+   - vision: Y8 **320×240 (full)** or **160×120 (half)**; external
+     datasets (NYUv2 etc.) are resized to these before anything sees them;
+   - lidar: the deploy ingest ring-range raster, rings-as-channels —
+     **3×1024 (full)** or **3×512 (half)** beams. (BEV grids remain a
+     mechanism-study surface only; adoption form is the ingest raster.)
+2. **The vision CNN is ONE dual-objective net**: a shared trunk with
+   (a) a TRACKING head — per-cell weights (+ thermometer scale cutoff),
+   the Regime-A outputs serving ego-motion/place/verify; and
+   (b) a **SEGMENTED classification head** — per-cell class → k-bit label
+   latent (Regime B). Per-cell is load-bearing, never whole-image: the
+   map binds features AT POSITIONS, so only spatially-resolved labels can
+   be encoded/queried (objmap/semantic map).
+   Joint training: alternate SLAM-sequence batches (tracking losses,
+   self-supervised) with segmented-dataset batches (per-cell CE);
+   Regime C fine-tunes the same trunk through the VSA decode.
+3. **The lidar CNN mirrors it**: shared trunk on the ring raster with a
+   tracking head (saliency/weight + cutoff) @20 Hz and a distilled
+   per-cell label head (Regime B cross-modal) @keyframe rate.
+4. **Rate split on fabric** (verified in cnn_budget.py, this date):
+   trunk + tracking head run at FRAME rate (vision full-res 11.3 MMAC =
+   fits @120 int8-packed with 2× headroom; half-res 8×; lidar full
+   2.5 MMAC @20 trivial); the seg/label heads re-use the latest trunk
+   features at KEYFRAME rate (vision 40-class head 16.7 MMAC @5 Hz =
+   32× headroom, 14k params EBR-resident). EBR caveat: full+full line
+   buffers (13.1 KB vision + 22 KB lidar) + weights ≈ 54.5 of 55 KB —
+   edge-exact int8; half-res lidar (11 KB) or BNN weights restores
+   margin. Both full and half variants are sanctioned; report budget
+   lines for whichever is trained.
+
 ## Regime A — end-to-end THROUGH the VSA, for SLAM feature quality
 
 Self-supervised. The net emits per-feature WEIGHTS (and nothing else); the
@@ -17,10 +52,12 @@ is the SLAM objective itself:
   (ii) differentiable registration (synthetic SE(3) on real frames,
   soft-argmax correlation decode, penalize pose error); (iii) verify
   conditioning (6×6 derivative-solve error on adjacent pairs).
-- lidar: SaliencyNet at DEPLOY scale — k≈2000 (not the k=32 toy), 3-ring
-  ingest raster in; existing `learn_lidar.py` is the seed.
-- vision: CellWeightNet — Y8 QVGA in, per-c16-cell weight out, replacing
-  the intensity/gradmag heuristics in gridint/gyro encodes.
+- lidar: the TRACKING head of the unified lidar net (geometry section
+  above) at DEPLOY scale — k≈2000 (not the k=32 toy), ring raster
+  3×1024 full / 3×512 half in; existing `learn_lidar.py` is the seed.
+- vision: the TRACKING head of the unified vision net — Y8 full/half
+  QVGA in, per-cell weight (+cutoff) out, replacing the
+  intensity/gradmag heuristics in gridint/gyro encodes.
 - gates: school+classroom place vs the ADOPTED v1.4 recipes at equal D
   (multi-venue-gated 2026-07-15: azel-oct6 D240 = 0.947 classroom
   honest / 0.892 school est; ring-coarse16 D1920 = 0.976 / 0.940 —
@@ -30,10 +67,12 @@ is the SLAM objective itself:
 ## Regime B — WITHOUT the VSA: label latents (semantic descriptors)
 
 Supervised on SEGMENTED indoor data (NYUv2 primary, SUN RGB-D scale-up —
-per-cell heads, never whole-image):
+per-cell heads, never whole-image; images resized to the pinned deploy
+res 320×240 / 160×120 before training):
 
-- vision: per-c8/c16-cell class embedding → binarized **k-bit label
-  vector**. The bits play TWO roles:
+- vision: the SEG head of the SAME unified net (shared trunk with the
+  tracking head — geometry section above): per-cell class embedding →
+  binarized **k-bit label vector**. The bits play TWO roles:
     1. semantic KEY — bound into the map (ROLES-binding / bipolar spatter;
        P4b compares the two at equal bits);
     2. **encoding STRENGTH** — the feature's write weight is a function of
@@ -43,8 +82,9 @@ per-cell heads, never whole-image):
        shift-add; no multipliers.
 - lidar: labels are scarce → CROSS-MODAL DISTILLATION: the trained vision
   net labels pixels; registered depth (TUM today, lidar-projected depth
-  after extrinsics) lifts them to 3D points; a small point/BEV net learns
-  to predict those labels from GEOMETRY alone. Vision teaches lidar; no
+  after extrinsics) lifts them to 3D points; the LABEL head of the
+  unified lidar net (ring-raster input, geometry section) learns to
+  predict those labels from GEOMETRY alone. Vision teaches lidar; no
   manual lidar labels.
 - gates: seg mIoU sanity; cross-view descriptor stability on TUM (adjacent
   vs far — the failure mode that killed raw census); semantic-map P/R on
@@ -128,6 +168,9 @@ REPORTED (they are interpretable — which scales did each class buy?).
 
 - Determinism (fixed seeds), anti-oracle statements per bench, negatives
   banked in docs/RESULTS.md.
+- Input geometry pinned (2026-07-15b): vision 320×240 or 160×120 Y8;
+  lidar ring raster 3×1024 or 3×512. External datasets resized to these;
+  no toy-resolution training runs count toward a gate.
 - Budgets printed with every result: params, int8/BNN bytes, MACs (or
   XNOR-popcounts) per frame at QVGA120 / 20 Hz lidar, LUT/DSP estimate.
 - HARD per-rate ceilings from the full-board envelope

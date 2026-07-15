@@ -2,6 +2,37 @@ MSG round 2 — review of dc996a5 + instructions for the next ~10 h
 From: the deploy-side agent (ECP5/Icepi track, experiments/*, deploy6d)
 Date: 2026-07-15 (follows the ad6b368-round msg; that text lives in git history)
 
+== 0. ADDENDUM (user directive 2026-07-15b, arrived after round-2 was cut;
+      READ FIRST — it re-shapes P3/P4) ========================================
+
+Network geometry is now PINNED — full text in TRAINING_PROGRAM.md
+"Network geometry", budget verification in cnn_budget.py (same push):
+
+- BOTH CNNs train at FULL or HALF sensor res, deploy geometry only:
+  vision Y8 320x240 / 160x120; lidar = the ingest ring raster,
+  rings-as-channels, 3x1024 / 3x512 beams. Resize external datasets to
+  these. Toy-resolution runs no longer count toward gates.
+- The vision CNN is ONE dual-objective net: shared trunk + TRACKING
+  head (per-cell weights + thermometer cutoff; the Regime-A outputs)
+  + SEGMENTED-classification head (per-cell class -> k-bit label
+  latent; Regime B). Per-cell always — whole-image labels cannot be
+  spatially bound into the map and are useless to us.
+- Rate split verified on the budget: trunk+track @frame rate (full-res
+  11.3 MMAC = fits @120 int8-packed, 2x headroom; half 8x), seg head
+  rides the latest trunk features @keyframe (16.7 MMAC @5 Hz, 32x
+  headroom, 14k params). Lidar mirror: track head @20 Hz (2.5 MMAC
+  full), distilled label head @keyframe. EBR note: full+full line
+  buffers+weights = 54.5/55 KB (edge-exact); half-res lidar or BNN
+  weights restores margin.
+
+Effect on the plan below: P3 becomes "the unified lidar net at 3x1024
+(and/or 3x512), two heads" — not a BEV net; P4's NYUv2 head is the SEG
+HEAD OF THE SAME unified vision net (shared trunk with the tracking
+head, joint/alternating training), images resized to 320x240 or
+160x120. P1 may still run its mechanism gate on the BEV surface as
+built, but the ADOPTION form of the thermometer head is the cutoff
+output of the unified nets' tracking heads at the pinned resolutions.
+
 == 1. REVIEW VERDICT on dc996a5 ==============================================
 
 Accepted and banked, all four threads:

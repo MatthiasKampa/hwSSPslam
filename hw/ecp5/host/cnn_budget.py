@@ -72,6 +72,26 @@ def cost(arch, w, h):
 
 
 ARCHS = {
+    # UNIFIED vision net (user 2026-07-15: ONE net, tracking +
+    # SEGMENTED classification; full/half res). Split across rate
+    # tiers: trunk + tracking head at FRAME rate; the seg head reuses
+    # the latest trunk features at KEYFRAME rate (entry below).
+    "uni-trunk+track FULL": (
+        [conv(3, 1, 8, 2), conv(3, 8, 8, 1, dw=True), conv(1, 8, 16),
+         conv(3, 16, 16, 2, dw=True), conv(1, 16, 32),
+         conv(3, 32, 32, 2, dw=True), conv(1, 32, 64),
+         conv(1, 64, 2)], 320, 240,
+        [120, 60], "trunk->40x30x64 + w/cutoff head"),
+    "uni-trunk+track HALF": (
+        [conv(3, 1, 8, 2), conv(3, 8, 8, 1, dw=True), conv(1, 8, 16),
+         conv(3, 16, 16, 2, dw=True), conv(1, 16, 32),
+         conv(3, 32, 32, 2, dw=True), conv(1, 32, 64),
+         conv(1, 64, 2)], 160, 120,
+        [120], "trunk->20x15x64 + w/cutoff head"),
+    "uni-seg-head @kf (on trunk)": (
+        [conv(3, 64, 64, 1, dw=True), conv(1, 64, 128),
+         conv(1, 128, 40)], 40, 30,
+        [5], "40-class per-cell seg 40x30"),
     # regime A vision: per-c16-cell weight head (ego-motion/place tiers)
     "cellweight-A (vision)": (
         [conv(3, 1, 8, 2), conv(3, 8, 8, 1, dw=True), conv(1, 8, 16),
@@ -90,10 +110,18 @@ ARCHS = {
          conv(3, 64, 64, 2, dw=True), conv(1, 64, 128),
          conv(1, 128, 40)], 320, 240,
         [5], "40-class seg 40x30"),
-    # regime A lidar: saliency at deploy ingest (3-ring raster)
-    "saliency (lidar)": (
-        [conv(3, 3, 8), conv(3, 8, 8), conv(1, 8, 1)], 128, 24,
-        [20], "per-cell saliency"),
+    # UNIFIED lidar net at the DEPLOY ingest raster, full/half beam res
+    # (user 2026-07-15: no toy rasters): rings-as-channels 3 x beams;
+    # track head @20 Hz, distilled per-cell label head @keyframe.
+    "lidar-track FULL 1024x3": (
+        [conv(3, 3, 8), conv(3, 8, 8), conv(1, 8, 2)], 1024, 3,
+        [20], "per-beam-cell w/cutoff"),
+    "lidar-track HALF 512x3": (
+        [conv(3, 3, 8), conv(3, 8, 8), conv(1, 8, 2)], 512, 3,
+        [20], "per-beam-cell w/cutoff"),
+    "lidar-label @kf (on trunk)": (
+        [conv(3, 8, 16), conv(1, 16, 16)], 1024, 3,
+        [5], "distilled label bits"),
     # regime B/C keyframe class unlocked by SDRAM weights + full DSP:
     "seg-mnetv2-class (vision)": (
         [conv(3, 1, 16, 2), conv(3, 16, 16, 1, dw=True), conv(1, 16, 32),
