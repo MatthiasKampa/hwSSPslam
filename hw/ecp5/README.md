@@ -210,6 +210,33 @@ headroom goes to (in current expected-value order):
 | RESET# / PWDN | 7 / 13 | gpio[4] R1 / gpio[27] P3 |
 | 3V3 / GND | 1 or 17 / 6,9,14,… | module has onboard 2.8/1.5 V regulators |
 
+## ISM330DHCX IMU wiring map (user 2026-07-15: baseline + fusion; Pi-header
+## pin #s; SPI mode-3 4-wire on the Pi's native SPI0 positions)
+
+| IMU module | header pin | FPGA net / site |
+|---|---|---|
+| SCL/SPC (SCLK) | 23 | imu_sclk, gpio[11] G2 |
+| SDA/SDI (MOSI) | 19 | imu_mosi, gpio[10] L2 |
+| SDO/SA0 (MISO) | 21 | imu_miso, gpio[9] J1 |
+| CS | 32 | imu_cs, gpio[12] J3 (idle high) |
+| INT1 / INT2 | 38 / 40 | imu_int1 F1 / imu_int2 F2 |
+| VIN 3V3 / GND | 17 / 25,30,34,39 | (camera takes 3V3 pin 1) |
+
+No pin collisions with the camera map; `make build/full.lpf` composes
+board + camera + IMU constraints (safe for any top). Bring-up rung 1 is
+flash-ready pre-arrival: `rtl/spi_reg.v` (mode-3 register master,
+3.125 MHz SCLK, SPI PASS vs a bit-level ST-style slave) +
+`rtl/top_ism330_id.v` — send any UART byte, expect **0x6B** (WHO_AM_I)
++ INT status. Ladder after silicon hello: (2) CTRL config + polled
+gyro/accel reads → offline comparison against the visual/cloud gyros
+on the same motion; (3) FIFO streaming with FPGA timestamps on the
+SAME 50 MHz counter as DVP/lidar (the single-clock-owner rule from the
+delay design — the IMU is the highest-rate stream and the temporal
+anchor); (4) fusion experiments: gravity = absolute pitch/roll anchor
+for the 6-DoF layer, gyro = drift baseline vs our 1.08° fused
+visual+cloud service, and the IMU/wheel-slip residual class from
+FINDINGS §6 as the wall-crossing independent cue.
+
 Bring-up ladder (each step machine-gated like the fast9 silicon gate):
 1. SCCB chip-ID read → expect 0x5640 (the hello-world).
    `make TOP=top_ov5640_id RTL="rtl/sccb.v ../ice40/rtl/uart.v

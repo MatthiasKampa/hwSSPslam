@@ -62,6 +62,18 @@ build/cam.lpf: icepi-zero.lpf cam-pins.lpf
 	@mkdir -p build
 	cat icepi-zero.lpf cam-pins.lpf > $@
 
+# full sensor set (camera + ISM330DHCX IMU) — safe for any top: nextpnr
+# ignores LOCATEs for ports a design does not have
+build/full.lpf: icepi-zero.lpf cam-pins.lpf imu-pins.lpf
+	@mkdir -p build
+	cat icepi-zero.lpf cam-pins.lpf imu-pins.lpf > $@
+
+sim-spi:
+	@mkdir -p build
+	$(TOOLS)/iverilog -g2012 -o build/tb_spi.vvp rtl/spi_reg.v \
+	  rtl/tb_spi.v
+	cd build && $(TOOLS)/vvp tb_spi.vvp
+
 prog: $(B).bit
 	$(TOOLS)/openFPGALoader -b icepi-zero $<
 

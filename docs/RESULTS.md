@@ -7756,3 +7756,24 @@ queries (48 drawn, depth-spread + multi-view filters); poses DIAGNOSTIC
   multi-view; stage-1 shortlist from the snapshot library.
 - Residual wall: p90 localization 1-1.5 m (a hard tail of queries
   never decodes — texture-poor or view-unstable patches).
+
+## 2026-07-15 — ISM330DHCX IMU IO/pinout prepared, SPI rung 1 sim-gated + flash-ready (user: baseline or fusion; hw/ecp5/imu-pins.lpf, rtl/{spi_reg,tb_spi,top_ism330_id}.v)
+
+Role in the architecture (three hats): (a) gyro = high-rate drift
+BASELINE against the fused visual+cloud service (1.08°/step); (b)
+accel gravity = ABSOLUTE pitch/roll anchor — the drift-free attitude
+reference the 6-DoF layer lacks; (c) the FINDINGS §6
+independent-absolute-cue class (IMU residual) for wall-crossing.
+Pinout: SPI mode-3 4-wire on the Pi-header's native SPI0 positions
+(SCLK h23/gpio11, MOSI h19/gpio10, MISO h21/gpio9, CS h32/gpio12,
+INT1/2 h38/h40) — zero collisions with the camera map;
+`make build/full.lpf` composes board+cam+IMU (unused LOCATEs are safe
+for any top, like the vendored board LPF itself). `spi_reg.v` (16-bit
+{RW,addr7,data8} register master, SCLK 3.125 MHz of 10 max): `SPI
+PASS: WHO_AM_I 0x6B read, write captured, reread OK` vs a bit-level
+ST-style slave (`make sim-spi`). `top_ism330_id.bit` built at 224 MHz:
+any UART byte → {WHO_AM_I, INT status}; expect 0x6B. Ladder filed in
+README: config+polled reads → FIFO stream with FPGA timestamps on the
+SAME 50 MHz counter as DVP/lidar (the delay-design single-clock rule;
+the IMU becomes the temporal anchor stream) → gravity-anchor and
+gyro-baseline fusion experiments.

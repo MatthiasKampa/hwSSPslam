@@ -1,0 +1,16 @@
+# ISM330DHCX IMU pins (project-local; SPI mode-3, 4-wire — sites from
+# the vendored icepi-zero.lpf; header positions use the Pi's native SPI0
+# pins so the wiring reads conventionally). Compose at build:
+#   cat icepi-zero.lpf cam-pins.lpf imu-pins.lpf > build/full.lpf
+LOCATE COMP "imu_sclk" SITE "G2";     # gpio[11], header 23 (SPI0 SCLK)
+IOBUF  PORT "imu_sclk" IO_TYPE=LVCMOS33 DRIVE=8;
+LOCATE COMP "imu_mosi" SITE "L2";     # gpio[10], header 19 (SPI0 MOSI) -> SDI
+IOBUF  PORT "imu_mosi" IO_TYPE=LVCMOS33;
+LOCATE COMP "imu_miso" SITE "J1";     # gpio[9],  header 21 (SPI0 MISO) <- SDO
+IOBUF  PORT "imu_miso" IO_TYPE=LVCMOS33;
+LOCATE COMP "imu_cs" SITE "J3";       # gpio[12], header 32
+IOBUF  PORT "imu_cs" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "imu_int1" SITE "F1";     # gpio[20], header 38
+IOBUF  PORT "imu_int1" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+LOCATE COMP "imu_int2" SITE "F2";     # gpio[21], header 40
+IOBUF  PORT "imu_int2" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
