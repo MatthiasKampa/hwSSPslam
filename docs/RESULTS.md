@@ -9604,3 +9604,20 @@ All verdicts accepted. My corrections/notes on top:
 segnet.py changes reviewed: taxonomy anti-oracle fence (split-invariant,
 zero numeric impact — correctly logged, correctly fenced), rgb flag with
 the NaN root cause documented, ch param for the capacity arm. All fine.
+
+## 2026-07-16 — platform-reality clarification on the label-head plan (user-pinned): no RGB-D sensor exists; the depth channel is PROJECTED 64-ring lidar, and the banked +0.12 lever is dense-Kinect-optimistic
+
+Amends the 2026-07-16 review entry so "the student is RGB-D" cannot be
+over-read: the platform camera is an OV5640 (mono Y8 ingest; colour
+available but worthless for CNN seg per the corrected deep-net test — Y8
+validated). ALL deploy depth is the Ouster-class 64x1024 lidar projected
+through the pending extrinsics (all 64 rings in the camera FOV; the
+3x1024 net ingest is an unrelated budget choice). Projected-lidar depth
+is ring-sparse (~0.6-0.7 deg vertical), FOV-clipped, and
+parallax-occluded — every banked RGB-D seg number (trunk 0.597, U-Net
+0.638, lever +0.12) used DENSE Kinect depth. msg P1 now REQUIRES a
+lidar-like-depth degradation arm FIRST (ring-subsample + aperture crop +
+occlusion dropout on NYUv2 depth), with a decision rule: lever survives
+>= ~+0.07 -> streaming-lane U-Net plan stands; collapses toward
+luma-only -> the label head demotes and surfaces+QBE is the deploy
+endgame.

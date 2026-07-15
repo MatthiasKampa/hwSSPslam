@@ -94,9 +94,27 @@ P1 (REWRITTEN — the label head, streaming lane). Goal: close 0.638 ->
     predicted map recall at the achieved error rate. If the full regime
     still caps <0.70: bank it — that closes "fine-object labels
     from-scratch" for real, and the surfaces+QBE fork ships alone.
-  - Student depth: NYUv2 depth until extrinsics; keep the depth channel
-    droppable (train with depth-dropout arm) so the vision-only fallback
-    number exists.
+  - Student depth — PLATFORM REALITY (user-pinned): the camera is an
+    OV5640 (mono Y8 ingest; colour available but colour ~= 0 for a CNN,
+    your own corrected result — Y8 stands). There is NO RGB-D sensor.
+    Deploy depth = the 64x1024 Ouster-class lidar PROJECTED through the
+    (pending) extrinsics — all 64 rings in the camera FOV, NOT the
+    3-ring net ingest. That channel is angularly SPARSE (~0.6-0.7
+    deg/ring vs ~0.1 deg/pixel), FOV-CLIPPED (no depth above/below the
+    lidar's vertical aperture — upper walls/ceiling rows), and
+    parallax-OCCLUDED at depth edges (different mounts), though
+    longer-range and more accurate where present. All banked RGB-D
+    numbers used DENSE Kinect depth — an optimistic proxy.
+    REQUIRED ARM (hardware-free, decision-gating, run it FIRST before
+    the regime program): degrade NYUv2 depth to lidar-like geometry
+    (ring-subsample vertically to ~0.6-0.7 deg, crop to a plausible
+    lidar vertical aperture, occlusion dropout at depth discontinuities;
+    nearest/linear fill as the deploy projector would) and re-measure
+    the depth lever vs dense (+0.12 reference at the trunk, 0.638 U-Net
+    reference). Decision rule: lever survives >= ~+0.07 -> the
+    streaming-lane plan stands; collapses toward luma-only -> the label
+    head DEMOTES and surfaces+QBE is the endgame (bank either way).
+    Keep the depth-dropout arm too (vision-only fallback number).
 
 P2 (1 h — carried, now broader). Commit the load-bearing scratch work:
   (a) the classroom learned-vs-fixed wall test (with the GT-leak control
