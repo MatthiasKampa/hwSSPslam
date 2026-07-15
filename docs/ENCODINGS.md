@@ -139,5 +139,9 @@ data wants them). Detection margin against room-wide extreme-value
 noise is thin for single 25-cell templates (foil max ≈ 0.7-0.9× true
 even with exact codes at 400 items) → architectural direction:
 segment-scoped two-stage retrieval (which-segment first, metric decode
-inside), bigger/multi-view templates. Real-data verdicts: RESULTS
-2026-07-15.
+inside), bigger/multi-view templates. Real-data verdicts (RESULTS
+2026-07-15): int-FPE > grad > census for detection (0.735/0.667/0.609
+centered — graded kernels beat binary codes in amplitude matched
+filtering); centering = detection↔localization trade; D flat
+(noise-limited); seg scoping no rescue (max-over-segments EV); 2b
+free. Status: coarse room-region cue; two-stage + multi-view filed.

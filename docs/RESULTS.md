@@ -7615,3 +7615,46 @@ for 2b, −0.023..−0.029 for 12-perm). ACTIONABLE EQUIVALENCE: **3b×12
 fidelity; pick per platform pressure. Deploy v1.2 default: 3b store ×
 12-perm search (best fidelity-per-compute; the 24-perm search can be
 enabled per-query for verification-grade matches).
+
+## 2026-07-15 — object-in-map first characterization (experiments/objmap.py, TUM fr3, poses DIAGNOSTIC): mechanism VERIFIED, real-data utility = coarse room-region cue (AUC 0.735 / ~0.8 m) — code distinctiveness is the wall, not the algebra
+
+Setup: world-frame appearance map (c16 cells → 3D via registered depth,
+bipolar-spatter/FPE amplitude binding, per-segment bundles over 215 map
+kf), 5×5-cell template queries from held-out blocks (≥4 s away),
+room-wide coarse→fine decode, foils from fr1_desk. Synthetic selftest:
+exact query 3.6 cm, 1-flip kernel 0.85 (theory 0.75), deterministic.
+
+Real data (D960, seg8, scene-DC centered | uncentered census baseline
+self 0.674 / cross 0.982 / AUC 0.474):
+  census  self 0.917 / cross 1.327 / detect-AUC 0.609
+  grad    self 1.184 / cross 0.880 / detect-AUC 0.667
+  int     self 1.150 / cross 0.970 / detect-AUC **0.735**
+- **Scene-DC centering = a detection↔localization TRADE** (+0.14..0.26
+  AUC, −0.2..0.35 m position): the scene-common code amplitude carries
+  true matched signal AND correlates the foils.
+- **Detection ordering int > grad > census INVERTS the place-encoder
+  prediction**: in amplitude-space matched filtering, graded FPE codes
+  give partial credit for near-values while census bits flip wholesale
+  across views (illumination invariance buys nothing indoors at fixed
+  exposure).
+- S-corner: D FLAT 480→1920 (0.77/0.80/0.85 — noise-limited, more rows
+  don't help); segment scope does NOT rescue detection (seg32 0.749 /
+  seg8 0.803 / seg4 0.905 — max-over-segments extreme value eats the
+  per-segment SNR gain); **2b quant FREE** (0.741 vs 0.803 float).
+- Anchor-bag cheap tier: 5/24 top1 even mean-subtracted — c16 census
+  bags alias scene-wide; stage-1 segment selection must come from the
+  EXISTING gridint snapshot channel instead.
+- T-corner: encode ~0.2M cis-MAC/kf (place-encode class, ~free); query
+  ~38M cis-MAC × segments, on-demand only.
+
+VERDICT: the map CAN be queried for objects from camera data — O(D)
+algebra end-to-end, bounded storage, mechanically exact — and today's
+codes make it a coarse detector/region cue (0.735 AUC, ~0.8 m), not a
+precise finder. The wall is cross-view code distinctiveness +
+room-wide extreme-value competition (foil max 0.7–0.9× true even with
+exact codes — measured synthetically too). FILED, in expected-value
+order: (1) two-stage with gridint-snapshot stage-1 (segment shortlist)
++ in-segment decode (small box kills the EV pool); (2) multi-view query
+bundles (the robot sees the object across frames — Nq×3 signal); (3)
+richer/multi-scale codes (census16, c8+c16); (4) SPOT venue via
+lidar-projected depth once extrinsics land (the standing unlock).
