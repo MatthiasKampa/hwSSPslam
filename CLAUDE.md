@@ -41,6 +41,15 @@ re-litigate this without new information — see `docs/FINDINGS.md` §5–§6.
 - `experiments/` — one module per catalogued experiment, frozen post-verdict;
   **`experiments/README.md` is the catalogue with verdicts + run recipes**.
   Run as `python3 -m experiments.<name>`.
+- `sspax/` — **JAX efficient experimentation surface** (2026-07-15; imports the
+  frozen core only, rule 1). Bit-faithful JAX port of the encode/rotate/decode
+  algebra (`core.py`, verified `python3 -m sspax.bench parity`); the
+  approximate-permutable ring-stagger sphere (`sphere.py`); the 6-DoF formulation
+  sweep (`sweep*.py` → `SWEEP_RESULTS.md`); learned FPGA front-ends — lidar
+  saliency (`learn_lidar.py`) + vision CNN (`vision/`) with cuDNN-free convs
+  (`nnconv.py`); and the binary-descriptor **semantic/queryable map**
+  (`semantic.py`, "highlight the chairs"). Overview in `sspax/README.md`,
+  synthesis in `sspax/LEARNED_FRONTEND.md`.
 - `hw/ice40/` — FPGA track (`rtl/`, `host/` incl. live demo server,
   `golden.py`). `docs/` — FINDINGS, RESULTS (ledger), PROTOCOL,
   RESTRUCTURE-MAP, `sota/` notes. `demo/` — browser replay demo.

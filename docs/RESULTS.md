@@ -7777,3 +7777,179 @@ README: config+polled reads → FIFO stream with FPGA timestamps on the
 SAME 50 MHz counter as DVP/lidar (the delay-design single-clock rule;
 the IMU becomes the temporal anchor stream) → gravity-anchor and
 gyro-baseline fusion experiments.
+
+---
+
+## 2026-07-15 — sspax: JAX efficient core + the approximate-permutable ring-stagger sphere
+
+**Directive:** "build a more efficient version we can run tests in (JAX) …
+focus on 6DoF, the fib sphere should be formulatable in an approximate version
+as permutable like the other structured variant (approx same distance points on
+sphere)" → clarified: "structure a sphere out of rings with half offset between
+layers to have approx equal distance between points" + "provide both quantized
+and float option" + a 50% GPU-memory-headroom courtesy for a co-running agent.
+
+New top-level package **`sspax/`** (efficient impl, imports the frozen core
+only — rule 1). JAX float64, `jit`/`vmap`, GPU footprint capped at ≤45% VRAM.
+`python3 -m sspax.bench <parity|uniform|rot|resolution|so3|disp|speed>`,
+`--quant nph,nmag` for the FPGA-quantized column.
+
+### parity (the port is bit-faithful)
+JAX encode / `perm_of` / `q_polar` reproduce `experiments/lattice3d.py` and
+`sspslam.quantized.q_polar` to **4.3e-16** (index+sign permutation exact). The
+efficient core is a faithful re-encoding of the shipped algebra, not a new one.
+
+### ringstag3d — rings-with-half-offset sphere (the new formulation)
+Latitude rings, full 2π azimuth/ring (antipode = conjugate), per-ring count ∝
+`cos(elev)` apportioned to an exact budget, consecutive rings staggered by half
+an azimuth step. Each ring equal-azimuth over a FULL circle ⇒ yaw by a multiple
+of that ring's step is an exact cyclic shift (a true permutation, **no** conj —
+cleaner than the half-circle 2D lattice); different per-ring counts ⇒ a common
+yaw is *approximately* a permutation (per-ring integer snap, `yaw_perm`).
+
+- **uniform (its design goal — WIN):** nearest-neighbour arc over the full
+  antipodal set (N=60 dirs/scale): ringstag3d **cv 0.081 / min-arc 12.7°** beats
+  fib3d (0.102 / 11.1°) and azel3d (0.111 / 11.5°). The staggered ring layout is
+  the most equidistant of all layouts tested. (5 rings, az counts
+  [18,16,13,9,4].)
+- **rot (the cost — resolution-bound):** at the shipped D=240 the approximate
+  yaw is coarse (cos ≈ 0.82 @ off-lattice angles) — spreading only 60 directions
+  over a 2-sphere leaves each ring a 20–36° azimuth step. az2d/azel3d stay exact
+  ONLY at lattice angles (15°/30°); at off-lattice 5° ringstag3d (0.889) beats
+  azel3d (0.798).
+- **resolution (when it becomes good):** ringstag3d yaw fidelity vs
+  directions/scale at off-lattice 7°: **0.816 (D240) → 0.944 (D960) → 0.984
+  (D1920) → 0.970 (D3840)**. The stored `encode_dvda` first-order d/dα correction
+  CROSSES from hurting to helping at finest-step ≈6° (n_dir≥480); a **gated**
+  correction (apply only where per-ring residual <3.5°, known at query time)
+  never hurts and reaches 0.987 @ D1920. Verified the derivative independently by
+  finite differences (‖fd+dv‖/‖dv‖ = 2.8e-3; dv/dθ = −dv/dα, sign −δ correct);
+  it is a valid first-order tool but useless past δ≈2°, which is why the
+  coarsest polar ring (4 az, 90° step) pins the worst residual at low D.
+- **so3 (honest negative for ringstag):** SE(3)-rotation decode over a ±15°
+  Euler grid (5° steps, floor ~3.5°): az2d **16.7°** (the 2D+heading system is
+  blind to pitch/roll — confirms out-of-plane needs a 3D lattice), fib3d 6.0,
+  azel3d **4.7**, ringstag3d 7.4, rand3d 4.2. ringstag3d's win is uniformity,
+  NOT decode accuracy — its non-commensurate rings give noisier approximate
+  permutations off the yaw axis.
+- **disp:** all 3D lattices recover z-inclusive translation at the grid limit
+  (med 0.079 m @ |d|=0.3); az2d searches dz=0 and is blind to the z-component
+  (0.150–0.293 m). 6-DoF translation needs the 3D lattice; ringstag3d matches
+  the others exactly.
+
+### quantized vs float (both provided, per directive)
+FPGA polar quant (16 phase bins / 4 mag levels) on the STORED vectors costs
+**~1–2°** on SO(3) decode (azel3d 4.7→6.8, ringstag3d 7.4→9.5, fib3d 6.0→5.9)
+and **~0.05** on yaw cos (ringstag3d 0.889→0.835 @5°) — the storage model
+survives the sphere layouts, consistent with the 2D quantization ledger.
+
+### speed (the point of the port)
+Batched SO(3) decode (64 clouds × 343 candidates, D=240): **JAX 1.0 ms/batch**
+(0.43 s warm+compile) vs **numpy 695 ms/cloud** (perm rebuilt per candidate).
+
+**Verdict.** The directive's hypothesis holds: the rings-with-half-offset sphere
+is simultaneously the most isotropic layout AND per-ring exactly / globally
+approximately yaw-permutable — the reconciliation of fib3d's coverage with
+azel3d's algebra. Quantified cost: the approximation is resolution-bound (coarse
+at the shipped D=240, accurate >0.98 only at D≈2k or with the gated derivative
+correction) and it does not beat azel3d on SO(3) decode. It is the layout of
+choice when isotropic coverage matters and a larger direction budget is
+affordable; azel3d stays preferable for exact common-yaw at a tiny D. Full
+writeup + run recipes in `sspax/README.md`.
+
+---
+
+## 2026-07-15 (cont.) — sspax large formulation sweep (6 batches, cam + lidar + combined)
+
+**Directive:** "run a large sweep across various formulations… both cam and
+lidar formulation as well as the combined… split into 10-min sweeps so you can
+integrate insights into the next batch." Six insight-driven batches on the JAX
+core, float **and** quantized, deterministic synthetic geometry (anti-oracle),
+GPU ≤45% VRAM. Runners `sspax/sweep*.py`; raw CSVs `scratch/sweep_b{1..6}_*.csv`;
+full writeup `sspax/SWEEP_RESULTS.md`.
+
+Generalized the ring family to knobs (elevation spacing arc|area × azimuth
+apportion cos|const × stagger 0|½ × n_rings) + synthetic pinhole/omni camera
+(bearings on S²) + VSA fusion (shared-lattice bundle vs concat) + a place-
+separability metric (same-place vs different-place AUC under yaw-rotation search).
+
+**Winner:** the permutable staggered-ring sphere **`ring_arc_const_s0.5_r6`**
+(equal-azimuth-per-ring, arc elevations, ½ stagger, ~6 rings) on a **wide oct6
+ladder (0.25–8 m)** is the cross-modality winner: SO(3) decode **3.0°** (tightest
+p90 6.0), place-rec **0.910 [0.861, 0.956]**, quant-robust. Beats the more-
+isotropic cos-ring (wins pure uniformity, cv 0.043, but decode outliers p90 11.5)
+and azel3d.
+
+Key findings:
+- **Uniformity does NOT predict SO(3) decode** — decode is nearly geometry-flat
+  (3.0–4.5°); `rand3d` (worst cv 0.43) decodes best (3.0°). Isotropy ↔
+  permutability is a genuine trade: cos apportion → uniformity, const apportion
+  (more azimuths on polar rings) → yaw permutability (yawRing 0.919 vs 0.886).
+- **Translation decode is 0.074 for every 3D layout** (grid-limited, not a
+  discriminator); az2d blind to dz (0.15–0.29) — confirms 6-DoF needs the 3D
+  lattice, again.
+- **Camera rewards permutability** (const-ring wins so3omni 3.1 + placeOmni
+  0.857 + placeNarrow 0.662), unlike lidar's decode-flatness. Omni (360°) place-
+  rec strong (0.85, rotation-equivariant); narrow FOV hard (0.64).
+- **Geometric cam+lidar fusion is REDUNDANT** — naive bundle dilutes below
+  lidar-alone; concat worse than bundle. Best geometry + narrow FOV gives a
+  small real lift (0.892→0.909). Fusion pays only with an *independent* cue
+  (appearance) — the same "independent absolute cue" wall as FINDINGS §5–6.
+  Bundling is memory-free (same D), so the system win stands regardless.
+- **Resolution** lifts yaw (0.82→0.99 at D=1920); place-rec **saturates ~0.86**
+  (content-limited). **Wider ladder helps place-rec** (oct6 best everywhere,
+  const-ring 0.901); camera-tight high-freq ladder hurts.
+- **Deploy:** place-rec near quant-invariant (**94 B/anchor** @ 4ph2mag holds
+  0.844); yaw registration is the bit-sensitive metric (0.864→0.649). Recommend
+  4ph2mag/94 B for place-rec, 16ph4mag/184 B for registration.
+
+Honest caveat: place-rec geometry CIs overlap (±~0.05) — the *ladder* effect and
+the const-ring's decode-tail are the robust signals; the geometry deltas are
+modest. Synthetic-geometry study; a texture/appearance camera channel (to make
+fusion non-redundant) is the filed next step.
+
+---
+
+## 2026-07-15 (cont.) — sspax learned front-end + semantic (queryable) SSP map
+
+**Directive:** learn FPGA-fittable pre-processing for BOTH vision and lidar,
+end-to-end for SLAM; pretrain vision on external data; make the map queryable by
+object ("highlight where the chairs are"). Unifying architecture (user's spec):
+each CNN emits a BINARY descriptor; bind each set bit's role hypervector with the
+feature POSITION (SSP phasor) and bundle; **significance = bit count**.
+Modules `sspax/learn_lidar.py`, `sspax/semantic.py`, `sspax/vision/tinycnn.py`;
+writeup `sspax/LEARNED_FRONTEND.md`. Runs on CPU (box cuDNN mismatches JAX GPU
+conv → also frees the GPU). Anti-oracle: GT poses only align contrastive targets.
+
+- **Learned lidar saliency (826 params):** BEV-rasterize scan → 3-conv CNN scores
+  per-cell saliency on a 2×-downsampled 24×24 map → top-k salient cells → SSP.
+  The differentiable SSP encode lets a contrastive place-rec loss backprop into
+  the CNN. At a tight k=32-feature budget with interior clutter to reject,
+  rotation-invariant matching: learned **0.940** vs uniform-random **0.707**
+  place-rec AUC (**+0.232**, GPU-converged; im2col convs sidestep the box's
+  cuDNN mismatch so training runs on GPU at 400 steps in ~10 s). 826 params = 0.8 KB int8 / 103 B BNN. Learns to
+  spend a sparse budget on repeatable structure, drop moving clutter.
+- **Semantic binary-binding map:** `map += Σ_{i∈bits} ROLES[i] ⊗ encode(xyz)`;
+  query a class by unbinding its roles and decoding spatial density (peak ∝
+  |query ∩ feature bits|). Query 'chair' (16 objects, D=360, k=12): precision
+  **1.00**, recall **1.00**, pos err **0.04 m**, **4.0×** contrast vs non-chairs.
+  Significance ∝ committed bits (readout 5.4/9.7/12.9/14.9 for 3/6/9/12 bits).
+  Capacity (one bounded D=360 vector): recall 0.75/0.38/0.03 @ 10/20/40 objects
+  — saturates ~15–20 objects; more bits/object raises SNR; query cost O(D)
+  regardless of object count.
+- **Learned vision (34 k params, 4.2 KB BNN):** tiny CNN + 64-bit binary
+  descriptor head, pretrained on CIFAR-100 (has chair/couch/table/bed/wardrobe →
+  a furniture detector). Built + FPGA-costed; pretraining auto-runs on CIFAR
+  download completion (slow external mirror).
+- **FPGA cost:** lidar 103 B (BNN) / vision 4.2 KB (BNN) / bind O(D), D=360; both
+  fit the ECP5 fusion target, lidar fits ice40. Map = one bounded vector, object
+  query = O(D) phase ops — history-free, consistent with the project thesis.
+
+**Verdict.** The learned front-ends give real gains at FPGA scale (sparse
+trackable lidar features +0.10 AUC; a queryable semantic map at 4 cm / P=R=1.0
+within capacity), and the binary-descriptor binding cleanly unifies FPGA
+efficiency with VSA object binding. The sweep's fusion caveat resolves here: the
+learned *appearance* descriptor is the independent cue that makes cam+lidar
+binding non-redundant — the reason to pretrain vision on real images. Open:
+vision pretraining accuracy (pending download); scaling capacity with D; an
+end-to-end joint (lidar+vision) SLAM+semantics objective.
