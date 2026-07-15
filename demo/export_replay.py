@@ -72,6 +72,13 @@ CONFIGS = {
     # 1040-beam stata target proxy 0.196 vs raw points 1.659
     "interp2": dict(label="deploy sampler: bridged pairs @ 63.4°",
                     sample=None, kw=dict(spec=None, nph=0)),
+    # the FPGA recipe for DENSE heads (stata-class): raw points collapse
+    # there (1.659, 9 loops — encoder study), so the deploy sampler carries
+    # the lean 2b+int8 store/arithmetic
+    "lean-i2": dict(label="FPGA-lean + deploy sampler (2b store + int8, "
+                          "bridged pairs)", sample=None, interp=True,
+                    kw=dict(spec=("i", 8, 7, 7), nph=4, nmag=1,
+                            ring_scales=True)),
 }
 
 
@@ -168,7 +175,8 @@ def export(name, cfg_name, cap=None, stride=None):
         base = H.HexSLAM
     else:
         base = F.BandSLAM
-    sample = _interp2 if cfg_name == "interp2" else cfg["sample"]
+    sample = _interp2 if (cfg_name == "interp2"
+                          or cfg.get("interp")) else cfg["sample"]
     # est stays float64 inside DS.run: float32 chaining of the guess alone
     # perturbs the chaotic closure cascade (measured: Intel 2.44 -> 3.97 m).
     src = dyn_bundle(name, cap) if dyn is not None else name
@@ -224,7 +232,7 @@ def export(name, cfg_name, cap=None, stride=None):
                 nRefOk=int(ref_ok.sum()), memKb=round(r["mem_kb"]),
                 keyTrans=C.KEY_TRANS, keyRotDeg=float(np.degrees(C.KEY_ROT)),
                 dataset=name, evalKind=bundle["eval"],
-                gt=GT_NAMES[bundle["eval"]],
+                gt=bundle.get("gt_name") or GT_NAMES[bundle["eval"]],
                 log=Path(bundle["path"]).name if bundle.get("path")
                 else bundle["name"], config=cfg_name,
                 label=cfg["label"])

@@ -51,3 +51,36 @@ python3 -m runners.spot parse    # -> data/spot_telluride/scans.npz (ring-34 sli
 Ouster-class 1024×64 @ 20 Hz (the custom-head spec), SPOT odometry 528 Hz,
 78 s / 36.5 m / ~7×7 m room. Protocol: LIDAR-ONLY runs (odometry withheld
 as ground truth) — see `runners/spot.py`.
+
+### SPOT Telluride drop 2 — SCHOOL building (runs 1+2, 2026-07-13)
+
+Same HF dataset, reorganized: `school/run1` (117 pointcloud shards, 455 s,
+8298 clouds) and `school/run2` (47 shards, 167 s, 3343 clouds); shard rows
+carry `npz_bytes` (xyz/intensity/ring) instead of ASCII PCD. Fetch
+pointclouds + odometry_imu + odometry_lio_sam + static into
+`data/spot_telluride/school_run{1,2}/` (≈8.6 GB), then distill:
+
+```bash
+python3 -m runners.spot_school parse school_run1   # -> scans.npz
+python3 -m runners.spot_school refs  school_run1   # -> ref_lio.npz
+python3 -m runners.datasets run school_run2        # canonical run
+```
+
+**Reference warning (measured 2026-07-13, undocumented upstream):** this
+drop's kinematic `odometry_imu` oscillates ±20–300 m for extended intervals
+in both runs — unusable as reference. LIO-SAM is the only reference and only
+run2's is healthy, for t<~80 s (the gated flat window: 342/836 kf). run1 has
+ZERO usable reference → loop/stability stress set only (ATE prints nan).
+Everything downstream consumes only the two npz caches; the parquet shards
+can be deleted and re-fetched at will.
+
+## TUM RGB-D + EuRoC (3D/6D vision SLAM references, 2026-07-14)
+
+`data/tum/`: rgbd_dataset_freiburg3_long_office_household (415 kf) and
+rgbd_dataset_freiburg2_pioneer_slam (373 kf) — RGB 640×480 @30 Hz,
+REGISTERED 16-bit depth, 100 Hz 6-DoF mocap ground truth. Parse to the
+QVGA integer-pipeline cache with `python3 -m runners.tum parse <seq>`
+(→ `<seq>.npz`: gray/depth_mm/gt/K, bin-2 frame). Benches:
+`python3 -m experiments.vision6d {place,rot} <seq>`.
+EuRoC MAV moved upstream to the ETH Research Collection
+(https://projects.asl.ethz.ch/datasets/euroc-mav/) — deferred.

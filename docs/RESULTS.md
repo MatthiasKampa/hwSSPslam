@@ -6804,3 +6804,663 @@ Convention going forward: scratch lives in scratch/ (run with
 archive keep historical flat filenames — resolve via
 docs/RESTRUCTURE-MAP.md. Historical scratch files were NOT import-
 rewritten (they are evidence of what ran, not runnable code).
+
+## 2026-07-13 — reservoir save-cadence study on REAL data (user: "every 20, every 64 — we only tried the denser random 10%"): cadence does NOT unlock adoption; ANY map-mutating rehearsal makes closure-cascade logs BANDED — collapse is a per-draw event, not a dose response; the 2026-07-12 fhw opt-in is AMENDED to a band (scratch/scratch_reservoir_real.py)
+
+Harness: ReservoirSLAM = verbatim port of scratch_replayfront.ReplaySLAM
+(2026-07-13 package paths) + save_every knob (None = banked p=0.25/kf
+random; else deterministic k%20 / k%64 — the websim/solo RES_EVERY
+convention, random slot overwrite + random replay draw KEPT per user) +
+res_w knob. GATES: OFF ≡ acceptance on all 5 logs (incl. spot
+0.034/22); ALL 8 p25 rseed-11 control cells reproduce
+scratch_replayfront.log BIT-EXACT incl. rep counters. One fixed config
+(N=16, w=0.3, 1 replay/kf, RECENT_KF=60); rseeds 11/12/13 = replay-draw
+bands; do-no-harm gate = matcher correlation (GT scores only).
+
+ATE (med) per arm; OFF: fr101 1.881(1.551)/53, fhw 0.981(0.841)/559,
+stata 0.202(0.123)/99, belg 2.644(1.859)/1, spot 0.034(0.028)/22.
+
+  fr101 R1: p25 {1.396,1.648,4.412 banked} | e20 1.915(1.621) |
+            e64 {1.707(1.429), 1.741(1.450), 3.530(1.053)}
+  fr101 R2: p25 2.461(1.596) | e20 {1.565(1.184), 1.753(1.281),
+            2.530(1.575)} | e64 1.808(1.487)
+  fhw   R1: p25 {0.220(0.182), 0.241(0.218), 4.045(3.174)} ← the banked
+            opt-in, now banded | e20 {0.223(0.193), 1.009(0.857),
+            2.217(0.693)} | e64 0.494(0.402)
+  fhw   R2: p25 0.701(0.640) | e20 0.534(0.302) | e64 {0.247(0.216),
+            0.248(0.216), 1.016(0.917)}
+  stata R1: p25 0.246(0.130) | e20 {0.201(0.127), 0.253(0.165),
+            4.743(3.988)} | e64 {0.201(0.125), 0.205(0.125),
+            10.921(9.200)} | diag e21 10.711 / e25 0.258 (s11)
+  stata R2: p25 14.949 (banked catastrophe) | e20 4.743 | e64
+            {0.209(0.125), 0.213(0.130), 1.040(1.043)}
+  belg  R1: e20 3.883 | e64 {2.087, 2.405, 5.853}  (loop-noise log)
+  belg  R2: e20 2.356 | e64 {2.528, 5.857, 7.103}
+  spot  R1+R2, all cadences: 0.033–0.034, 22 loops — NO-OP at the
+            reference noise floor (target platform tolerates all arms).
+
+VERDICTS.
+(1) CADENCE IS NOT THE UNLOCK: no (arm × cadence) survives the
+multi-seed multi-log gate; the user's sparser cadences reshape tails
+(fr101's 4.41 p25 tail → 2.53/3.53) but do not remove bimodality.
+(2) THE LAW (new): map-mutating rehearsal at ANY dose/cadence converts
+closure-cascade logs into BANDED logs. Collapse (loops 99→4-14 on
+stata, 559→354 on fhw) is a discrete per-draw event hitting ~1/3 of
+arm×seed cells at EVERY cadence — ~70 folds over ~1400 kf re-roll
+stata's basin just like 825 folds do; e25 (maximally segment-locked)
+is fine while co-prime e21 collapses — NOT resonance, NOT dose. The
+replay fold stream is an ONLINE perturbation sequence: the
+band-probe rule (PROTOCOL §6) extends to any feature that mutates the
+map, and single-seed results on such features are basin draws.
+(diag invocation: e21/e25 via inline CADENCE additions to the harness
+module — see scratch_reservoir_stata_diag.log.)
+(3) AMENDMENT to 2026-07-12 "per-environment OPT-IN": the fhw R1 p25
+lever is itself a band {0.220, 0.241, 4.045} — a ~2/3-probability 4×
+win, 1/3 collapse. The opt-in stands only with band-aware framing;
+even 559 dense closures do not guarantee gauge re-pinning.
+(4) MEDIAN WINS CONFIRMED AND BROADENED: median beats OFF in 15/18
+non-collapsed replay draws across fr101/fhw/stata (e.g. stata R1 e64
+s13 = 0.205 ATE / 0.125 med / 101 loops — better than OFF on all
+three); the banked mechanism (registration improves; closure graph
+carries the risk) holds at every cadence.
+(5) R2 cross-pass at HIGH dose is reliably catastrophic (p25 14.9);
+at LOW dose it is banded like everything else (e64 {0.21,0.21,1.04})
+— the frontend-recency law's protection matters in proportion to fold
+rate.
+Follow-up filed: consensus-over-replay-draws (K-seed trajectory
+consensus, stablegate-class, offline only) — nothing GT-free selects
+the good draw online (commit-policy wall applies to draw selection).
+
+## 2026-07-13 — SPOT Telluride drop 2 (SCHOOL building, runs 1+2): adapter + distillation + webvis; kinematic odometry BROKEN upstream; lidar-only holds ~1.06 m vs gated LIO-SAM on run2's flat window; reservoir arms benign 10/10 there; run1 = band-dominated stress set (runners/spot_school.py)
+
+Dataset (user: "bigger dataset, let's validate findings"): the HF repo
+reorganized — classroom/run1 = the banked session (shards byte-identical
+to local) + NEW school/run1 (117 pointcloud shards, 8298 clouds, 455 s,
+2075 kf @stride 4) and school/run2 (47 shards, 3343 clouds, 167 s,
+836 kf); shard format changed pcd_bytes -> npz_bytes (xyz/intensity/
+ring). Downloaded pointclouds+odometry+static only (~8.6 GB), DISTILLED
+per run into scans.npz + ref_lio.npz (all the pipeline and webvis
+consume; parquets re-fetchable — ~8 GB reclaimable at will).
+
+DATA QUALITY (measured; undocumented upstream): the school
+odometry_imu is a single ~1 kHz stream that OSCILLATES +-20..300 m for
+extended intervals in BOTH runs — kinematic odometry UNUSABLE as
+reference (the classroom drop's was fine; same converter change that
+renamed the blobs). LIO-SAM: run1 is 99% z=-1000 sentinels (DEAD);
+run2 healthy ONLY t<~80 s (z flat +-0.1 m, ~5 Hz), then it AND the
+robot localization break simultaneously (z +-19 m, then frozen).
+Gating (sentinels + |z|<1 m flat window + 0.4 s windowed velocity
+<=2.5 m/s + 1 s dilation): run2 reference = 342/836 kf over a 23x16 m
+sweep (35 m path); run1 = ZERO reference. Diagnosis details in
+runners/spot_school.py docstring; not resonance-checked upstream.
+
+Infra (additive; the acceptance path re-gated): runners/spot_school.py
+(npz-shard parse mirroring runners/spot.py semantics, gated-LIO ref
+cache, LIO-frame bundle, protocol stays lidar-only CV); registry
+entries school_run1/school_run2 (kind=spot_school); DS.evaluate exact
+branch gained an empty-mask guard (nan/0 ref — additive);
+demo/export_replay.py honors bundle gt_name. GATE: `run spot`
+(classroom) BYTE-IDENTICAL after all edits (0.034/22 loops/366 KB).
+
+school_run2 (canonical): OFF ATE 1.071 med 1.061, 59 loops, 821 KB,
+79 ms/kf over the 342-kf flat window — lidar-only holds ~1 m in real
+school corridors vs LIO-SAM (the reference's own error there is
+unknown; no classroom-style noise-floor claim available). RESERVOIR
+VALIDATION: {R1,R2} x {p25,e20,e64} s11 = ATE 1.055–1.068 (ALL <=
+OFF), loops 58–60; seed probes R1-e20 {1.061,1.067,1.067} / R2-e64
+{1.067,1.068,1.070} — 10/10 replay cells BENIGN, no collapse drawn;
+the median-win pattern replicates (small, -0.3..-1.5%). Read with the
+2026-07-13 law: collapse probability is per-environment — run2's
+dense small-area closure structure (59 loops / 23x16 m) is
+fhw-tolerant-class and its rate is evidently low (0/10), vs stata's
+~1/3 and fhw-p25's 1/3.
+
+school_run1 (2075 kf, 455 s, real multi-room traverse, NO reference):
+pipeline runs BOUNDED and stable — canonical OFF 174 loops, 968 KB,
+89 ms/kf. THE WORLD-FRAME DRAW ALONE moves loops 65 (old
+kinematic-anchored frame) -> 174 (canonical zeros-anchored) on
+identical input: the long aliased school traverse is BAND-DOMINATED
+(the perturbation-band law in whole-run form). Reservoir arms (loops
+151–191 across p25/e20/e64 x R1/R2) sit INSIDE that frame-draw
+variance — no attribution possible without a reference. STATUS:
+loop/stability stress set (Deutsches-Museum class); its registry ATE
+prints nan by construction.
+
+WEBVIS: replay_school_run2_shipped.json exported (667 KB) and embedded
+— 15-replay pack now incl. school_run2 @ 1.071 with honest reference
+label ("LIO-SAM, gated flat window; kinematic odometry broken in this
+drop"); pack parses as JSON; jsc syntax check PARSE OK. run1
+deliberately NOT exported (refless: ate=nan is invalid JSON and there
+is no honest reference trace to draw).
+
+VERDICT vs the user's ask ("validate findings"): (1) bounded-memory +
+runtime claims HOLD at 2.5x stata scale on the target platform
+(<=1.7 MB, ~80-90 ms/kf, 2075 kf); (2) the reservoir median-win
+replicates on real school data and NO cadence harms it there (10/10
+benign) — consistent with the cadence study's law once collapse
+probability is understood as per-environment; (3) the aliasing/band
+wall shows up exactly where predicted (run1: frame-draw dominates the
+closure graph); (4) NEW hygiene law for the platform: reference
+streams must be velocity/z-gated BEFORE use — this drop's kinematic
+odometry would silently poison any eval that trusts it.
+
+### school_run2 webvis glitch (user report 2026-07-14): reference-trace placeholders, FIXED
+
+"Glitches back and forth then stays at origin" = the replay's
+odometry/reference overlay, not the estimate: the packed Python
+trajectory is smooth (step p95 <=0.2 m, a legitimate out-and-back tour
+ending at the start). Cause: ref_lio.npz filled the 494 uncovered kf
+with a CONSTANT first-valid-pose placeholder — the drawn trace
+teleported pose<->placeholder through coverage gaps and parked at the
+start pose after t~80 s. Fix (runners/spot_school.py build_ref):
+hold-last-valid forward-fill (leading gap back-fills from the first
+valid pose = the world-frame seed, so pipeline output is UNCHANGED —
+re-gated: ATE 1.071/59 loops identical). Re-exported + re-embedded;
+odom trace now step p95 0.137 m with one honest 2.3 m re-acquisition
+step; tail parks at the last valid reference pose. jsc PARSE OK.
+
+## 2026-07-14 — FPGA recipe across ALL webvis demos (user directive): every real-data replay now carries its regime-correct FPGA arm; two honest negatives labeled by their numbers (demo/export_replay.py lean/lean-i2)
+
+Config: "lean" = the banked binary winner (point encoding + 2-bit
+phase-only ring store + per-ring scales + int8 matcher). NEW "lean-i2"
+= the dense-head FPGA recipe (deploy sampler bridged@63.4° carrying
+the same 2b+int8 store/arithmetic) — raw points are the WRONG recipe
+on stata-class heads (encoder study). Exporter gained the interp flag;
+manifest reordered dataset-grouped; 19 replays, jsc PARSE OK.
+
+  FPGA arms (vs their float siblings):
+  spot        lean    0.036 @ 14 KB   (float interp2 0.039 @ 354 KB)
+  fr101       lean    1.132 @ 75 KB   (float shipped 1.881 — BEATS float)
+  fr079       lean    3.149           (float e2 2.210; banded log)
+  fhw         lean    1.108 @ 206 KB  (float shipped 0.981 @ 5203 KB — 25x
+                                       less map at +13%)
+  school_run2 lean    1.120 @ 34 KB   (float shipped 1.071 @ 821 KB — 24x
+                                       less map at +5% on the REAL school,
+                                       NEW target-platform datapoint)
+  belg        lean    5.232 @ 63 KB   (float 2.644 / hex63 2.071 — the
+                                       non-Manhattan log rejects the lean
+                                       point recipe; negative, labeled)
+  stata       lean-i2 6.379 @ 58 KB   (float interp2 0.196 — CLOSURE
+                                       STARVATION: 99->2 loops, 0 relax;
+                                       the aliasing-heavy flagship's
+                                       closure cascade does not survive
+                                       the 2b store even with the deploy
+                                       sampler; consistent with the banked
+                                       stata-lean gap + u2b band. Negative,
+                                       kept visible per house style.)
+
+Dynenv arms unchanged (pinned expect gates are the point of those
+entries). Read: the FPGA-lean recipe is DEPLOYABLE on the target
+platform (spot 0.036/14 KB, school_run2 1.120/34 KB) and on
+dense-closure halls at a large memory win (fhw); it is NOT a universal
+default — belg-class non-Manhattan structure and the stata-class
+aliased flagship reject it (per-environment, as banked).
+
+### Webvis menu trimmed to FPGA-only (user directive 2026-07-14)
+
+manifest.json := the 7 FPGA arms only (spot/stata/fhw/fr101/fr079/
+belg/school_run2 — one per dataset, incl. the two labeled negatives);
+float/hex/dynenv replay blobs remain on disk and re-embed by adding
+them back to the manifest. Page 35.8 -> 14.9 MB; jsc PARSE OK.
+
+## 2026-07-14 — ECP5 TRACK OPENED (Icepi Zero): camera pipeline @ lidar point-parity, FAST-9 RTL bit-exact + 72 MHz, and the 2D-vs-3D lattice study — az×elev KEEPS the exact-rotation algebra in 3D; lidar⊕cam vector fusion AUC 0.92 (hw/ecp5/, runners/spot_cam.py, experiments/lattice3d.py)
+
+User directives: "ECP5 (icepi zero) version taking full lidar + camera
+(OV5640 direct later); for now scale dataset cam data + simple feature
+detection so lidar and cam have approx the same amount of data" and
+"try both a 2D and a 3D version — e.g. Fibonacci sphere (multiple
+scales) or other structured layouts". Board = Icepi Zero v1.3
+(LFE5U-25F CABGA256, 24k LUT, ~112 KiB EBR, 28 MULT18, 32 MB SDRAM,
+50 MHz osc; LPF vendored verbatim). nextpnr-ecp5/ecppack verified
+present in the local oss-cad-suite; board arriving — everything below
+is sim/PnR-gated (no hardware yet), mirroring the iCE40 staging.
+
+CAMERA PIPELINE (runners/spot_cam.py + hw/ecp5/host/golden_cam.py):
+D455 640x480 JPEG -> integer luma (77R+150G+29B)>>8 -> 2x2 box bin
+(320x240) -> integer FAST-9 (radius-3 circle, >=9 contiguous,
+comparator-only score, 3x3 NMS) with the threshold SERVOED per
+keyframe to the lidar valid-beam count. POINT PARITY ACHIEVED:
+school_run2 742/836 kf aligned (dt med 7.6 ms), lidar med 948 pts vs
+cam med 944 feats, ratio med 1.00 [p10 0.97, p90 1.03]; classroom
+414/414, 901 vs 904, ratio 1.00. Bytes/kf: lidar slice 2048 | cam
+feats ~5.6 KB | binned gray 76.8 KB | full cloud 128 KB. Caches:
+cam_features.npz per run (CSR features + intrinsics).
+
+FAST-9 RTL (hw/ecp5/rtl/fast9.v, ~200 lines): 6 line buffers + 7x7
+window, per-tap comparators, 16-rotation contiguous-9 AND-tree, arm
+adder trees, ZERO multipliers; one pipeline stage on the cone (the
+iCE40 pd-stage pattern — single-cycle missed 50 MHz at 45.9).
+GATE: tb vs golden vectors from a REAL school frame at its served
+threshold — 3364/3364 centres BIT-EXACT (t=12). Build on LFE5U-25F:
+4011/24288 COMB (16.5%), 735 FF, 200 RAMW, 1 DP16KD, 0 MULT18;
+timing 72.2 MHz vs the 50 MHz constraint. Defect classes hit + fixed:
+tb reset-release race at posedge (X-propagation — declaration initials
++ negedge release), valid-vs-data pipeline skew twice (one register
+per added data stage — mismatches appeared exactly one column
+shifted).
+
+2D-vs-3D LATTICE STUDY (experiments/lattice3d.py; equal D=240 = the
+matcher budget; scales = the shipped ladder; real school_run2 full
+clouds via npz shards, classroom via PCD; anti-oracle: references
+label pairs only):
+  disp (SE(3) displacement decode, grid step 0.15 m):
+    |d|=0.8 m: az2d err med 0.409 (cannot see dz + planar aliasing)
+    vs fib3d 0.075 / azel3d 0.074 / rand3d 0.075 — all 3D layouts at
+    the grid floor; |d|=0.3: 0.138 vs 0.080-0.082.
+  rot (yaw 15 deg, permutation vs re-encode):
+    az2d cos 1.0000 (exact, the house algebra) | azel3d cos 1.0000
+    EXACT — azimuth-rings x elevation-bands keeps rotation = index
+    permutation band-wise | fib3d 0.870 med / 0.762 min | rand3d
+    0.875/0.696 — the Fibonacci sphere SACRIFICES the exact-rotation
+    algebra and buys nothing measurable elsewhere.
+  place (classroom, 110 frames, withheld-odometry labels, 179 same /
+  4144 diff pairs, yaw-agnostic |cos| proxy):
+    az2d AUC 0.744 -> fib3d 0.833 / azel3d 0.822 / rand3d 0.842 —
+    3D content lifts same-place separability ~+0.08-0.10.
+    (school_run2's gated window has NO revisit pairs — outbound sweep;
+    stated, not fudged.)
+  cam (camera bearings K^-1[u,v,1] on the 3D lattices, score-weighted):
+    cam-only AUC 0.73-0.75; **lidar(+)cam bundled (plain vector
+    addition, 50/50): AUC 0.922-0.935** vs lidar-alone 0.82-0.84 —
+    the first fusion datapoint on real target-platform data, and it is
+    POSITIVE by ~+0.10 AUC.
+
+RECIPE: the ECP5 3D lattice is **azel3d** (az rings x elevation bands
+x scale ladder) — matches Fibonacci on displacement/place metrics AND
+keeps the exact yaw-permutation matcher primitive. Fibonacci sphere =
+labeled negative for this system (algebra loss, no gain). Fusion via
+vector addition is live and measured. Next (filed in hw/ecp5/README):
+OV5640 DVP front, full-cloud SDRAM ingest, encoder port
+(SPRAM->EBR/SDRAM), python fusion experiment at the aliasing wall.
+
+### School-data addendum (user: "did you run over the school data?") — place/cam re-run on school_run2; ALL revisits are reverse-heading, and the exact-permutation layouts are the only ones that survive it
+
+disp/rot already ran on school_run2 clouds (banked above). place/cam
+originally fell back to the classroom (the school's gated-LIO window
+has no revisit pairs); now re-run on the FULL school_run2 with
+OWN-ESTIMATE labels (diagnostic per PROTOCOL: ~1 m label error, pair
+margins widened to same<1.0 m / diff>4 m; labels never enter an
+encoder). Heading split exposes the structure: the school's 85
+same-place pairs are 0 forward / 85 REVERSE (out-and-back tour).
+
+  school_run2 (all-reverse revisits), raw |cos| vs rotation-searched:
+    az2d    raw 0.651 -> ROT-SEARCHED 0.767   (60-step exact perm)
+    azel3d  raw 0.542 -> ROT-SEARCHED 0.700   (12-step exact perm)
+    fib3d   raw 0.531 -> no exact permutation, CANNOT rot-search
+    rand3d  raw 0.566 -> likewise stuck
+  classroom control (all-forward pairs): rot-search ~= raw
+    (0.744->0.705, 0.822->0.807 — max-over-perms lifts the diff tail
+    slightly; 3D > 2D unchanged).
+  camera on school: cam-only 0.37-0.40, lidar+cam 0.42-0.51 — BELOW
+    chance on reverse revisits and not rescued by fusion: the D455
+    looks FORWARD; a reverse pass sees a different scene. The banked
+    viewpoint wall in fusion form — camera helps only where views
+    overlap (classroom 0.92-0.94).
+
+READ: (1) the algebra argument is now empirical — on aliased
+corridors with reversed revisits, rotation-as-exact-permutation buys
++0.12..+0.16 AUC that Fibonacci/random layouts structurally cannot
+reach; azel3d's gap to az2d (0.700 vs 0.767) is its coarser 15-deg
+rotation search (12 az/band at equal D), not the 3D content — fine-
+rotation refinement per band (the d/dtheta derivative trick
+generalizes band-wise) is the filed follow-up. (2) Forward cameras do
+not cross the reverse-revisit wall; fusion gains are view-overlap-
+gated. Both consistent with FINDINGS section 5; neither closes it.
+
+## 2026-07-14 — detector-formulation zoo (user: "continue experimenting, same opt corners, various feature detector formulations"): shi-tomasi-L1 wins the F-corner (+0.07 cam-AUC over FAST-9), extrema/edge win the S-corner at 3 line-buffer rows; depth-augmented landmarks NEGATIVE pending real extrinsics (experiments/detzoo.py)
+
+Seven integer, line-buffer-streamable formulations, each servoed to
+lidar point parity per frame and judged on the house corners (S =
+window rows / mults/px; F = cam-only + lidar(+)cam place-AUC on azel3d
++ adjacent-frame repeatability; T = all 1 px/clk). Venues: classroom
+(honest withheld-odometry labels) + school_run2 (own-estimate
+DIAGNOSTIC labels; all-reverse revisits, the known wall).
+
+  classroom (lidar-only AUC 0.822):
+    det        rows mult  cam-AUC fused  adj-rep
+    fast9       7    0    0.742   0.921  0.973   (shipped RTL v0)
+    fast12      7    0    0.698   0.915  0.970   (same silicon, worse)
+    susan16     7    0    0.733   0.912  0.971
+    extrema     3    0    0.723   0.904  0.962   <- S-corner champion
+    harris      8    5    0.706   0.923  0.922   (servo saturates 1..4095
+                                                  — >>16 rescale too
+                                                  coarse; not tuned,
+                                                  superseded below)
+    shitomasi   8    3    0.809   0.935  0.947   <- F-corner WINNER
+    edge        3    0    0.763   0.910  0.972   (edges > corners for
+                                                  place signal here)
+  school_run2 (lidar-only 0.446; all cam channels at the reverse-view
+  wall 0.36-0.41 as banked): fused best = edge 0.522; adj-rep
+  0.80-0.84 everywhere — the camera stays a solid frame-to-frame
+  (odometry-class) signal even where place recognition is walled.
+
+VERDICTS: (1) shi-tomasi L1 (separable Sobel -> 5x5 structure tensor
+-> (Sxx+Syy) - (|Sxx-Syy|+2|Sxy|); 3 MULT18 at pixel rate, response =
+abs/add only) is the RTL v1 candidate: +0.067 cam-AUC and +0.014
+fused over FAST-9 for 3 of the ECP5's 28 multipliers. (2) The cheap
+tier is real: extrema (8 comparators, 3 rows) and edge (Sobel adds, 3
+rows) give up <=0.02 fused AUC vs FAST-9 at ~40% of its line buffers
+— the right corner when the detector shares the die with the encoder.
+(3) fast12/susan16: no wins. (4) DEPTH-AUGMENTED 3D landmarks
+(bearing x nearest-lidar-range, 2-deg cone): NEGATIVE as implemented —
+the geometry-picked camera->body axis mapping is UNSTABLE across
+venues (z->+x @52% hits vs z->+y @76%), and 3D points score BELOW
+bearings both venues (classroom 0.566 vs 0.651 cam) — radial noise at
+lattice scale without calibrated extrinsics. Filed: real extrinsic
+calibration (checkerboard or lidar-camera mutual-information), then
+re-run; ALSO noted: bearing-cone orientation vs the azel3d equatorial
+band matters (camera-frame vs body-frame encodes differ — pin the
+convention when extrinsics are real). FAST-9 RTL v0 stays the shipped
+core; shitomasi v1 RTL + OV5640 DVP front are the next hardware steps.
+
+## 2026-07-14 — 4h block part 1 (user: "lidar needs to be scaled, vision needs to be explored; two maps; QVGA@120"): lidar scales with D not ingest (0.70->0.86 @ D960, 3 rings == 64); vision's best channel is DETECTOR-FREE dense intensity; two-map beats shared-map at the wall (experiments/twomap.py, experiments/lidarscale.py)
+
+Operating point locked (user): OV5640 at its max rate = QVGA 320x240 @
+120 fps — natively the binned working res (no bin stage), ~9-12 MHz
+pixel clock; T-corner: comparator detectors + shi-tomasi FREE; 3-layer
+int8 CNN ~60% of the MULT18 budget (quality-reference tier only);
+YOLO-nano-class OUT (hw/ecp5/README section 5).
+
+TWO-MAP ARCHITECTURE (school est-labels diagnostic / classroom honest):
+lidar map = az2d rot-searched; vision map = own bearing lattice (fib or
+FOV-cone); late z-normed score fusion. school: lidar-map 0.720 vs
+SHARED-map control 0.516 — the split protects lidar at the wall.
+classroom: shared 0.921 vs best late-fusion 0.877 — shared wins under
+view overlap. Vision arms (school | classroom, vis-only):
+  fast9-pk 0.38|0.75  shito-pk 0.37|0.84(cone 0.81)  dog-pk 0.39|0.79
+  dog-raw 0.38|0.76  gridint (8x8 mean-intensity, NO detector)
+  0.62|0.949 <- the STRONGEST vision channel in both venues; on school
+  fused(a=.5) 0.759 BEATS lidar-alone 0.720 — dense appearance carries
+  reverse-view signal sparse corners cannot. FOV-cone lattice ~= fib
+  (no win from concentrating directions). ucnn arm was DEGENERATE run 1
+  (relu chain after zero-mean random filters -> all-zero heat; all rows
+  identical — NOT banked; abs-activation fix in, rerun pending).
+
+LIDAR SCALING (school, azel3d rot-searched, est-labels):
+  input:  slice1(2D shipped input) 0.256 | rings3 {16,33,50} 0.701 |
+          full 64-ring 0.700  -> THREE RINGS CARRY THE FULL-CLOUD PLACE
+          SIGNAL (ingest can drop to 3/64 bandwidth)
+  D:      240 0.700 | 480 0.814 | 960 (24az x 5el x 8lam sqrt2 0.25-2.83)
+          0.858  -> separability SCALES WITH D on the aliasing venue
+          (finer az = finer rot search + more scales; the span-ladder
+          law generalizes to 3D)
+  SUB:    32/16/8 (2k/4k/8k pts) 0.690/0.700/0.699 -> FLAT; 2k pts
+          suffice
+  disp:   flat 0.067-0.075 across D (already at grid floor at D=240)
+  RECIPE: spend on the lattice (D960-class), not the ingest (3 rings,
+  ~2k pts) — quality +0.16 while bandwidth drops ~40x.
+
+### 4h block part 2 — 6-DoF capability, fusion policy, fixed CNN arm
+
+SO(3) capability on FROZEN vectors (school clouds, permutation search,
++-15deg grid @5deg): azel3d decodes unknown pitch/yaw/roll at 3.9 deg
+med / 6.1 p90 (grid floor ~3.5) — with z-translation already at floor,
+FULL 6-DoF transform capability is demonstrated without re-encoding.
+fib3d 4.7/9.3 (loses even its isotropy argument); az2d 19.2 deg =
+orientation-blind beyond heading (the 2D+heading system, quantified).
+Per-axis quality: azel3d y15 EXACT (1.0000*), p15 0.94, r15 0.92.
+
+FUSION POLICY (lidar rot-searched x gridint, z-normed): school
+MAX-RULE 0.798 beats every alpha-sum (best 0.759) and lidar-alone
+0.720; classroom prefers vision-heavy sums (a=0.1 -> 0.954). Policy is
+venue-dependent; max = the robust default at the wall;
+confidence-adaptive alpha filed.
+
+UCNN FIXED (abs activations replace the relu chain that zeroed the
+heat): school ucnn-pk 0.426 (sparse, walled like all corners);
+ucnn-RAW dense heatmap 0.652 vis / 0.756 fused — beats gridint's 0.622
+vis with RANDOM weights: dense appearance >> sparse corners for place,
+and a trained tiny head has headroom — but at ~60% of the MULT18
+budget @QVGA120 vs gridint ~free. Deploy = gridint; ucnn-raw = quality
+reference tier.
+
+### 4h block part 3 — appearance-IN-PHASE encoder family (architecture: bind what with where): a precision/ego-motion channel, NOT a cross-view channel
+
+Three integer cis-ROM-addressable encoders binding appearance into the
+phase (vs gridint = appearance as weights): intphase (cell intensity,
+3 wavelengths), gradhog (8-dir quantized gradient orientation,
+pi-periodic harmonics, magnitude weights), census (cell-level 8-bit
+neighbour code, binary phase decomposition). Predictions on record:
+census to win school via illumination invariance; intphase fragile.
+MEASURED (vis-AUC school | classroom):
+  gridint(weights) 0.622 | 0.949     intphase 0.448 | 0.999 (!)
+  gradhog          0.425 | 0.829     census   0.425 | 0.852
+  adj-rep: intphase 0.897/0.997 — the strongest ego-motion signal yet.
+Predictions REFUTED: phase-binding does not rescue cross-view matching
+(cell codes/orientations differ across views regardless of lighting);
+it SHARPENS view-specificity. LAW: appearance-in-phase = the
+PRECISION + EGO-MOTION channel (view-overlap verification, 120 fps
+tracking; classroom 0.999/0.997); appearance-as-weights (gridint) =
+the coarse CROSS-VIEW place channel (school 0.622). The two-tier
+vision similarity drops straight into the two-service architecture
+(hw/ecp5/README "Architecture").
+
+### 4h block part 4 — TUM RGB-D 6D probe: DEPTH-LANDMARK REDEMPTION — 3D visual landmarks CROSS the reverse-view wall (rev-AUC 0.941); real-motion 6D rotation decode works (runners/tum.py, experiments/vision6d.py)
+
+Dataset delivered per user ask: TUM RGB-D fr3_long_office_household
+(415 kf parsed to the QVGA integer pipeline; 6-DoF mocap labels;
+REGISTERED depth = no extrinsic guessing) + fr2_pioneer_slam (robot,
+parsing). EuRoC moved upstream (ETH Research Collection; pointer in
+data/README, deferred).
+
+PLACE (mocap labels; 1021 same pairs incl 78 REVERSE / 58311 diff):
+  gridint-bearings  0.797  (fwd 0.846 / rev 0.198 — dense bearings
+                            CRASH across viewpoint reversal)
+  fast9-bearings    0.805  (rev 0.494 = chance)
+  gridint-3D        0.794  (rev 0.791 — depth restores reverse)
+  fast9-3D          0.850  (rev 0.941 — sparse corners x registered
+                            depth = TRUE 3D landmarks; view-invariant)
+VERDICT: the SPOT depth-augmentation NEGATIVE was an extrinsics
+artifact, as filed — with registered depth the camera+range channel
+crosses the reverse-view wall that bearings physically cannot. On the
+platform, lidar provides the range: CALIBRATED lidar-camera extrinsics
+is now the highest-value single step for the fusion track.
+
+REAL-MOTION SO(3) decode (40 pairs, |dt|<0.15 m, true rot 5-20 deg,
+frozen gridint-3D vectors): fib3d 6.7 deg med / azel3d 8.4 / az2d 21.7
+(heading-blind, as designed). Mixed-axis real rotation favors fib's
+isotropy (synthetic single-axis favored azel) — both usable; grid
+floor 3.5 not reached (translation contamination |dt| up to 0.15 m).
+
+### 4h block part 5 — fr2_pioneer replicate: the depth-COVERAGE boundary condition
+
+fr2_pioneer_slam (373 kf, robot in a big industrial hall, Kinect):
+fast9-3D 0.560 (rev 0.540), gridint-bear 0.543, others 0.36-0.49;
+rotation decode fib 10.4 / azel 11.3 / az2d 21.7 deg. NOT a refutation
+of the fr3 redemption: the Kinect's ~4 m depth covers almost none of
+the hall (landmarks starve) and robot vibration blurs corners — a
+depth-COVERAGE boundary condition. The target platform's range source
+is 60 m lidar, so fr3-class coverage is the relevant regime; fr2 marks
+where the channel degrades. Real-motion rotation decode stays ~2x
+better than heading-only even here.
+
+## 2026-07-14 — individual-optimization round 2 (user: "continue optimizing the two systems individually"): lidar scale axis = the LADDER; vision D is FLAT — the two maps want opposite budgets (experiments/lidarscale.py axis, experiments/twomap.py vissweep)
+
+LIDAR (school est-labels, full cloud unless noted, rot-searched):
+  axis decomposition at EQUAL D=960: az24xL8 0.858 > az48xL4 0.842 >
+  az24xel10xL4 0.819 — the SCALE LADDER buys most, azimuth second,
+  elevation bands last (5 suffice). D1920 = 0.876 (+0.018 — diminishing
+  but real). Parabolic rotation-peak refinement = exact no-op for place
+  ranking (0.858; sub-step rotation matters for pose, not ranking).
+  rings3 x D960 = 0.854 @ ~700 pts med — the ingest recipe HOLDS at
+  scale. OPERATING POINT: 3 rings, ~0.7-2k pts, azel3d 24az x 5el x
+  8lam sqrt2 (D960) -> 0.854; D1920 headroom if EBR allows.
+
+VISION (school | classroom):
+  cell size 4/8/16 IDENTICAL AUCs (coarsest angular wavelength 0.3 rad
+  oversamples even 300 cells) -> c16 = 300 cells/frame, vision encode
+  ~8.6 M cis-MAC/s @ 120 fps (trivial). Weight transform: intensity
+  best cross-view (0.622|0.949); sqrt tiny classroom gain (0.957);
+  gradmag WORST for place (0.317|0.728) but BEST adjacency
+  (0.872|0.974) — ego-motion tier confirmed again. Vision D FLAT
+  (0.622/0.622/0.623 @ D120/240/480 school) — the vision map does NOT
+  scale with D; D120 suffices. intphase-DC (gain-invariance fix):
+  school 0.451 (no rescue — fragility is view-specificity, not gain;
+  law holds), classroom 0.989/adj 0.994.
+
+THE ASYMMETRY LAW: the two maps want OPPOSITE budgets — lidar quality
+scales with lattice D (spend EBR there: D960-1920) and not with
+ingest; vision saturates at D120/300 cells (spend nothing) and splits
+into intensity-weights (place) + gradmag/intphase (ego-motion) tiers.
+Individual optimization is not just permitted by the two-map split —
+it is required.
+
+## 2026-07-14 — 6-DoF refinement, both systems (user: vision first, lidar after, then cohere): the decode stack is near-EXACT (0.29 deg / 3 mm GN on school clouds); real-pair error is CONTENT-OVERLAP, not machinery; visual + cloud gyros at 1.3-1.8 deg (experiments/vision6d.py se3/gyro/depthrob, experiments/lidar6d.py)
+
+VISION (TUM fr3, mocap): joint separable SE(3) decode (343 rotations x
+one-matmul translation each): coarse 6.3 deg / 0.216 m; local refine
+6.7 / 0.172. VISUAL GYRO (analytic derivative vectors — the segder/Cx
+pattern lifted to SO(3)xR3, 6x6 least squares, inner products only):
+1.82 deg med on 2.6-deg adjacent-frame motion (rotation-only 3x3 was
+2.02; coarse-rings-only variant REGRESSED med 2.31/p90 12.7 — too few
+constraints; fine-ring linearization error filed -> iterate on points
+for the frame-to-frame service). DEPTH-COVERAGE ladder (the
+lidar-projected-depth readiness curve): rot 5.6/6.3/7.2/11.4 deg at
+100/50/25/10% cell coverage — GRACEFUL TO 25%, breaks at 10% -> sparse
+lidar depth on SPOT is sufficient.
+
+LIDAR (TUM depth clouds as the 6-DoF range surrogate + school lidar):
+  school clouds + synthetic SE(3): coarse 2.31 deg/0.051 m ->
+  **GNx3 0.29 deg / 0.003 m** — the correlation+GN decode stack is
+  near-exact on real lidar geometry.
+  TUM real pairs (0.1-0.5 m, 5-20 deg): ~6 deg / 0.17 m at EVERY stage
+  (coarse 6.35 / refine 5.72 / GN 6.14) — NOT the optimizer: at these
+  baselines the two clouds are not rigid transforms of each other
+  (occlusion + surface turnover + depth noise). Correlation 6-DoF
+  decode is CONTENT-OVERLAP-limited; GN pays only inside the
+  content-consistent regime.
+  CLOUD GYRO (GNx2, adjacent frames): 1.34 deg med on 2.5-deg motion —
+  beats the visual gyro; its true operating point (20 Hz sensor rate,
+  10x smaller steps, ~total overlap) is still better-conditioned.
+READ for the deploy variant: 6-DoF verification at loop closures should
+use SHORT-baseline decodes (or snapshot-vs-snapshot at the same
+anchor), where the stack is near-exact; gyros run at sensor rate on
+both modalities with the same 6 derivative vectors per frame.
+
+### fr1 aggressive-motion replicate + DEPLOY VARIANT v1 coherence
+
+fr1_rpy (the purpose-built roll/pitch/yaw sequence): visual gyro 1.95
+deg / cloud gyro 1.45 deg med on 3.0-deg adjacent steps — the gyros
+REPLICATE on aggressive real rotation. fr1_desk wide-baseline SE(3):
+7.4-9.3 deg / 0.18-0.22 m, GN diverges on low-overlap pairs (p90 21) —
+the content-overlap limit holds across all three sequences.
+
+DEPLOY VARIANT v1 written to hw/ecp5/README (all numbers banked):
+lidar = 3-ring/2k-pt ingest + azel3d D960 per-anchor place layer
+(0.854) + cloud gyro; vision = gridint-c16 place + intphase precision
++ visual gyro @120 fps + fast9 RTL sparse path, snapshot library
+D120-240 (<=0.5 KB/anchor); fusion = max-rule candidates + intphase
+precision verify + SHORT-BASELINE 6-DoF consistency checks (the
+near-exact regime: 0.29 deg/3 mm); wide-baseline SE(3) = coarse gate
+only; depth-lifted landmarks (the wall-crosser, rev 0.941, graceful to
+25% coverage) gated on lidar-camera extrinsic calibration — the
+standing unlock. Both maps bounded per anchor; QVGA120 budgets hold
+(dense vision encode ~free at 300 cells; CNN tier excluded at 120 fps).
+
+## 2026-07-14 — ECP5 ceiling tuning (user: use the full part, all corners, tune scales/vec-distribution; headroom -> map/history/detection): the "D-scaling law" was a LADDER law — coarse rings 0.5-90 m at D1920 = 0.928; curve saturates ~0.93 (experiments/lidarscale.py tune)
+
+Sweep (school est-labels, full clouds, rot-searched; banked refs D960
+0.858 / D1920 0.876 / D3840az 0.880 / D3840lam 0.915):
+  LADDER (24az x 5el x 16lam, D1920): coarse-shifted (0.5..90.5 sqrt2)
+  **0.928 / adj 0.967** > full-span 0.906 > octave-wide 0.902 >
+  fine-shifted 0.896 — sub-0.5 m rings buy NOTHING for place (they are
+  registration rings); building-to-campus-scale rings (11-90 m) are
+  the lever (the 2D span15g global-anchor lesson, in 3D).
+  ELEVATION (x 8lam): +-20 / +-22(sensor-matched) / 3-band / 9-band
+  all 0.865-0.872 vs +-40 5-band 0.876 — FLAT (free knob; use
+  sensor-matched +-22).
+  CLOSE-OUT: 48az x coarse16 (D3840) 0.934; 20-ring 0.354-256 m
+  (D2400) 0.933 — the curve SATURATES ~0.93.
+CEILING RECIPE (the "better map" headroom sink, quantified): azel3d
+24az x 5el x lam16-coarse(0.5-90.5 sqrt2) = D1920 -> **0.928** place
+(vs v1's D960 0.854, +0.074), 480 B/anchor @ 2b, encode ~77 M
+cis-MAC/s @ 2k pts x 20 Hz, rot-search 24-perm. Deploy v1.1: map
+layer upgraded to this; D3840 not worth 2x bytes (+0.006).
+Headroom allocation banked in hw/ecp5/README: (1) map/objects (this
+recipe + the fidelity/pursuit layer), (2) history reservoir in SDRAM
+(~16k raw scans; safe-cadence rehearsal + RAW-history closure
+re-verification — new memory the UP5K never had), (3) trained tiny-CNN
+detector head.
+
+## 2026-07-14 — 3h formulation block part 1: fidelity/granularity at D1920-coarse (experiments/lidarscale.py fidelity)
+
+Place-snapshot QUANT ladder (phase-only, NO per-ring scales — note):
+float 0.928 (15.4 KB/anchor f32) | 4b 0.862 (1.9 KB) | 3b 0.862
+(1.4 KB) | 2b 0.834 (0.48 KB). Unlike the matcher-store deadband law,
+place-similarity RANKING pays for quantization at D1920-coarse; 3b =
+the knee (2x cheaper than 4b, equal AUC). FILED: per-ring-scale quant
+(the house 2b recipe) may recover — the flat quant here lacks ring
+structure. S-corner options: 3b snapshots 1.4 KB/anchor, or float at
+~15 KB (SDRAM: still 2k+ anchors).
+MATCHING SPACE: mid-rings 0.5-2.83 alone 0.907 (D960) | coarse 4-90
+alone 0.865 | all-16 0.928 — the mid scales are the single-handed
+workhorse (reconciles the ladder finding: "fine" junk was sub-0.5 m,
+not 0.5-2.8); query can drop to D960 mid-rings at -0.021 (T halves).
+ROT-SEARCH GRANULARITY: 24 perms 0.928 | 12 perms 0.905 | 6 perms
+0.823 — 12-perm is the budget point, 24 standard.
+
+### 3h block part 2 — extraction variants: no new winner; TIERS MUST STAY SEPARATE CHANNELS
+
+multigrid8+32 == gridint (scale mixing adds nothing; cell-size flatness
+law); hog8bin = ego-motion-tier citizen (adj 0.894/0.973, place-weak
+0.556/0.843); gridint(+)intphase COMBINED SNAPSHOT: school vis 0.410
+(vs gridint 0.622) — summing the precision tier into the cross-view
+vector DILUTES it (classroom 0.990 = intphase alone). LAW SHARPENED:
+the two vision tiers must remain SEPARATE similarity channels fused at
+score level (max-rule); vector addition across tiers is destructive.
+
+## 2026-07-14 — ICEPI ZERO FIRST SILICON: fast9 detector BIT-EXACT on hardware, day-of-arrival (hw/ecp5/rtl/top_fast9_uart.v, host/hw_fast9.py)
+
+Board attached (FT231X, /dev/cu.usbserial-DK0GEIG0; openFPGALoader
+-b icepi-zero programs via bitbang). Sequence: detect -> flash
+top_fast9 (LED smoke) -> UART gate top (2 Mbaud exact DIV=25, magic-
+armed frame protocol, 2 KB TX FIFO) -> full-top SIM gate (uart cores
+as host BFM) -> silicon: **HW PASS, 3364/3364 centres bit-exact vs
+the golden model on a real school_run2 camera crop (t=12)** — the
+ECP5 track's first hardware gate, green on arrival day.
+
+Defect classes caught (both protocol-level, neither in the core):
+(1) TX FIFO OVERFLOW at back-to-back input (reply = 2 bytes/pixel vs
+1-byte drain at equal baud; missing bytes = exactly one FIFO depth —
+host pacing 2.2x masks it; proper flow control filed for the
+streaming front). (2) FT231X FIRST-BYTE CORRUPTION after port open:
+the raw first byte (= threshold) arrived as garbage -> ZERO corners
+with PERFECT framing (large t kills all arms) — hw signature:
+mismatches == corner count, all-zero reads. Fix = MAGIC arm byte
+(0xA5) + open-settle + dual-buffer flush. The sim-first discipline
+held: core sim, full-top sim, then silicon — which agreed with sim on
+the first properly-armed attempt.
+
+## 2026-07-14 — 3h block part 3 + consolidation: FROZEN RAW-SAMPLE ANCHOR BANK — the mechanism is real (fhw 3.2x, fr101 -19%, stata celld-win), admission is the remaining work (experiments/frozenbank.py)
+
+User design: frozen samples that never get overwritten (scan #0 + salient
+picks) to anchor loop closure / remove drift. Implementation: cell-capped
+(O(area)) frozen tier of raw scans; every 4 kf the nearest old frozen
+sample re-encodes at its LIVE pose and the current scan matches
+raw-vs-raw; accepted matches append standard loop edges (try_constraint
+Z-form). DETERMINISTIC (no rng). OFF gates reproduced acceptance on all
+6 venues.
+
+v1.0 (naive gate 1.5 m/20 deg, fixed weights):
+  fr101 1.881->1.518 (-19%, POINT-STABLE log, citable) loops 53->111
+  fhw   0.981->0.305 (3.2x) loops 776    school med 1.061->1.050 (+37
+        loops; scored window cannot see the return-leg anchoring)
+  stata cell 0.225 (mild loss) but **celld 0.194 BEATS OFF 0.202 — the
+        DISTINCTIVENESS gate binds exactly on the aliased flagship and
+        flips it** (anti-aliasing selection working as designed)
+  spot  no-op | belg CRASH 4.9 (aliased raw matches at full weight)
+  first-only (scan #0): neutral-to-negative — a single over-trusted
+  anchor distorts; the SPATIALLY-DISTRIBUTED cell bank is the design.
+v1.5 (+coherence floor 0.45 + 1/coh^2 inflation):
+  belg FIXED (== OFF exactly; all raw matches rejected) | fhw 0.357
+  (still 2.7x) | fr101 1.880 (gain gone — floor too strict there) |
+  stata 0.291 (WORSE than v1.0 — inflated weak edges still perturb).
+VERDICT: the frozen-bank mechanism is REAL and large where revisits
+exist, and the distinctiveness selector is the first thing to ever
+flip stata; but a 2-constant gate cannot serve all regimes — the SAME
+admission problem the shipped cascade solved. FILED v2: route frozen
+closures through the SHIPPED admission (aperture classifier, EMA
+coherence reference, PCM) instead of a private gate. STATUS: banked as
+per-environment OPT-IN (fhw-class halls; v1.0 numbers) pending v2;
+graph-only (no map-content mutation), deterministic, and the natural
+consumer of the SDRAM frozen tier in the headroom plan.

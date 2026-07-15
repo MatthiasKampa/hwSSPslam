@@ -742,7 +742,15 @@ deterministic and reproduces bit-exact, but freeze-time map perturbations of
 §3 stability-boundary bullet). fr101 is the one point-stable log (1.88 at 1%
 noise). Consequently a config delta smaller than the log's band width is a
 basin draw, not an effect; PROTOCOL §6 now requires the band probe
-(`ssp_fpga.BandSLAM`) for config-level claims on the sensitive logs.
+(`sspslam.quantized.BandSLAM`) for config-level claims on the sensitive logs.
+The 2026-07-13 reservoir-cadence study extended this law to *online* map
+mutation: any rehearsal/replay feature that folds content into the live map
+acts as a perturbation sequence — it converts even point-quotable logs into
+banded ones (stata: ~1/3 of replay-seed draws collapse the closure graph at
+every save cadence and dose tested, from ~70 folds to ~4300), so single-seed
+results on map-mutating features are basin draws, and the fhw replay opt-in
+is itself a band ({0.22, 0.24, 4.05}; RESULTS "reservoir save-cadence
+study").
 
 **What is defensible.** The three properties are the bound, the absence of
 history, and the algebra — each verified: Intel plateaus at 698 segments (84% of
@@ -1018,3 +1026,33 @@ interpreter over the same BRAM that holds the map. Freeze-store corollary
 (38 B/seg, all integer, from one freeze scan) reads out BETTER than the
 float store it quantizes — quantization noise is below, and dead-lattice
 junk above, the extraction's noise floor.
+
+## A10 — Sensor-fusion architecture laws (ECP5 track, 2026-07-14; RESULTS "4h block" parts 1–5)
+
+(1) **Two maps of different kinds.** The phase algebra transforms range
+points but not camera appearance (parallax): the lidar map is
+transformable world-frame content; the vision map is a bounded
+per-anchor appearance-snapshot library queried by max-similarity. Late
+score-level fusion; max-rule at the aliasing wall (school 0.798 >
+lidar-alone 0.720), vision-weighted sums under view overlap (0.954).
+(2) **Lidar scales with D, not ingest.** School place-AUC 0.700 → 0.858
+from D240 → D960 (finer azimuth = finer exact-rotation search + more
+scales); 3 of 64 rings and ~2k points carry the full signal — spend on
+the lattice, not the bandwidth.
+(3) **Full 6-DoF on frozen vectors.** azel3d decodes unknown
+pitch/yaw/roll at ~4° (grid floor) + translation incl. z at grid floor —
+2D+heading (az2d) is orientation-blind beyond yaw (19–22°). Real-motion
+(TUM): 7–8° med; mixed-axis motion favors fib3d's isotropy slightly.
+(4) **Vision: dense beats sparse for cross-view place; appearance-in-
+phase is a precision/ego-motion tier, not a cross-view tier.** Weights-
+only intensity grid = the coarse cross-view channel (school 0.622);
+phase-bound appearance sharpens view-specificity (classroom 0.999 /
+adj-rep 0.997 — the ego-motion service) and hurts across viewpoint
+change. Untrained int8 CNN heatmaps ≈ +0.03 over raw intensity (trained
+headroom exists at ~60% of the MULT18 budget @QVGA120).
+(5) **3D visual landmarks cross the reverse-view wall — given depth
+coverage.** TUM fr3 (registered depth): corners × depth rev-AUC 0.941
+where bearings collapse to 0.198; fr2's 4 m Kinect in a hall = the
+coverage boundary. On the platform the range source is 60 m lidar →
+**calibrated lidar-camera extrinsics is the single highest-value step**
+(the SPOT depth negative was an extrinsics artifact, proven).

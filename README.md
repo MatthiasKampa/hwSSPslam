@@ -294,7 +294,7 @@ python3 -m runners.carmen data/fr101.log     # shipped deliverable + ATE
 python3 -m runners.datasets run stata                # flagship: floorplan GT
 python3 -m runners.synth bench                       # SPOT-proxy 360° GT bench
 python3 -m sspslam.bounded quick                     # synthetic GT bench
-open demo/index.html                             # browser demo (9 replays + sandbox)
+open demo/index.html                             # browser demo (7 FPGA replays + sandbox)
 ```
 
 Everything is deterministic: published numbers reproduce bit-exact.
@@ -325,9 +325,10 @@ old→new table is `docs/RESTRUCTURE-MAP.md`.
 | `runners/rpe.py` | relative-pose-error metric CLI over saved trajectories |
 | `baselines/` | ICP / CSM / RBPF / Scan-Context controls, same harness |
 | `experiments/` | one module per catalogued experiment — **`experiments/README.md` is the index with verdicts + run recipes**; notable: `sampling.py` (encoding family), `hier.py` (HY4, adopted), `scale_arrays.py`, `posefilter.py` |
-| `hw/ice40/` | FPGA track: `rtl/`, `host/` tools (incl. the live demo server `host/live.py`), `golden.py` integer golden model |
-| `demo/` | self-contained browser demo: interactive synth sandbox + 9 real-data replays (stata/fhw/fr101/fr079/belg incl. binary, hex, and the deploy-sampler configs) exported by `demo/export_replay.py` from the real pipeline — Python is the source of truth |
-| `docs/` | `FINDINGS.md` (the synthesis — read this first), `RESULTS.md` (**the ledger**: all findings, tables, negatives, audits), `PROTOCOL.md` (experimental discipline), `RESTRUCTURE-MAP.md`, `sota/` literature notes |
+| `hw/ice40/` | iCE40 UP5K FPGA track: `rtl/`, `host/` tools (incl. the live demo server `host/live.py`), `golden.py` integer golden model |
+| `hw/ecp5/` | ECP5 / Icepi Zero fusion front end (full lidar + OV5640 camera): FAST-9 streaming RTL (bit-exact vs `host/golden_cam.py`), budget charter in its README |
+| `demo/` | self-contained browser demo: interactive synth sandbox + 7 real-data replays, one per dataset (spot/stata/fhw/fr101/fr079/belg/school_run2), all on the **FPGA-lean recipe** (2b store + int8; stata via the bridged deploy sampler) incl. the two labeled negatives — exported by `demo/export_replay.py` from the real pipeline; float/hex/dynenv blobs stay exportable via `demo/replays/manifest.json` — Python is the source of truth |
+| `docs/` | `FINDINGS.md` (the synthesis — read this first), `RESULTS.md` (**the ledger**: all findings, tables, negatives, audits), `PROTOCOL.md` (experimental discipline), `ENCODINGS.md` (every encoding formulation + verdicts), `RESTRUCTURE-MAP.md`, `sota/` literature notes |
 | `data/` | datasets (gitignored; `data/fetch_datasets.sh`) |
 | `scratch/` | ALL transient session scripts/logs (gitignored) |
 | `archive/` | superseded implementations kept for provenance |

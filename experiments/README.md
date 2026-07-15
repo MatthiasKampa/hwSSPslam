@@ -388,3 +388,15 @@ portable exactly-specifiable replacement candidate for the load-bearing
 scipy-TRF max_nfev=30 truncation (fixed-budget CG on the normal
 equations, hard iteration cap). No banked verdict yet — the module is
 committed for provenance; run + bank before any deploy claim.
+
+**ECP5 fusion track (2026-07-14)** — `lattice3d.py`: 2D-vs-3D feature-vector
+layouts at equal D=240 (az2d baseline / Fibonacci-sphere×scales / az×elev
+bands / random control) on real school clouds + camera bearings. Verdicts:
+3D decodes full SE(3) displacement at the grid floor where 2D fails (0.07 vs
+0.41 m at |d|=0.8); **az×elev is the recipe** (keeps yaw = exact index
+permutation, cos 1.0000 — Fibonacci drops to 0.87 and buys nothing);
+place-AUC 0.74→0.83 from 3D content; **lidar⊕cam vector addition AUC 0.92
+vs 0.83 lidar-alone** (classroom, withheld-odometry labels). Run:
+`python3 -m experiments.lattice3d [selftest|disp|rot|place|cam] [run]`.
+Camera features via `runners/spot_cam.py` (FAST-9 servoed to lidar point
+parity — golden model `hw/ecp5/host/golden_cam.py`, RTL `hw/ecp5/rtl/`).

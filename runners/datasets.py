@@ -50,6 +50,17 @@ DATASETS = {
     # uses it as GT ('exact' eval). See runners/spot.py.
     "spot": dict(kind="spot", path="data/spot_telluride/scans.npz",
                  eval="exact"),
+    # SPOT Telluride drop 2 (school building; npz_bytes shards). Reference
+    # = gated LIO-SAM flat window (kinematic odometry broken in this drop)
+    # — see runners/spot_school.py. run2: 342 ref kf (first ~80 s). run1:
+    # ZERO usable reference — loop/stability stress set only; its
+    # ATE/med print nan by construction.
+    "school_run1": dict(kind="spot_school",
+                        path="data/spot_telluride/school_run1/scans.npz",
+                        eval="exact"),
+    "school_run2": dict(kind="spot_school",
+                        path="data/spot_telluride/school_run2/scans.npz",
+                        eval="exact"),
 }
 
 
@@ -62,6 +73,13 @@ def load(name, cap=None):
         b = ssp_spot.make_bundle()
         if cap:
             for key in ("keys", "kts", "odom", "gt"):
+                b[key] = b[key][:cap]
+        return b
+    if d["kind"] == "spot_school":
+        import runners.spot_school as SPS
+        b = SPS.make_bundle(name)
+        if cap:
+            for key in ("keys", "kts", "odom", "gt", "gt_ok"):
                 b[key] = b[key][:cap]
         return b
     if d["kind"] == "carmen":
@@ -158,6 +176,9 @@ def evaluate(bundle, fin):
         gt = bundle["gt"]
         ok = bundle.get("gt_ok")
         m = np.ones(len(gt), bool) if ok is None else ok
+        if not m.any():                # refless run (e.g. school_run1)
+            return dict(ate=float("nan"), med=float("nan"),
+                        mx=float("nan"), n_ref=0)
         al = C.align_se2(fin[m, :2], gt[m, :2])
         e = np.linalg.norm(al - gt[m, :2], axis=1)
     else:                                        # stata floorplan GT

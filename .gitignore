@@ -21,3 +21,6 @@ demo/replays/replay_*.json
 
 # ice40 build artifacts (bitstreams/pnr reports regenerate from rtl/)
 hw/ice40/build/
+
+# ecp5 build artifacts (bitstreams/configs regenerate from rtl/)
+hw/ecp5/build/

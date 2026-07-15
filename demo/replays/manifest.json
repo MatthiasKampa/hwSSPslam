@@ -1,16 +1,9 @@
 [
- "replay_spot_interp2.json",
- "replay_spot_lean.json",
- "replay_stata_shipped.json",
- "replay_stata_interp2.json",
- "replay_fhw_shipped.json",
- "replay_fr101_shipped.json",
- "replay_fr101_lean.json",
- "replay_fr079_e2.json",
- "replay_fr079_lean.json",
- "replay_belg_shipped.json",
- "replay_belg_hex63.json",
- "replay_dyncls-p5w_interp2.json",
- "replay_dynsch8-p0_interp2.json",
- "replay_dynsch8-p5s_interp2.json"
+"replay_spot_lean.json",
+"replay_stata_lean-i2.json",
+"replay_fhw_lean.json",
+"replay_fr101_lean.json",
+"replay_fr079_lean.json",
+"replay_belg_lean.json",
+"replay_school_run2_lean.json"
 ]
