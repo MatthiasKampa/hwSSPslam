@@ -1191,3 +1191,21 @@ full detail in RESULTS "deploy-side integration verdict"):
   absolute cue §5-6 requires, so the semantic layer does not offer a way
   around the loop-closure wall — it offers the thing the wall never blocked
   (a queryable, correctable, bounded map wherever the metric solution holds).
+
+## Addendum (2026-07-16, deploy-side) — the label head is budget-LEGAL on the keyframe streaming lane; the object-semantics fork
+
+One correction to the seg-bottleneck close above (and to "labels pending
+distillation" in the 07-15b addendum): the pinned envelope's keyframe lane
+(540 MMAC @5 Hz, <=8 MB int8 SDRAM-streamed — EBR-residency binds only the
+frame-rate trunk) admits a ~1 MB U-Net label head AT KEYFRAME RATE. So
+fine-object labels are not architecture-blocked at deploy; the demonstrated
+gap is the TRAINING REGIME (quick from-scratch U-Net RGB-D 0.638 vs the
+~0.70 usefulness bar from semantic_segnoise). The deployable semantic stack
+therefore forks three ways, all mechanisms already validated: (1) NOW —
+surfaces tier (coarse classes, pixacc 0.858) + query-by-example via the
+tracking-descriptor bits (0.95 retrieval, label-free, compositional grading
+included); (2) NEXT — the streaming-lane U-Net label head, gated on closing
+0.638->0.70 with regime (long schedule/aug/self-sup pretraining), student
+input RGB-D; (3) deploy depth for (2) = projected lidar, making
+lidar-camera extrinsics the gating hardware step for the THIRD independent
+thread (depth-lifted landmarks, verify fusion, label head).

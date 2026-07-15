@@ -9545,3 +9545,62 @@ cannot change. To sharpen it you'd need a different operator (e.g. a
 margin/ratio test between the two attribute densities, or requiring BOTH to
 exceed per-attribute thresholds), not more dimensions. Grading capability:
 sound and D-robust; clean double-match retrieval: an operator-design problem.
+
+## 2026-07-16 — deploy-side review of ddd0fdb (seg-lever ledger + compositional queries): accepted, with ONE budget-lane correction that reopens the label head, two compose nits, and a convergence note
+
+The seg-bottleneck characterization is exemplary rule-5/rule-4 work — five
+levers measured (input/capacity/resolution/architecture/class-coarsening),
+each with a control, the colour claim CORRECTED by the deployment-faithful
+deep-net test, and the audit catching the units mismatch + taxonomy wrinkle.
+All verdicts accepted. My corrections/notes on top:
+
+- **BUDGET-LANE CORRECTION (reopens the label head).** The thread's closing
+  frame — "a seg decoder departs the pinned minimal-trunk budget; fine-object
+  labels are beyond deploy budget" — mis-reads the PINNED envelope. The seg
+  head runs @KEYFRAME rate, and the envelope (TRAINING_PROGRAM.md hard
+  ceilings, from hw/ecp5/host/cnn_budget.py) explicitly provides the
+  keyframe lane: **540 MMAC @5 Hz and <=8 MB int8 weights via SDRAM
+  STREAMING** — EBR-residency (55 KB) binds only the @frame-rate trunk. A
+  ~1 MB int8 U-Net label head at 5 Hz is inside BOTH ceilings. So the
+  demonstrated blocker is NOT architecture-at-budget: their own U-Net
+  RGB-D (980k, quick 4000-step from-scratch) already reaches 0.638 vs the
+  ~0.70 bar, and their audit attributes the remaining gap "largely to the
+  missing training regime". REVISED endgame: do not distill INTO the
+  trunk (architecture-capped ~0.60) — train the streaming-lane U-Net AS
+  the keyframe label head and close the 0.06 with the training regime
+  (long schedule + heavy aug + self-sup pretraining on their GPU; no
+  external weights required a priori). Platform wrinkle unchanged: the
+  student is RGB-D, deploy depth = projected lidar -> the lidar-camera
+  EXTRINSICS unlock (see convergence below); NYUv2 dataset depth gates it
+  until then.
+- **Compose nit 1 (repro):** the ledger's decisive random-query control
+  (flat 3.6/3.9/4.4) is NOT in the committed module — semantic_compose.py
+  only prints a bracketed note; the control ran in scratch. Same for the
+  product-of-queries operator and the D-sweep (both scratch variants).
+  The module should absorb its own controls (~15 lines).
+- **Compose nit 2 (framing):** retrieval recall/precision are computed
+  with GT OBJECT CENTROIDS as the candidate set (readout separability at
+  known positions), not the grid-detect pass the other semantic entries
+  use — the ~0.55 precision ceiling is not comparable to e.g. segnoise
+  precision. The grading claim (2>1>0) is unaffected (that is a readout
+  study by design).
+- **Compose capacity interaction (untested, cheap):** attribute-union
+  binding COMMITS 2k bits/object — by the significance-capacity law
+  (cross-talk tracks committed bits) a 2-attribute object loads the map
+  like a double-significance one, so composition SPENDS capacity;
+  n_obj=10 at D=360 with 24-bit objects is already near the measured
+  ceiling. A load sweep (n_obj x attrs/object) would pin the price.
+- **Scratch-pattern escalation:** FINDINGS pt3 now rests on seven
+  scratch-only scripts (colour/depth probes, rgbd_seg/fullres/big,
+  unet_seg, unet5) plus the still-uncommitted classroom wall test.
+  Load-bearing verdicts cited by FINDINGS should have committed recipes
+  (msg round 3b asks for a consolidated seg_levers module).
+- **Convergence note:** THREE threads now block on lidar-camera
+  extrinsics — depth-lifted landmarks (rev-AUC 0.941 banked), the verify
+  fusion, and now the RGB-D label head's deploy depth. It was already
+  FINDINGS' "single highest-value step"; the seg thread makes it three
+  for three.
+
+segnet.py changes reviewed: taxonomy anti-oracle fence (split-invariant,
+zero numeric impact — correctly logged, correctly fenced), rgb flag with
+the NaN root cause documented, ch param for the capacity arm. All fine.
