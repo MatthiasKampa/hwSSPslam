@@ -24,6 +24,18 @@ labels select pairs and score errors; nothing enters an encoder):
             (coarse SO(3) decode stage).
 
 Usage: python3 -m experiments.deploy6d selftest|verify|rowdepth|gyro|hopf [seq]
+
+TUNING round 2 (same session, additive benches):
+  dtune   vision 6-DoF space tuning: camera-range ladder x cell weights
+          x store model (flat-mag 2b/3b vs PER-RING magnitude scales —
+          the filed fix for the +1 deg flattening cost); verify + gyro
+          + TRANSLATION errors (never reported before)
+  fuse2   two-space fusion IN THE SOLVER: block-stacked GN residuals
+          (spaces stay distinct; one 6x6 solve) vs the banked post-hoc
+          rotation-vector averaging
+  chain   ego-motion at deploy rate: chain the fused gyro over 15 Hz
+          steps (fr3 stride-2 parse) across one 5 Hz keyframe interval
+          vs the single-shot 5 Hz decode
 """
 import sys
 
@@ -361,6 +373,248 @@ def bench_hopf(seq=SEQ):
               f"{np.percentile(errs, 90):.1f}", flush=True)
 
 
+# --------------------------------------------------------------------------
+#  tuning round 2: store model / ladder / weights, solver fusion, rate
+# --------------------------------------------------------------------------
+def qvec_rs(v, nph, nlam):
+    """Ring-scaled store: phase-only nph + ONE magnitude scalar per
+    wavelength ring (the filed fix: tonight's flat-mag store cost ~+1
+    deg and 2b ~= 3b showed magnitude, not phase resolution, is what
+    the derivative solve misses). Cost: nlam scalars per vector."""
+    if nph == 0:
+        return v
+    D = len(v)
+    rows = D // nlam
+    ph = np.round(np.angle(v) * nph / (2 * np.pi)) * (2 * np.pi / nph)
+    q = np.exp(1j * ph)
+    out = np.empty_like(q)
+    for r in range(nlam):
+        s = slice(r * rows, (r + 1) * rows)
+        out[s] = q[s] * (np.linalg.norm(v[s]) / max(np.sqrt(rows), 1e-12))
+    return out
+
+
+def qstack_rs(M, nph, nlam):
+    return np.stack([qvec_rs(M[:, k], nph, nlam)
+                     for k in range(M.shape[1])], 1)
+
+
+def feats_w(gray, depth, K, wmode):
+    """gridint-3D landmark cells with selectable weights (banked law:
+    intensity = place weights, gradmag = ego-motion weights — the gyro
+    and verify ran on intensity so far)."""
+    import experiments.detzoo as DZ_
+    ys, xs, w_int = __import__("experiments.twomap", fromlist=["x"]
+                               ).grid_int(gray)
+    if wmode == "gradmag":
+        dx, dy = DZ_._sobel(gray)
+        gm = np.zeros(gray.shape)
+        gm[1:-1, 1:-1] = np.abs(dx) + np.abs(dy)
+        cs = 8
+        h, wd = gray.shape[0] // cs * cs, gray.shape[1] // cs * cs
+        cw = gm[:h, :wd].reshape(h // cs, cs, wd // cs, cs).mean((1, 3))
+        w = cw.ravel() + 1.0
+    else:
+        w = w_int
+    Ki = np.linalg.inv(K)
+    uv = np.stack([xs + 0.0, ys + 0.0, np.ones(len(xs))])
+    b = (Ki @ uv).T
+    b /= np.linalg.norm(b, axis=1, keepdims=True)
+    d = depth[np.asarray(ys, int), np.asarray(xs, int)] / 1000.0
+    ok = (d > 0.2) & (d < 8.0)
+    return (b[ok] * d[ok, None]), w[ok]
+
+
+LADDERS_V = {
+    "lam.35-2.8 (v1)": [0.35, 0.7, 1.4, 2.8],
+    "lam.25-2.0     ": [0.25, 0.5, 1.0, 2.0],
+    "lam.5-4.0      ": [0.5, 1.0, 2.0, 4.0],
+    "lam.35-5.6(x6) ": [0.35, 0.7, 1.4, 2.8, 5.6, 11.2],
+}
+
+
+def _W_of_lams(lams):
+    return np.concatenate([(2 * np.pi / lam)
+                           * L3.dirs_azel(12, [-40, -20, 0, 20, 40])
+                           for lam in lams])
+
+
+def bench_dtune(seq=SEQ):
+    gray, depth, gt, K = V6.load(seq)
+    pairs = small_pairs(gt)
+    print(f"vision 6-DoF space tuning ({seq.split('_freiburg')[-1]}, "
+          f"{len(pairs)} small-motion pairs; rot deg / transl m):")
+    print("  -- ladder x weights (float store, linear solve) --")
+    best = None
+    for lname, lams in LADDERS_V.items():
+        W = _W_of_lams(lams)
+        for wmode in ("int", "gradmag"):
+            er, et = [], []
+            for i, j, Rt, tt in pairs:
+                P0, w0 = feats_w(gray[i], depth[i], K, wmode)
+                P1, w1 = feats_w(gray[j], depth[j], K, wmode)
+                v0 = V6._enc_raw(W, P0, w0)
+                v1 = V6._enc_raw(W, P1, w1)
+                Dm = np.concatenate([V6._deriv_axes(W, P0, w0),
+                                     V6._deriv_transl(W, P0, w0)], 1)
+                th = solve66(v0, Dm, v1)
+                er.append(gyro_err(th, Rt))
+                et.append(np.linalg.norm(th[3:6] - tt))
+            key = np.median(er)
+            print(f"  {lname} {wmode:7s}: rot med {key:.2f} p90 "
+                  f"{np.percentile(er, 90):.2f} | transl med "
+                  f"{np.median(et)*1000:.1f} mm", flush=True)
+            if best is None or key < best[0]:
+                best = (key, lname, lams, wmode)
+    _, lname, lams, wmode = best
+    print(f"  -- store model at the winner ({lname.strip()}, {wmode}) --")
+    W = _W_of_lams(lams)
+    nlam = len(lams)
+    F = {}
+    for i, j, Rt, tt in pairs:
+        P0, w0 = feats_w(gray[i], depth[i], K, wmode)
+        P1, w1 = feats_w(gray[j], depth[j], K, wmode)
+        F[i] = (V6._enc_raw(W, P0, w0),
+                np.concatenate([V6._deriv_axes(W, P0, w0),
+                                V6._deriv_transl(W, P0, w0)], 1),
+                V6._enc_raw(W, P1, w1))
+    for tag, qv, qm in (
+            ("float      ", lambda v: v, lambda M: M),
+            ("2b flat-mag", lambda v: qvec(v, 4), lambda M: qstack(M, 4)),
+            ("2b ring-mag", lambda v: qvec_rs(v, 4, nlam),
+             lambda M: qstack_rs(M, 4, nlam)),
+            ("3b ring-mag", lambda v: qvec_rs(v, 8, nlam),
+             lambda M: qstack_rs(M, 8, nlam))):
+        er, et = [], []
+        for i, j, Rt, tt in pairs:
+            v0, Dm, v1 = F[i]
+            th = solve66(qv(v0), qm(Dm), v1)
+            er.append(gyro_err(th, Rt))
+            et.append(np.linalg.norm(th[3:6] - tt))
+        print(f"  {tag}: rot med {np.median(er):.2f} p90 "
+              f"{np.percentile(er, 90):.2f} | transl med "
+              f"{np.median(et)*1000:.1f} mm", flush=True)
+
+
+def _gn_stacked(chans, v1s, R0, t0, weights, iters=2):
+    """Two-space GN: block-stacked residuals, ONE 6x6 solve per iter.
+    chans = [(W, P0, w0)], v1s = fresh queries per channel; spaces stay
+    distinct (no vector mixing) — fusion happens in the solver."""
+    R, tt = R0.copy(), t0.copy()
+    for _ in range(iters):
+        As, bs = [], []
+        for (W, P0, w0), v1, wt in zip(chans, v1s, weights):
+            Pc = P0 @ R.T + tt
+            v0c = V6._enc_raw(W, Pc, w0)
+            Dm = np.concatenate([V6._deriv_axes(W, Pc, w0),
+                                 V6._deriv_transl(W, Pc, w0)], 1)
+            s = wt / max(np.linalg.norm(v1), 1e-9)
+            As.append(np.concatenate([Dm.real, Dm.imag]) * s)
+            bs.append(np.concatenate([(v1 - v0c).real,
+                                      (v1 - v0c).imag]) * s)
+        th, *_ = np.linalg.lstsq(np.concatenate(As),
+                                 np.concatenate(bs), rcond=None)
+        dR = L3._axis_rot("yaw", np.degrees(th[0]))             @ L3._axis_rot("pitch", np.degrees(th[1]))             @ L3._axis_rot("roll", np.degrees(th[2]))
+        R = dR @ R
+        tt = tt + th[3:6]
+    return R, tt
+
+
+def bench_fuse2(seq=SEQ, max_pairs=80):
+    gray, depth, gt, K = V6.load(seq)
+    Wl = L3.make_lattices()["azel3d"]
+    Wv = W_vis3d()
+    pairs = small_pairs(gt, max_pairs)
+    e_post, e_stack, t_post, t_stack = [], [], [], []
+    for i, j, Rt, tt in pairs:
+        Fv0 = V6.feats(gray[i], K, "gridint", depth[i])
+        Fv1 = V6.feats(gray[j], K, "gridint", depth[j])
+        Pc0, wc0 = L6.depth_cloud(depth[i], K)
+        Pc1, wc1 = L6.depth_cloud(depth[j], K)
+        w_true = rotvec(Rt)
+        v1v = V6._enc_raw(Wv, *Fv1)
+        v1c = V6._enc_raw(Wl, Pc1, wc1)
+        # post-hoc (the banked 1.08): per-channel GN then omega average
+        Rv, tv = L6._gn_iterate(Wv, Fv0[0], Fv0[1], v1v, np.eye(3),
+                                np.zeros(3), iters=2)
+        Rc, tc = L6._gn_iterate(Wl, Pc0, wc0, v1c, np.eye(3),
+                                np.zeros(3), iters=2)
+        pv, pc = 1 / 1.82 ** 2, 1 / 1.34 ** 2
+        wf = (pv * rotvec(Rv) + pc * rotvec(Rc)) / (pv + pc)
+        tf = (pv * tv + pc * tc) / (pv + pc)
+        e_post.append(np.degrees(np.linalg.norm(wf - w_true)))
+        t_post.append(np.linalg.norm(tf - tt))
+        # stacked: one solve over both spaces
+        Rs, ts = _gn_stacked(
+            [(Wv, Fv0[0], Fv0[1]), (Wl, Pc0, wc0)], [v1v, v1c],
+            np.eye(3), np.zeros(3), [1 / 1.82, 1 / 1.34])
+        e_stack.append(np.degrees(np.linalg.norm(rotvec(Rs) - w_true)))
+        t_stack.append(np.linalg.norm(ts - tt))
+    print(f"two-space fusion in the solver ({seq.split('_freiburg')[-1]},"
+          f" {len(pairs)} pairs):")
+    for tag, e, tm in (("post-hoc omega avg (banked)", e_post, t_post),
+                       ("block-stacked GN (one solve)", e_stack,
+                        t_stack)):
+        print(f"  {tag}: rot med {np.median(e):.2f} p90 "
+              f"{np.percentile(e, 90):.2f} | transl med "
+              f"{np.median(tm)*1000:.1f} mm p90 "
+              f"{np.percentile(tm, 90)*1000:.1f}", flush=True)
+
+
+def bench_chain(seq=SEQ, max_windows=60):
+    """Deploy-rate check: chain the stacked-GN gyro over 15 Hz steps
+    (stride-2 parse) across one 5 Hz keyframe interval (3 steps) and
+    compare against the single-shot 5 Hz decode over the same window."""
+    import numpy as _np
+    from pathlib import Path as _P
+    f = _P(__file__).resolve().parents[1] / "data" / "tum"         / f"{seq}_s2.npz"
+    z = _np.load(f)
+    gray, depth, gt = z["gray"], z["depth_mm"], z["gt"]
+    K = z["K"]
+    Wl = L3.make_lattices()["azel3d"]
+    Wv = W_vis3d()
+
+    def step(i, j, R0, t0):
+        Fv0 = V6.feats(gray[i], K, "gridint", depth[i])
+        Fv1 = V6.feats(gray[j], K, "gridint", depth[j])
+        Pc0, wc0 = L6.depth_cloud(depth[i], K)
+        Pc1, wc1 = L6.depth_cloud(depth[j], K)
+        return _gn_stacked(
+            [(Wv, Fv0[0], Fv0[1]), (Wl, Pc0, wc0)],
+            [V6._enc_raw(Wv, *Fv1), V6._enc_raw(Wl, Pc1, wc1)],
+            R0, t0, [1 / 1.82, 1 / 1.34])
+
+    e_chain, e_shot, t_chain, t_shot = [], [], [], []
+    n = 0
+    for k0 in range(0, len(gray) - 3, 5):
+        if n >= max_windows:
+            break
+        Rt, tt = V6._rel_pose(gt[k0], gt[k0 + 3])
+        ang = np.degrees(np.arccos(np.clip((np.trace(Rt) - 1) / 2,
+                                           -1, 1)))
+        if not (0.5 <= ang <= 9.0) or np.linalg.norm(tt) > 0.18:
+            continue
+        # chained 15 Hz: compose three per-step estimates
+        Rc_, tc_ = np.eye(3), np.zeros(3)
+        for s in range(3):
+            Rs, ts = step(k0 + s, k0 + s + 1, np.eye(3), np.zeros(3))
+            Rc_, tc_ = Rs @ Rc_, Rs @ tc_ + ts
+        # single-shot 5 Hz over the whole window
+        Rs1, ts1 = step(k0, k0 + 3, np.eye(3), np.zeros(3))
+        e_chain.append(np.degrees(np.linalg.norm(rotvec(Rc_ @ Rt.T))))
+        e_shot.append(np.degrees(np.linalg.norm(rotvec(Rs1 @ Rt.T))))
+        t_chain.append(np.linalg.norm(tc_ - tt))
+        t_shot.append(np.linalg.norm(ts1 - tt))
+        n += 1
+    print(f"deploy-rate chaining ({seq.split('_freiburg')[-1]} @15 Hz, "
+          f"{n} keyframe windows of 3 steps):")
+    for tag, e, tm in (("chained 3x15 Hz", e_chain, t_chain),
+                       ("single-shot 5 Hz", e_shot, t_shot)):
+        print(f"  {tag}: rot med {np.median(e):.2f} p90 "
+              f"{np.percentile(e, 90):.2f} | transl med "
+              f"{np.median(tm)*1000:.1f} mm", flush=True)
+
+
 def selftest():
     rng = np.random.default_rng(RNG)
     v = rng.normal(size=240) + 1j * rng.normal(size=240)
@@ -398,4 +652,5 @@ if __name__ == "__main__":
     seq = sys.argv[2] if len(sys.argv) > 2 else SEQ
     dict(selftest=lambda s: selftest(), verify=bench_verify,
          rowdepth=bench_rowdepth, gyro=bench_gyro,
-         hopf=bench_hopf)[cmd](seq)
+         hopf=bench_hopf, dtune=bench_dtune, fuse2=bench_fuse2,
+         chain=bench_chain)[cmd](seq)

@@ -45,10 +45,11 @@ def _k_of(seq):
     raise SystemExit(f"unknown freiburg station in {seq}")
 
 
-def parse(seq):
+def parse(seq, stride=STRIDE):
     from PIL import Image
     tgz = BASE / f"{seq}.tgz"
-    out = BASE / f"{seq}.npz"
+    out = BASE / (f"{seq}.npz" if stride == STRIDE
+                  else f"{seq}_s{stride}.npz")
     tf = tarfile.open(tgz)
     names = tf.getnames()
     root = names[0].split("/")[0]
@@ -68,7 +69,7 @@ def parse(seq):
                   if ln and not ln.startswith("#")])
     gts, gpose = g[:, 0], g[:, 1:8]
 
-    pick = np.arange(0, len(rts), STRIDE)
+    pick = np.arange(0, len(rts), stride)
     grays, depths, poses, kts = [], [], [], []
     for i in pick:
         jd = int(np.abs(dts - rts[i]).argmin())
@@ -100,4 +101,5 @@ if __name__ == "__main__":
         for f in sorted(BASE.glob("*.tgz")):
             print(f.stem)
     else:
-        parse(sys.argv[2] if len(sys.argv) > 2 else sys.argv[1])
+        parse(sys.argv[2] if len(sys.argv) > 2 else sys.argv[1],
+              stride=int(sys.argv[3]) if len(sys.argv) > 3 else STRIDE)

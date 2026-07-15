@@ -7704,3 +7704,55 @@ matches the Euler box (7.8 vs 7.3, within noise), so ~2-4× T-corner
 savings are available if ever needed, and the analytic answer to
 "would quaternions help" stands: bookkeeping yes (future integrator),
 representation no.
+
+### deploy6d tuning round 2 (dtune/fuse2 + scratch_lidstore): ring-magnitude store REPLICATES both channels → verify recipe 3b+ring-mag ≈ 1.7°/35-38 mm; ladder and solver-fusion negatives
+
+- **Per-ring magnitude scales (the filed fix) pay on BOTH channels**:
+  vision 2b flat 2.68° → 2b+rs 2.05 → **3b+rs 1.73** (float 1.32);
+  lidar 2.20 → 1.85 → **1.72** (float 1.44). Translation 44→35 mm /
+  47→38 mm. Cost ~4 scalars/vector (≈50-100 B/anchor across the 7
+  stored vectors). DEPLOY VERIFY RECIPE: 3b phase + per-ring magnitude,
+  ~1.7° rot / ~37 mm transl small-motion consistency on both channels.
+- **Vision 6-DoF ladder: the v1 judgment pick (0.35-2.8 m) stands** —
+  finer/coarser/6-ring alternatives all equal-or-worse (1.32 vs
+  1.36-1.57). Space is robust to the ladder in this regime.
+- **gradmag weights do NOT transfer to derivative solves** (1.38 vs
+  1.32 int) — the banked "gradmag = ego-motion weights" law was about
+  place-vector repeatability, not the gyro; intensity weights stay.
+- **Solver-stacked two-space GN LOSES to post-hoc ω-averaging** (1.13
+  vs 1.08 rot; transl equal 26 mm) — independent per-channel solves +
+  fixed-weight averaging is optimal here (stacking couples the
+  channels' linearization errors); deploy keeps post-hoc fusion.
+- First TRANSLATION numbers for the fused ego-motion service: **26 mm
+  med / 42 mm p90** on ≤6 cm steps (both fusion forms).
+- **Verify space is INDIFFERENT on the lidar side** (scratch_verifyspace,
+  float, 40 pairs): D240 house 1.13°/31.5 mm ≡ D1920-coarse
+  1.14°/31.6 mm — so the verify set lives in D240 by BYTES (6 D-vectors
+  × 240 × 3b+rs ≈ 0.6 KB/anchor vs 4.3 KB at D1920); the anchor's
+  D1920 place snapshot stays place-only.
+
+## 2026-07-15 — object-in-map round 2 (experiments/objmap2.py): the two filed levers WORK — stage-1 shortlist perfect via the existing snapshot channel, multi-view queries localize at 0.17 m, combined detection 0.805
+
+TUM fr3, per-segment maps, foils through the SAME pipeline; n=16
+queries (48 drawn, depth-spread + multi-view filters); poses DIAGNOSTIC
+(deploy: gyro-chained).
+
+- **Stage-1 (whole-query-frame gridint place sim vs the per-map-kf
+  snapshot library — ZERO new storage): 25/25 shortlist hit rate**
+  across all runs (top-3 of 27 segments), and the frame-sim ALONE
+  detects foreign-scene foils at AUC 0.732.
+- **Multi-view queries (3 frames, world-gated cells; the robot's own
+  poses) are the LOCALIZATION lever**: census 2stage-3view err med
+  **0.165 m** (n=16; 0.124 at n=9) vs ~1.3 m banked single-view; int
+  0.544 m (p90 1.05).
+- **Detection = COMBINED evidence**: stage-2 template score alone is
+  weak (0.47-0.69 — box-scoped EV cancels in the real/foil ratio), but
+  z-combined stage-1 + stage-2 reaches **0.805 (int, 3-view)** / 0.704
+  (census).
+- **Complementarity law: int-FPE detects, census localizes** (sharp
+  binary codes need multi-view signal but then pinpoint; graded FPE
+  codes separate scenes). DEPLOY RECIPE: two-family segment maps
+  (~2×240 B @2b), detect via int-combined, localize via census
+  multi-view; stage-1 shortlist from the snapshot library.
+- Residual wall: p90 localization 1-1.5 m (a hard tail of queries
+  never decodes — texture-poor or view-unstable patches).

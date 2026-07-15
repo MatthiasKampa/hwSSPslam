@@ -146,11 +146,15 @@ cis-ROM addressable.
 - Ego-motion: cloud gyro (20 Hz) + visual gyro (120 fps), each in its
   own vector space, **fused at the rotation-vector level with fixed
   precision weights: 1.08° med / 2.03° p90** on 2.6°-class steps
-  (beats either alone; GN×2 on the visual side = 1.13° single) — feeds
-  the CV guess / odometry prior. Verify against STORED anchors survives
-  the 2b/3b snapshot store at 2.2–2.7° small-motion consistency (the
-  ~+1° quant cost is magnitude flattening — per-ring magnitude scales
-  filed); rotation-search verify is quantization-free. Lidar-projected
+  (beats either alone; GN×2 on the visual side = 1.13° single; post-hoc
+  ω-averaging beats solver-stacked fusion — measured) — feeds the CV
+  guess / odometry prior at 26 mm med / 42 mm p90 translation. Verify
+  against STORED anchors at the v1.3 store recipe (**3b phase +
+  per-ring magnitude scales**): ~1.7° rot / ~37 mm transl small-motion
+  consistency on BOTH channels (flat-mag 2b was 2.2–2.7°; the fix
+  costs ~4 scalars/vector). Verify space is accuracy-indifferent →
+  lives in D240 by bytes (~0.6 KB/anchor verify set); rotation-search
+  verify is quantization-free. Lidar-projected
   depth needs only 4-beam-class camera overlap for the landmark/coarse
   tier (band conditioning, not beam count, is the cost).
 - The reverse-view wall is crossed only by depth-lifted 3D visual
