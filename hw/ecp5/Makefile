@@ -37,6 +37,31 @@ build/tb_fast9.vvp: rtl/fast9.v rtl/tb_fast9.v build/fast9_thresh.txt
 build/fast9_thresh.txt:
 	cd ../.. && python3 -m runners.spot_cam vectors school_run2
 
+# camera-front sim gates (sccb master / init ROM walker / DVP capture)
+sim-sccb:
+	@mkdir -p build
+	$(TOOLS)/iverilog -g2012 -o build/tb_sccb.vvp rtl/sccb.v rtl/tb_sccb.v
+	cd build && $(TOOLS)/vvp tb_sccb.vvp
+
+build/ov5640_init.hex: host/gen_ov5640_rom.py host/vendor/ov5640_settings.h
+	python3 host/gen_ov5640_rom.py
+
+sim-init: build/ov5640_init.hex
+	$(TOOLS)/iverilog -g2012 -o build/tb_init.vvp rtl/sccb.v \
+	  rtl/ov5640_init.v rtl/tb_ov5640_init.v
+	cd build && $(TOOLS)/vvp tb_init.vvp
+
+sim-dvp:
+	@mkdir -p build
+	$(TOOLS)/iverilog -g2012 -o build/tb_dvp.vvp rtl/dvp_capture.v \
+	  rtl/tb_dvp.v
+	cd build && $(TOOLS)/vvp tb_dvp.vvp
+
+# camera tops need the cam pin constraints appended to the board LPF
+build/cam.lpf: icepi-zero.lpf cam-pins.lpf
+	@mkdir -p build
+	cat icepi-zero.lpf cam-pins.lpf > $@
+
 prog: $(B).bit
 	$(TOOLS)/openFPGALoader -b icepi-zero $<
 

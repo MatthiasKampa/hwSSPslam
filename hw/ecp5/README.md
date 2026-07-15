@@ -117,14 +117,22 @@ cis-ROM addressable.
 **Maps (two kinds, the asymmetry law)**
 - Lidar: shipped SE(2) BoundedSLAM backend (acceptance-gated) + a
   per-anchor 3D place/verification layer on **azel3d D1920 (24az × 5el
-  × 16 coarse √2 rings, 0.5–90.5 m)** — school place-AUC **0.928** at
-  the 3-ring/2k-pt operating point (v1.1 ceiling recipe; sub-0.5 m
-  rings are registration-only, building-scale rings are the place
-  lever; curve saturates ~0.93). 2-bit store ≈ 480 B/anchor.
+  × 16 coarse √2 rings, 0.5–90.5 m)** — school place-AUC **0.928**
+  float at the 3-ring/2k-pt operating point (v1.1 ceiling recipe;
+  sub-0.5 m rings are registration-only, building-scale rings are the
+  place lever; curve saturates ~0.93). Store/search point (v1.2,
+  measured jointly): **3b × 12-perm = 0.835 at 720 B/anchor ≡ 2b ×
+  24-perm = 0.834 at 480 B** — quant and rot-search costs compose
+  additively; default 3b×12 (fidelity-per-compute), escalate to 24-perm
+  for verification-grade queries.
 - Vision: per-anchor snapshot library at **D120–240** (vision does not
   scale with D): gridint V + intphase V + 6 derivative vectors for
-  SE(3) checks ≈ ≤0.5 KB/anchor at 2 b. Bounded per anchor, like
-  everything else.
+  SE(3) checks. Quantization MEASURED (v1.2, experiments/visquant.py):
+  **intphase is 2b-FREE on both venues (0.999→0.996 classroom);
+  gridint's knee is 3b where views overlap (0.949→0.935; 2b costs
+  0.06)** — gridint@3b (180 B) + intphase@2b (120 B) = **300 B/anchor**,
+  adj-rep (the ego-motion proxy) ≥0.96 classroom at every level.
+  Bounded per anchor, like everything else.
 
 **Fusion policy**
 - Candidates: max-rule over z-normed {lidar rot-searched sim, vision
@@ -156,7 +164,11 @@ headroom goes to (in current expected-value order):
    combs annihilated) → a D3840-class fidelity layer is the "find
    objects in the map" substrate: line/corner-atom pursuit + driven-
    path veto (decode.py machinery) over a sharper PSF. Ceiling-tuning
-   sweep in flight (ladder composition × elevation distribution).
+   sweep banked (D1920-coarse = the recipe). CAMERA-side object finding
+   = `experiments/objmap.py` (2026-07-15): world-frame appearance map
+   (cells → 3D points, bipolar-spatter code binding, per-segment
+   bundles) + template matched-filter position decode — binding laws in
+   ENCODINGS.md §E, real-data characterization in RESULTS.
 2. **History samples.** 32 MB SDRAM = ~16k raw ring-scans (2 KB each)
    — the reservoir thread at its natural scale: sparse-cadence
    rehearsal (school 10/10 benign, median wins banked; collapse is
@@ -172,6 +184,44 @@ headroom goes to (in current expected-value order):
    banked as the quality-reference tier with headroom (+0.03 with
    RANDOM weights); train offline, weights via flash.
 
+## OV5640 wiring map (cam arrives 2026-07-15; Pi-header pin #s from the LPF)
+
+| OV5640 module | header pin | FPGA net / site |
+|---|---|---|
+| D0..D4 | 29, 31, 33, 35, 37 | gpio[5] E1, gpio[6] F3, gpio[13] E3, gpio[19] E4, gpio[26] D4 |
+| D5..D7 | 22, 24, 26 | gpio[25] J2, gpio[8] H2, gpio[7] G1 |
+| PCLK | 15 | gpio[22] P2 (oversampled in sysclk — no clock pin needed) |
+| HREF | 16 | gpio[23] M2 |
+| VSYNC | 18 | gpio[24] L1 |
+| XCLK | 11 | gpio[17] R3 (24 MHz from PLL) |
+| SIOC / SIOD | 3 / 5 | gpio[2] T2 / gpio[3] R2 (SCCB, open-drain emulated) |
+| RESET# / PWDN | 7 / 13 | gpio[4] R1 / gpio[27] P3 |
+| 3V3 / GND | 1 or 17 / 6,9,14,… | module has onboard 2.8/1.5 V regulators |
+
+Bring-up ladder (each step machine-gated like the fast9 silicon gate):
+1. SCCB chip-ID read → expect 0x5640 (the hello-world).
+   `make TOP=top_ov5640_id RTL="rtl/sccb.v ../ice40/rtl/uart.v
+   rtl/top_ov5640_id.v" LPF=build/cam.lpf build prog`, send any byte at
+   2 Mbaud, expect `56 40 00`.
+2. QVGA snapshot: the init ROM (generated from the vendored esp32-camera
+   tables by `host/gen_ov5640_rom.py`) boots QVGA 2×2-binned **Y8**
+   (grayscale format: DVP emits luma directly, one byte/pixel — half the
+   YUYV byte rate) at a *predicted* ~25 fps / PCLK ~12.5 MHz (4×
+   oversample in the 50 MHz domain, no CDC). Snapshot one frame to EBR
+   (76.8 KB of 112) → UART → `host/hw_snap.py` gates init-nerr, chip-ID,
+   240×320 geometry, live fps, image stats + fast9 servo smoke.
+   `make TOP=top_ov5640_snap RTL="rtl/dvp_capture.v rtl/ov5640_init.v
+   rtl/sccb.v ../ice40/rtl/uart.v rtl/top_ov5640_snap.v"
+   LPF=build/cam.lpf build prog`.
+3. Rate servo to **60 fps**: the snap top's `W`/`r` UART→SCCB
+   passthrough steps PLL mult (0x3036) / VTS (0x380E/F) against the
+   MEASURED frame counter — the ROM's rate section is a safe starting
+   point, not a spec claim. Then fast9 on live pixels, corner stream at
+   keyframe rate (~28 KB/s fits 2 Mbaud), ±1/frame threshold servo.
+4. QVGA **120 fps** (PCLK ~18–25 MHz, ~2× oversample — marginal): lift
+   the capture domain via PLL (e.g. 100 MHz) — the deploy operating
+   point, after 60 fps is gated.
+
 ## Status
 
 - [x] Toolchain smoke: `make TOP=top_fast9 build` — synth+PnR+pack on
@@ -185,7 +235,25 @@ headroom goes to (in current expected-value order):
       classes documented in the ledger.
 - [x] Dataset camera pipeline: `python3 -m runners.spot_cam parse
       school_run2` → `cam_features.npz` aligned to lidar keyframes.
-- [ ] OV5640 DVP capture front (SCCB init ROM, PCLK domain, async FIFO).
+- [x] OV5640 DVP capture front, SIM-GATED (2026-07-14 camera eve; silicon
+      gates when the sensor lands): `sccb.v` (SCCB PASS: write + chip-ID
+      read vs bit-level slave), `gen_ov5640_rom.py` → 178-entry init ROM
+      from the vendored esp32-camera tables (selftest + QVGA windowing
+      asserts), `ov5640_init.v` walker (INIT-ROM PASS: 172 writes in
+      order, all ACKed), `dvp_capture.v` oversampling snapshot (DVP
+      PASS: Y8 + YUYV bit-exact, frame/line/byte counters). Flash-ready
+      tops: `top_ov5640_id.bit` (186 MHz) and `top_ov5640_snap.bit`
+      (82.4 MHz, 41/56 EBR, 1.1k LUT) with UART→SCCB passthrough +
+      measured-geometry report for the live rate servo. Host gates:
+      `hw_snap.py` (init/ID/geometry/fps/image/fast9-smoke).
+- [x] Deploy VERIFIED pre-camera (2026-07-15): full-system sim
+      `tb_top_snap.v` — TOP-SNAP PASS (boot → init ROM over the real
+      SCCB engine → chip-ID/write passthrough → armed snapshot
+      bit-exact vs one seeded source frame → report); silicon no-cam
+      probe — fast9 HW PASS re-run + snap top flashed: init_done,
+      nerr=172 (exact no-slave NACK signature: the whole ROM walked the
+      real pins), chip-ID 0xFF/err, 0 frames. Board left running
+      top_ov5640_snap.
 - [ ] Full-cloud lidar ingest + SDRAM frame store (UART/USB feed first,
       sensor later).
 - [ ] Encoder port (iCE40 v6/v7 cores; SPRAM → EBR/SDRAM re-plumb —
