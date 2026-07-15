@@ -9043,3 +9043,24 @@ map fits the low-precision (BNN-regime) FPGA substrate the thesis claims, at
 a handful of bits per D-cell, with negligible query loss. Standard VSA
 phase-noise robustness (well-understood mechanism); clean float-baseline +
 sweep + roles-too control. Anti-oracle: synthetic, GT scores only.
+
+## 2026-07-15 — the bounded semantic map is DYNAMICALLY UPDATABLE (add/remove churn leaves no drift)
+
+`sspax/semantic_dynamic.py` — real scenes change (objects move/appear/
+disappear). The VSA binding is additive, so an object is ADDED by bundling
+its bound feature and REMOVED by SUBTRACTING it, both O(D), no re-encode.
+Churn test (D=360, 8 live objects, 40 add/remove steps, 16 seeds):
+  (c) DRIFT: max|churned - rebuilt-from-live-set| = 2.1e-14 — BIT-EXACT, no
+      residue accumulates over arbitrary edit histories.
+  (a) LIVE chair recall after churn: 0.86 = the STATIC recall at 8 objects —
+      query quality depends only on the CURRENT live set, not edit count.
+  (b) REMOVED chair readout: -1.04 below background — cleanly gone (removal
+      subtracts the binding exactly, no ghost).
+So the bounded map is a DYNAMIC map: add=bundle, remove=subtract, both O(D)
+phase ops on frozen content, and any edit history leaves the map identical
+to a fresh build of the live set (linear additive binding). Moving and
+disappearing objects (dynamic environments, session-to-session edits) are
+handled with no re-encode and no drift — completing the map's capability
+set alongside query, transform, capacity, significance, and quantization.
+Bit-exact identity + clean query metrics; anti-oracle: synthetic, GT scores
+only.
