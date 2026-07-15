@@ -8001,3 +8001,21 @@ deploy rates (20 Hz cloud / 120 fps visual) the per-step motion is
 matched buffered fusion + delayed-state re-anchoring) stands on this:
 the 120 Hz chain is the master integrator. IMU delay-bench redo filed
 for when the ISM330DHCX lands.
+
+## 2026-07-15 — full-board CNN feasibility envelope (hw/ecp5/host/cnn_budget.py): BNN lanes are the regime; every TRAINING_PROGRAM candidate class fits
+
+Full Icepi-Zero allocation model with explicit SLAM reserves (10 DSP,
+10k LUT, 57 KB EBR kept; SDRAM 32 MB @ ~170 MB/s practical, CNN share
+60 MB/s + 8 MB weight capacity; standing sensor traffic ~13 MB/s):
+- **BNN XNOR-popcount lanes: ~40 lanes from 7k LUT = 394 Gbop/s** →
+  3.3 Gbop/frame @120 fps — even a yolo-nano-CLASS net fits at full
+  camera rate as a BNN (the banked int8 "OUT" verdict stands for int8
+  only). int8 is DSP-scarce: 18 DSP → 11-22 MMAC/frame @120, 270-540
+  @keyframe (SDRAM-streamed weights).
+- Candidates: cellweight-A (regime A, 16 MMAC) fits @120 int8-packed;
+  tinycnn-34k @60 as BNN; seg-mnet/mnetv2-class (regime B, 36-87 MMAC,
+  17-40k params) @5 Hz; lidar saliency trivial @20.
+- Search prior for the architecture search: BNN-first, first-layer
+  int8; early stride-2 (line buffers are the EBR cost); keyframe tier
+  is where capacity lives. Ceilings written into TRAINING_PROGRAM.md;
+  README headroom item 3 rewritten around the program.

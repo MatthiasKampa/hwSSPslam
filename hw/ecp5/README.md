@@ -103,6 +103,16 @@ cis-ROM addressable.
 
 ## Deploy variant v1 (2026-07-14 coherence; every number banked in RESULTS)
 
+**v1.4 adopt-candidates from the sspax transfer gate (2026-07-15,
+pending the rule-5 multi-venue gate — see RESULTS "sspax TRANSFER
+GATE"):** matcher-budget place = azel-OCT6 D240 (school 0.892 — the
+wide-octave ladder alone, exceeds banked D960 at 1/4 budget); anchor
+layer = ring-coarse16 D1920 (0.940 > banked 0.928); verify space =
+ring-dirs × VIS_LAMS (1.12°/27.6 mm). Vision place stays azel3d (ring
+collapses reverse-view). Ego-motion validated at rate: chained 3×15 Hz
+1.02° beats single-shot 5 Hz 1.09° — the high-rate service is the
+odometry prior.
+
 **Sensors → services**
 - Lidar 1024×64 @ 20 Hz: ingest **3 rings (16/33/50), ~2k pts** (≈1/40
   bandwidth; quality-neutral). Cloud gyro at sensor rate (GN×2 on the 6
@@ -190,11 +200,18 @@ headroom goes to (in current expected-value order):
    own gauge; the commit-policy wall applies to selection, but a
    candidate-gated re-match against history is a verification signal
    the UP5K never had memory for). Multi-session map storage likewise.
-3. **Better feature detection.** shi-tomasi v1 (3 MULT18) is the
-   default; the freed multipliers make the trained tiny-CNN head
-   affordable (~60% MULT18 @ QVGA120, less at reduced detector fps) —
-   banked as the quality-reference tier with headroom (+0.03 with
-   RANDOM weights); train offline, weights via flash.
+3. **Better feature detection → the LEARNED FRONT-END PROGRAM**
+   (sspax/TRAINING_PROGRAM.md: 3 regimes × 2 modalities + thermometer
+   scale-blanking). Full-system CNN envelope measured
+   (`host/cnn_budget.py`, explicit SLAM reserves: 10 DSP + 10k LUT +
+   57 KB EBR kept): **BNN XNOR lanes are the regime** — ~40 lanes from
+   7k LUT = 394 Gbop/s → 3.3 Gbop/frame @120 fps (yolo-nano-class
+   binary nets fit at full rate); int8 is DSP-scarce (18 DSP → 11-22
+   MMAC/frame @120, 270-540 @keyframe with SDRAM-streamed weights, 8 MB
+   weight capacity). Candidate classes all fit: cellweight-A @120
+   (regime A), tinycnn-34k @60 BNN, seg-mnetv2-class @5 Hz (regime B),
+   lidar saliency @20. Architecture search = maximize quality inside
+   these per-rate ceilings.
 
 ## OV5640 wiring map (cam arrives 2026-07-15; Pi-header pin #s from the LPF)
 

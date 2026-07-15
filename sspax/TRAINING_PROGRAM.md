@@ -128,6 +128,12 @@ REPORTED (they are interpretable — which scales did each class buy?).
   banked in docs/RESULTS.md.
 - Budgets printed with every result: params, int8/BNN bytes, MACs (or
   XNOR-popcounts) per frame at QVGA120 / 20 Hz lidar, LUT/DSP estimate.
+- HARD per-rate ceilings from the full-board envelope
+  (hw/ecp5/host/cnn_budget.py, SLAM reserves subtracted): @120 fps
+  22.5 MMAC int8-packed / 3.3 Gbop BNN; @60 45 / 6.6 G; @20 135 /
+  19.7 G; @5 Hz 540 MMAC / 79 Gbop. Weights: ≤55 KB EBR-resident;
+  ≤8 MB int8 via SDRAM streaming at keyframe rate. BNN-first is the
+  search prior; int8 DSPs are the scarce resource.
 - Quantization-aware from the start (the map store is 2-3b phase; the
   descriptor is binary by construction).
 - Transfer-gate everything through `sspax/realbench.py`-style numpy runs
