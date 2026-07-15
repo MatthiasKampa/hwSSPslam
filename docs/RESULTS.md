@@ -7658,3 +7658,49 @@ order: (1) two-stage with gridint-snapshot stage-1 (segment shortlist)
 bundles (the robot sees the object across frames — Nq×3 signal); (3)
 richer/multi-scale codes (census16, c8+c16); (4) SPOT venue via
 lidar-projected depth once extrinsics land (the standing unlock).
+
+## 2026-07-15 — deploy6d: the lidar+cam 6-DoF deploy stack measured at its stored/structured/fused operating point (experiments/deploy6d.py, TUM fr3, TWO vector spaces per the two-map law)
+
+User: "continue experimenting for deploy of lidar + cam 6DoF" + "(run
+as two distinct vector spaces)". Lidar channel = house azel3d ladder;
+vision channel = its OWN azel lattice on a camera-range ladder
+(0.35-2.8 m); fusion only at the estimate level. Four deploy questions:
+
+**1. Quantized-anchor 6-DoF verify** (stored {v0, 6 derivative vectors}
+at house phase-only quant, fresh query; 80 small-motion pairs):
+  lidar-cloud float 1.44° → 3b 2.33 / 2b 2.20
+  vis-grid3D  float 1.32° → 3b 2.23 / 2b 2.68
+The stored-anchor verify survives the 2b/3b store at 2.2-2.7° med on
+0.3-6° motions — a usable consistency GATE (wrong anchors are gross).
+**2b ≈ 3b (lidar even inverted): the ~+1° cost is MAGNITUDE FLATTENING,
+not phase resolution** — FILED: per-ring magnitude scales on the stored
+derivative vectors (16 scalars × 6 vectors) should recover most of it.
+Rotation-search verify (5-20°, frozen permutations on the stored
+vector): float 6.9° / 3b 6.9 / 2b 7.1 — quantization FREE in the
+content-overlap-limited regime, as everywhere.
+
+**2. Lidar-structured depth** (elevation band + N-beam row masks vs the
+banked random-dropout curve; 15 wide-baseline SE(3) pairs): full
+registered 6.3°/0.167 m → band+64-beam 9.7°/0.223 → 16-beam 10.6 →
+8-beam 7.9 → 4-beam 9.5°/0.266. The hit is the BAND restriction
+(~+3°/+0.06 m, vertical-extent conditioning), and the curve is FLAT
+from 64 down to 4 beams — **lidar-projected depth suffices for the
+coarse-gate/landmark tier at ANY realistic beam count**; the extrinsics
+unlock does not need dense beams.
+
+**3. Ego-motion service** (80 adjacent pairs): visual linear 1.32° →
+**visual GN×2 1.13°** (the filed fine-ring-linearization fix pays);
+cloud GN×2 1.16°; **FUSED (fixed precision weights, rotation-vector
+level) 1.08° med / 2.03° p90 — beats both singles on both stats**;
+label-free residual selection 1.15° (fusion > selection). Deploy: run
+both gyros in their own spaces, fuse ω with fixed weights.
+
+**4. Rotation-grid geometry** (the quaternion question, measured;
+uniform rotation-ball vs Euler box, frozen-permutation decode, 5-18°
+pairs): euler-729 med 7.3/p90 20.1; ball-729 8.4/17.0; ball-364
+8.4/18.5; ball-182 7.8/18.5. **No accuracy lever** — content overlap
+dominates grid geometry; a uniform ball at QUARTER the candidates
+matches the Euler box (7.8 vs 7.3, within noise), so ~2-4× T-corner
+savings are available if ever needed, and the analytic answer to
+"would quaternions help" stands: bookkeeping yes (future integrator),
+representation no.

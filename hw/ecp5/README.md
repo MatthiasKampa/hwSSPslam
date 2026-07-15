@@ -143,8 +143,16 @@ cis-ROM addressable.
   near-exact: 0.29°/3 mm GN on school clouds). Wide-baseline SE(3) is
   content-overlap-limited (~6–9°/0.17 m) — treated as a coarse gate
   only, never as registration.
-- Ego-motion: cloud gyro (20 Hz) + visual gyro (120 fps) feed the CV
-  guess / odometry prior.
+- Ego-motion: cloud gyro (20 Hz) + visual gyro (120 fps), each in its
+  own vector space, **fused at the rotation-vector level with fixed
+  precision weights: 1.08° med / 2.03° p90** on 2.6°-class steps
+  (beats either alone; GN×2 on the visual side = 1.13° single) — feeds
+  the CV guess / odometry prior. Verify against STORED anchors survives
+  the 2b/3b snapshot store at 2.2–2.7° small-motion consistency (the
+  ~+1° quant cost is magnitude flattening — per-ring magnitude scales
+  filed); rotation-search verify is quantization-free. Lidar-projected
+  depth needs only 4-beam-class camera overlap for the landmark/coarse
+  tier (band conditioning, not beam count, is the cost).
 - The reverse-view wall is crossed only by depth-lifted 3D visual
   landmarks (TUM rev-AUC 0.941; graceful to 25% depth coverage) —
   **gated on calibrated lidar↔camera extrinsics, the standing unlock.**
