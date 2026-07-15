@@ -8328,3 +8328,718 @@ fr079-class EXCLUDED. The weight-semantics question the v2/v2.1 round
 filed is now ANSWERED, not open: the reconciliation exists (mult=8)
 but cannot buy a suite-default because the failure that blocks it
 lives in admission, not weights.
+
+## 2026-07-15 — P5: densified ladder-vs-extent DESIGN RULE (refines the clean 3-point trend; monotone but NOT linear)
+
+`sspax/ladder_rule.py` — 6 extents (8-120 m) × 9 lam_max candidates,
+ring_arc_const, 32 places/extent, rotation-searched lidar place AUC;
+n_rings 6 and 8 for ring-count invariance. This densifies the 3-point
+`ladder_extent.py` result (8→8, 30→22.6, 80→90.5) that looked like a
+clean linear law. The dense sweep tells a MORE HONEST, more nuanced
+story:
+
+  best lam_max per extent (n_rings=6): 4, 7, 17, 46, 123, 46 m
+  best lam_max per extent (n_rings=8): 4, 11, 75, 75, 123, 123 m
+  Spearman(extent, best_lam):  0.90 (n6)  /  0.97 (n8)   <- MONOTONE, robust
+  linear-through-origin fit:   0.75×ext R²0.39 (n6) / 1.25×ext R²0.78 (n8)
+
+Verdicts:
+- The **directional law is robust** — bigger venue wants a coarser
+  coarsest wavelength (Spearman 0.9-0.97). This confirms the mechanism
+  and the multi-venue real-data verdict (rooms→oct6, buildings→coarse16)
+  from two directions.
+- The **precise linear coefficient is NOT robust**: 0.75 vs 1.25
+  depending on ring count, and R² is weak at n6. A single through-origin
+  slope is the wrong model — the relationship is monotone but flat-then-
+  steep, not linear. Ring count confounds because rescaling lam_max at
+  fixed n rescales EVERY rung.
+- **Effect size is the real story**: AUC spread across lam_max is
+  0.03-0.09 at 8-50 m (nearly flat — ladder choice barely matters in
+  rooms/halls) but **0.21-0.22 at 80-120 m** (0.60→0.92 at 120 m). The
+  law only has teeth at building scale — precisely the regime where a
+  wrong (too-fine) ladder aliases catastrophically.
+
+Deploy reading for the venue-adaptive preset (the static cousin of the
+learned head): do NOT ship a precise `c×extent` formula (overfits the
+noisy mid-range). Ship a COARSE bucket — small venue: ladder choice is
+free; large venue (bbox ≳ 60 m): ensure lam_max reaches scene scale
+(~extent) or place recognition collapses. Anti-oracle: deterministic
+synthetic, no reference labels (jittered-view pairs vs distinct layouts),
+fixed seeds, fit reported with R² so a weak rule can't masquerade.
+
+## 2026-07-15 — read-only audit of the sspax JAX surface (rule 4): synthetic scale-negative is VACUOUS, not disproven
+
+Second-opinion audit (dispatched agent, no code changes) of
+ladder_extent / learn_scale / learn_lidar / nnconv / realbench. Two
+substantive findings, both in `learn_scale.py`, both CONSERVATIVE (they
+cannot manufacture a false win, so the stated negative stands) but they
+invalidate the *reasoning*:
+
+- **The "honest negative" never runs the aliasing regime it claims to
+  test.** `_view(align=True)` is the only path exercised by `batch` and
+  `evaluate`; the align=True branch undoes BOTH the GT rotation and
+  translation, so the two views of a place collapse to the same
+  canonical frame ± 0.02 m noise. The 24-yaw search is redundant
+  (identity perm always wins) and the aliasing regime (align=False, full
+  rotation) described in the docstring is DEAD CODE. So the synthetic
+  "learned ≈ fixed" is a SATURATED task (every ladder ≈ perfect on near-
+  duplicate positives), not evidence that blanking can't help.
+- **Train/eval scene overlap**: `evaluate(seed0=7000)` layouts are all
+  within the training seed range (24/24). `learn_lidar` is clean
+  (seed0=9000 disjoint from train max 6400) — the discipline slip is
+  isolated to learn_scale.
+- Verified SOUND: no anti-oracle leak anywhere (pose only aligns
+  targets + labels pairs, never enters an encoder/CNN input); the CReLU
+  param-efficiency comparison is fair (ReLU-ch8 826p vs CReLU-ch4 422p,
+  same steps/eval); all einsum/mask/pool/AUC shapes correct. Doc nit:
+  CReLU DOUBLES the next layer's input width (the comment says halves) —
+  numbers unaffected.
+
+Consequence: the synthetic scale-modulation negative is retained only as
+"the surface is too easy to probe blanking", NOT as "blanking can't
+help". The load-bearing test is the REAL building-scale gate with
+genuine rotated + re-rasterised positives and a TIME split
+(`sspax/learn_scale_real.py`, P1) — which is exactly the regime the
+audit says the synthetic version failed to exercise.
+
+## 2026-07-15 — P1: thermometer scale head on REAL school_run2 — mechanism CONFIRMED (large), learned head LOSES to a fixed coarse cutoff
+
+`sspax/learn_scale_real.py` — the real-data transfer gate the synthetic
+`learn_scale.py` negative could not be (its box-rooms have no aliasing
+regime; the audit above showed its "negative" was VACUOUS/saturated).
+Real building-scale lidar (school_run2 full SUB16 clouds), BEV raster
+extent 120 m / 64×64 (3.75 m cells), TIME split (train frames [0,144),
+eval [144,240)), rot-NCE over the 24-yaw per-ring search. Positives =
+temporally-adjacent kf + synthetic-yaw RE-RASTERISED same cloud;
+negatives = own-estimate >4 m (est labels DIAGNOSTIC, anti-oracle stated
+in-log; run2 has no honest revisits — banked). Two eval metrics:
+selfrot-AUC (frame vs its rotated-and-rerastered self, rotation-searched
+— the ALIASING regime) and adjacent-AUC.
+
+**Mechanism — CONFIRMED and LARGE.** selfrot-AUC is monotone in ring
+blanking (fixed global thermometer cutoff, keep rings ≥ c):
+
+  c0(all) 0.718  c1 0.748  c2 0.772  c3 0.808  c4 0.859  c5 0.901
+  adjacent:  0.879  0.875  0.874  0.871  0.872  0.849
+
+Blanking the fine rings improves rotation-invariant place recognition by
+**+0.183 AUC** (c0→c5); keeping only the coarsest ring (λ≈90.5 m ≈
+building scale) is best. The fine rings are pure aliasing liability under
+rotation — exactly the wall the synthetic surface could not produce. This
+independently confirms the coarse16-wins-buildings law and P5's
+venue-scale finding from the blanking direction. (adjacent slightly
+PREFERS fine rings, 0.879→0.849 — the two objectives tension, quantified.)
+
+**Learned head — does NOT beat the fixed global optimum (negative).**
+- yaw_frac=0.5 (mixed positives): head converges to cutoff≈0 (mean 0.02,
+  keep all) — the easy adjacent positives dominate the gradient; selfrot
+  LEARNED 0.768 ≈ fixed c0. It never learns to blank.
+- yaw_frac=0.9 (rotation-dominated): head DOES learn aggressive blanking
+  (mean cutoff 5.12, per-cell spread) — selfrot LEARNED 0.836, beats
+  c0..c3 — BUT a fixed GLOBAL c5 (0.901) beats it by 0.065. The earlier
+  "learned beats c3" reading was an artifact of testing only c0–c3; the
+  rigor extension to c4/c5 (gate-only, no retrain) caught the
+  false-positive-in-the-making. The per-cell spread HURTS vs a uniform
+  coarse cutoff.
+
+**Verdict.** The mechanism transfers to real data and is worth a large
+AUC; the LEARNED NET is not — a single fixed coarse-only cutoff (blank
+the fine rings) is both simpler and better per venue. This matches the
+synthetic "constant cutoff is the correct policy", except the constant is
+now c5 (aggressive blank), because real building-scale HAS the aliasing
+regime box-rooms lack. Deployable win = a zero-cost fixed coarse ladder
+for the rotation-invariant PLACE layer (no net, no per-cell LUT); keep the
+fine rings only for short-baseline tracking/registration. The learned
+head's only remaining value is CROSS-venue (one policy for mixed extents)
+— the P2 multi-venue arm is the real test of whether the net earns its
+keep; single-venue it does not. Recipe reference bars (raw-cloud, not
+raster): ring-coarse16 D1920 0.994 / azel-oct6 D240 0.995 adjacent — the
+BEV raster path costs ~0.12 adjacent AUC vs raw clouds (raster is lossy;
+all learned-vs-fixed numbers are within the raster path).
+
+## 2026-07-15 — P1 CORRECTION / RETRACTION (rule 4 audit): the "+0.183 blanking improves place recognition" claim is a rotation-triviality ARTIFACT — RETRACTED
+
+A read-only audit (dispatched agent, reproduced the numbers exactly from
+`scratch/learned_scale_real_yaw90.pkl`) REFUTES the previous P1 entry's
+central claim. I banked that entry BEFORE the audit returned — the
+correction supersedes it. Honest findings:
+
+- The +0.183 gain lives ENTIRELY in the `selfrot` metric (a frame vs its
+  OWN 90°-rotated + re-rasterised self — ZERO place variation). The
+  honest same-place control already in the gate — `adjAUC` (temporally
+  adjacent frames, genuine small-viewpoint same-place, same 24-perm
+  search, same far-negatives) — does NOT improve with blanking:
+    cut:   c0     c3     c5
+    self:  0.718  0.808  0.901   (+0.183 — the retracted number)
+    adj :  0.879  0.871  0.849   (FLAT, then DROPS at c5)
+- Root cause: as rings coarsen, the coarsest ring (λ=90.5 m spans <1
+  phase cycle over ±60 m) makes a 90° rotation a near-trivial permutation
+  and re-rasterisation near-lossless, so pos(self) rises 0.68→0.97 while
+  neg(far) rises slower — a rotation-ROBUSTNESS effect, not place
+  separation. Turn the rotation search OFF and selfAUC collapses to
+  0.525→0.606 with pos≈neg throughout: essentially NO place
+  discrimination without the self-identity + perm-search crutch.
+- "Fixed c5 (0.901) beats the learned head (0.836)" is therefore
+  near-tautological: the metric monotonically rewards coarseness, so
+  maximal blanking wins by construction. Not evidence about the head.
+- CLEAN on audit: anti-oracle (est poses only mask negatives/adjacency,
+  never encoded), time-split (eval gate touches only [144,240), _YCACHE
+  is train-only), normalization not the driver. Caveat: the fixed-cutoff
+  baselines still route through the TRAINED saliency weights (encode_mod
+  reads wlog even under force_cut) — entangled, not a pure occupancy
+  ladder.
+
+REVISED VERDICT: blanking the fine rings does NOT improve genuine
+place recognition on real building-scale lidar — the one honest metric
+(adjacent same-place) is flat and slightly regresses under aggressive
+blanking. This is CONSISTENT with the project thesis (loop-closure
+detection is the irreducible wall — you cannot blank your way to
+separability) and with the synthetic honest-negative. The only surviving
+physical statement: coarse rings ARE more rotation-robust (fewer phase
+wraps) — a real property, but it does not buy place discrimination.
+Methodological lesson banked: a self-rotation positive (zero place
+variation) is an INVALID place-recognition metric; use adjacent-frame
+same-place as the control. `learn_scale_real.py`'s primary gate metric
+should be adjAUC; selfrot is a rotation-robustness diagnostic only.
+Process lesson: do NOT bank a positive before its rule-4 audit returns.
+
+## 2026-07-15 — P3: unified LIDAR net at the pinned ring-raster geometry (deploy net + budget; honest saturated place gate)
+
+`sspax/lidar_ring.py` — the deploy lidar front-end at the PINNED ingest
+geometry (commit 34989b1): ring-range raster, RINGS-AS-CHANNELS
+(3×1024 full), 1D-along-azimuth convs, shared trunk + two heads
+(tracking: per-bin saliency weight + descriptor @20 Hz; distilled
+per-bin label @keyframe — placeholder, school has no lidar semantic
+labels). NOT a BEV net (BEV demoted to mechanism-study). Azimuth is
+cyclic, so yaw = an exact circular ROLL of the raster (no
+re-rasterisation, no permutation search for integer-bin yaw) — the
+cleanest rotation model in the project.
+
+BUDGET (the deployable deliverable): 15.9k params, **4.12 MMAC/frame
+(82 MMAC/s @20 Hz), 1.9 KB BNN weights** — trivial for the ECP5 lidar
+tier, leaves the EBR margin the vision net needs.
+
+HONEST place gate (learned vs uniform saliency, TIME split, rotation =
+azimuth-roll searched): the metric is the HONEST adjacent-vs-far
+separability (NOT a self-rotation positive — that was retracted as a
+rotation-triviality artifact, same-date P1 correction). Result:
+  uniform 0.987  learned 0.986  (delta -0.001)
+The adjacent-vs-far task is SATURATED at uniform (0.987): adjacent ring
+rasters are near-identical, trivially separable from >4 m frames, so
+there is no headroom for a learned saliency to show a place gain. This
+is NOT evidence the learned head is useless — it is evidence run2 CANNOT
+test it: the venue has no honest revisits (banked), so the only
+discriminating place pairs (same place, different heading/time) do not
+exist. Consistent with P1 and the project thesis (loop-closure detection
+is the irreducible wall; the front-end cannot manufacture separability).
+Deliverable = the deploy-geometry net + budget + a verified end-to-end
+pipeline on real ring rasters; the learned-saliency place value is
+UNSCOREABLE on run2 and awaits a revisit-bearing venue (classroom, P2).
+Anti-oracle: est poses label pairs only, never rasterised/encoded.
+
+## 2026-07-15 — bounded semantic-map CAPACITY law: cap ~ sqrt(D) — tiling beats one big superposition
+
+`sspax/semantic_capacity.py` — how many features fit in ONE fixed-size SSP
+vector before a class query stops resolving them, vs the vector dimension
+D (sphere.dirs_ring × oct6 ladder; chair-recall>=0.5; 0-chair scenes
+EXCLUDED not scored 0; 24 seeds). Mean chair-recall at rising map load:
+
+  D=120  cap@0.5  7.4 objects
+  D=240          12.8
+  D=360          16.3
+  D=720          23.1
+  D=1440         25.7
+  FIT: capacity ~ 0.76 * D^0.50   (log-log R^2 0.937)
+
+Capacity scales as **sqrt(D)** — the textbook superposition-retrieval law
+(cross-talk noise ~ sqrt(load/D), so recall crosses threshold at
+load ~ sqrt(D)). Consequence: to hold N objects at recall>=0.5 a SINGLE
+superposition map needs D ~ N^2 — it scales POORLY. The bounded-memory
+win therefore comes NOT from one giant vector but from TILING: per-segment
+bounded maps (exactly the shipped "per rigid 5-keyframe trajectory
+segment" architecture), each holding O(10-20) objects at D=360-720. The
+capacity law independently MOTIVATES the segmented-map design. k (bits per
+class) has minor effect (k=6-12 best ~16 obj at D=360; k=24 slightly worse
+14.8 — denser codes add cross-talk). Anti-oracle: deterministic synthetic,
+GT positions score recall only. Pure numpy, fixed seeds.
+
+## 2026-07-15 — P2: classroom fetched + HONEST place gate — reproduces the deploy mv numbers, confirms the venue-scale law on real revisits
+
+Classroom ("spot") session fetched from HF (lorinachey/spot-telluride,
+22 pointcloud shards 2.2 GB + kinematic odometry), parsed to scans.npz
+(1655 clouds), placed at data/spot_telluride/ (the flat "spot" run).
+This is the HONEST venue run2 lacked: withheld kinematic odometry gives
+110 keyframes with **179 genuine same-place revisit pairs** (gap>=40,
+<0.7 m) — real place recognition is scoreable here.
+
+Honest revisit-AUC (rot-searched, full clouds, ~10 m room):
+  ring-oct6      D240   0.904   (adj 0.991)
+  azel-oct6      D240   0.947   (adj 0.988)   <- best at D240
+  azel-house     D240   0.821   (adj 0.920)
+  ring-coarse16  D1920  0.976   (adj 0.993)
+  ring-oct6      D1920  0.976   (adj 0.994)   <- best overall (tie)
+
+Verdicts:
+- CROSS-BOX REPRODUCTION: matches the deploy agent's 08dc2a4 mv numbers
+  (azel-oct6 D240 0.947 honest classroom; ring-vs-azel D240 venue-split
+  0.904 vs 0.947) — rule-5 reproduction PASS across boxes/tooling.
+- The venue-scale law HOLDS on real revisits: oct6 family (0.90-0.95)
+  beats the old house ladder (0.821) at ~10 m — the LADDER is the lever.
+- Geometry at D240 is venue-dependent (azel 0.947 > ring 0.904); at
+  D1920 they converge (0.976) — consistent with the banked "adopt the
+  ladder, not the D240 geometry" verdict.
+- Positive, HONEST place result: the bounded SSP encoding separates REAL
+  revisits at 0.90-0.98 AUC. This does not contradict the loop-closure
+  wall (which is about ALIASED/ambiguous cross-session revisits, not
+  clean small-room revisits) — it shows the representation handles clean
+  revisits well; the wall bites only where appearance is genuinely
+  ambiguous. Anti-oracle: odometry labels pairs only, never encoded.
+
+## 2026-07-15 — P4 + Regime C: unified vision net on REAL NYUv2 — strong TRACKING head, weak deploy-budget SEG head, working queryable map at object level
+
+`sspax/vision/segnet.py` trained on REAL NYUv2 (1449 imgs, resized to the
+pinned Y8-luma 160×120, /4 trunk 30×40×64; 20.9k params, 2.5 KB BNN,
+22 MMAC/frame). Joint per-pixel seg CE + cell-InfoNCE descriptor.
+
+VISION NET (real, held-out 20%):
+- TRACKING descriptor head — STRONG: per-cell retrieval **0.950**, bit
+  stability 0.930 under luma jitter. The deploy-budget net produces
+  excellent appearance-invariant, cell-discriminative tracking keys on
+  real texture.
+- SEG head — WEAK at deploy budget. Naive CE collapsed to 3 dominant
+  classes (7/40 used, pixacc 0.11). Class-balanced CE (inverse-sqrt-freq,
+  void excluded) recovered breadth: **36/40 classes used, pixacc 0.329 on
+  non-void (13× the 1/40 chance)** but **mIoU 0.041** — the tiny luma-only
+  net gets the GIST, not precise masks. Honest verdict: fine 40-class seg
+  from luma at 20k params is infeasible; the per-cell LABEL head needs
+  cross-modal DISTILLATION (as the pinned spec intends) or coarser
+  classes. Tracking is the head that carries at deploy budget.
+
+REGIME C — the queryable map (`sspax/vision/objmap_nyu.py`): segnet
+per-cell class predictions → back-projected to 3D via NYUv2 depth →
+bound into the bounded SSP map (`sspax/semantic.py`) → query a class.
+The result is a clean demonstration that the CAPACITY LAW dictates the
+map design:
+- CELL-level binding (~1200 features into D=360, 75× over capacity):
+  round-trip AUC **0.576** (near chance — cross-talk destroys it).
+- OBJECT-level binding (one feature per predicted class-region centroid,
+  **13.1 objects/frame** ≈ the D=360 capacity of ~14): round-trip AUC
+  **0.799** (n=523 class-queries), 1.5× median contrast — a WORKING
+  queryable map on real predictions.
+The 0.576→0.799 jump by respecting the sqrt(D) capacity law is the
+capacity finding biting on real data: bind OBJECTS, not cells (and/or
+TILE). Anti-oracle: GT labels only SCORE seg; the map is built entirely
+from the net's own predictions bound at depth-projected positions.
+
+## 2026-07-15 — segnet quantization robustness: the tracking descriptor survives int4 weights (BNN-regime confirmed on the trained net)
+
+Fake-quant (symmetric per-tensor) of all conv/dense kernels of the trained
+NYUv2 segnet, descriptor-head eval (one held-out frame, 1200 cells):
+  float32  retrieval 0.730  bit-stability 0.915
+  int8     retrieval 0.733  bit-stability 0.916
+  int6     retrieval 0.726  bit-stability 0.914
+  int4     retrieval 0.720  bit-stability 0.926
+Weight precision from fp32 down to int4 costs ~0.01 retrieval and nothing
+on stability — the per-cell tracking descriptor (itself sign-binarized to
+1 bit, the deploy path) is fundamentally low-precision-friendly. Combined
+with the 2.5 KB BNN weight budget, this confirms the "BNN XNOR-popcount
+lanes are the regime" deploy claim on the actual trained net, not just the
+paper envelope. (Absolute retrieval here 0.73 is single-frame; the
+all-frames number is 0.95 — the ablation reads the int4-vs-fp32 DELTA.)
+
+## 2026-07-15 — rule-4 review CORRECTIONS to the capacity law + Regime-C map (one strengthened, one reframed)
+
+Read-only audit (dispatched agent) + my own controls refine the two
+2026-07-15 positives:
+
+- **Regime-C queryable map — STRONGER than banked, and confirmed SEMANTIC.**
+  The banked object-level round-trip AUC 0.799 was UNDERSTATED: it used
+  `semantic.query` which places every query point at a single median z
+  (z-flattening). Querying at each object's ACTUAL 3D centroid gives
+  round-trip AUC **~1.000** (D=360), and the capacity lever is visible on
+  real data: D=120→0.988, D=240→0.998, D>=360→1.000 (13 objects/frame).
+  DECISIVE control (mine + the auditor's, agreeing): querying the same map
+  with a RANDOM class code collapses to chance (0.49), and a WRONG-class
+  code to 0.46 — so the discrimination is carried by the class-code
+  BINDING, not by spatial separation of centroids. The queryable map is
+  genuinely semantic. Cell-level over-capacity binding stays near chance
+  (0.557-0.576) either way — the 0.576->~1.0 gap IS the capacity law.
+- **Capacity exponent D^0.50 is CONFOUNDED — reframe, keep the conclusion.**
+  D was swept only via n_dirs (D=6*n_dirs), so larger D BOTH lowers
+  superposition cross-talk AND sharpens the spatial decode kernel; the
+  low-D rows show a spatial-resolution failure (D=120 already <1 recall at
+  load 4) independent of bundling. So `0.76*D^0.50` is an empirical,
+  resolution-confounded capacity-vs-D trend, NOT a measured
+  superposition-physics constant (cap/sqrt(D) is non-flat 0.68→0.86→0.68).
+  The load-bearing takeaway is unaffected and conservative: capacity is
+  SUBLINEAR in D, so one giant superposition vector scales poorly and the
+  bounded-memory win comes from TILING (per-segment maps). Anti-oracle and
+  0-chair-exclusion both confirmed sound by the audit.
+
+## 2026-07-15 — classroom learned-vs-fixed PLACE test (the honest venue's definitive wall test): NO learned gain — and an anti-oracle catch
+
+The classroom (withheld odometry, 244 real revisit pairs) finally lets us ask
+the question run2 could not: does a LEARNED front-end beat a FIXED encoding for
+place recognition on a venue with real revisits? Trained the lidar ring net's
+per-bin saliency self-supervised (temporal-adjacency + azimuth-roll positives),
+encoded eval frames through `encode_bins` with LEARNED vs UNIFORM bin weights,
+gated on honest revisit-vs-far AUC (rotation = azimuth roll).
+
+ANTI-ORACLE CATCH (rule 2, self-caught): a first version used the withheld
+ODOMETRY distances to define training far-negatives (d>4 m) and then tested on
+odometry revisit labels — GT-contaminated. It showed learned 0.930→0.976
+(+0.046). Removing ALL pose labels from training (every off-diagonal batch frame
+a negative, positives temporal-only) FLIPS it:
+
+  uniform (fixed)  0.930   (deterministic, no training)
+  learned  seed0   0.908   (-0.022)
+  learned  seed1   0.882   (-0.048)
+  learned  seed2   0.929   (-0.001)
+
+Label-free learned saliency does NOT beat the uniform fixed encoding for revisit
+place (−0.001 to −0.048; never a clean win). The +0.046 was ENTIRELY the GT
+leak. VERDICT: on the honest venue with real revisits, the learned front-end
+provides no place gain over a good fixed encoding — the DIRECT confirmation of
+the loop-closure wall / do-no-harm gap that run2 (no revisits) and P1 (selfrot
+artifact) could only approach indirectly. The front-end improves FEATURE quality
+(tracking descriptors, seg gist — see P4) but cannot manufacture place
+separability. Lesson banked: pose-derived training negatives are an anti-oracle
+leak when the gate scores on pose — use temporal/label-free negatives, GT for
+scoring ONLY.
+
+## 2026-07-15 — tiling REFINEMENT: splitting a fixed D into smaller-D tiles does NOT help (refutes a naive √T intuition)
+
+Constructive follow-up to the capacity trend (`sspax/semantic_capacity.py
+tiling`): the naive intuition was "T tiles of D/T each = same total storage
+but √(TD) capacity = √T gain." The measurement REFUTES it — at fixed total
+D=720, chair recall@load for T=1/2/4 tiles (objects routed by x-position):
+  load 16:  T1 0.65   T2 0.53   T4 0.51
+  load 32:  T1 0.25   T2 0.12   T4 0.14
+More tiles HURT. Reason (the same D-vs-resolution confound the rule-4 audit
+flagged for the capacity exponent): a D/T tile has COARSER spatial-decode
+resolution, and that loss offsets the reduced per-tile load. So sub-dividing
+one fixed storage budget is NOT the lever.
+
+CORRECTED bounded-memory framing: the win is a FULL-D map per bounded-AREA
+segment — total storage grows with area (one D-map per segment, each covering
+~10-20 objects within its region), never one giant superposition and never
+smaller-D sub-tiles. This is exactly the shipped per-5-keyframe-segment
+architecture; the capacity study now supports it for the RIGHT reason (each
+segment covers few objects at full D), not the wrong one (sub-dividing D).
+Supersedes the "bind OBJECTS and TILE" phrasing in the earlier capacity entries
+where "tile" could be misread as splitting D.
+
+## 2026-07-15 — the QUERYABLE semantic map obeys the SSP TRANSFORM algebra (unifies the two contributions)
+
+`sspax/semantic_transform.py` — the bounded semantic map (map = Σ_o
+roles[bits_o] ⊙ pos(x_o)) is not only queryable-by-class, it is
+ALGEBRAICALLY TRANSFORMABLE on frozen content, exactly like the metric
+SSP map:
+  TRANSLATION t: map ⊙ exp(iW·t) == rebuild@{x+t}   max|err| 1.3e-13 EXACT (any t)
+  ROTATION 36° (lattice angle): map[perm_R] == rebuild@{Rx}  2.7e-13 EXACT
+  ROTATION 30° (off-lattice):   residual 41.9  approx (ring-sphere snap)
+The class query still localises objects in the NEW frame after the
+transform (translated 0.18 m, rotated-36° 0.05 m; off-lattice-30° degrades
+to 0.37 m but does not break). So a graph correction / loop closure MOVES
+the entire queryable map — every object AND its class binding — with ONE
+O(D) phase op (translation) or index permutation (on-lattice rotation),
+never re-encoding any object. This unifies the project's two contributions
+on a single bounded vector: it is simultaneously a QUERYABLE semantic map
+and an ALGEBRAICALLY-TRANSFORMABLE (correctable, movable) map. Rotation
+inherits the ring-stagger sphere's exact-on-lattice / approximate-off
+property (residual shrinks with D or the d/dθ correction — sspax/bench).
+Bit-exact identity (not a statistical result); anti-oracle: synthetic,
+positions score localisation only.
+
+## 2026-07-15 — significance = committed-bit count, on REAL predictions: mechanism CONFIRMED, quality-signal blocked by the weak seg head
+
+`sspax/vision/objmap_nyu.py sig` — closes the last piece of the original
+user directive ("modulate a feature's significance by setting bits") on
+REAL data. Each object commits round(confidence*k) of its class's k bits
+(segnet softmax confidence), so the bounded-map query READOUT should track
+committed bits. On real NYUv2 (816 objects):
+- MECHANISM CONFIRMED: Spearman(confidence, query-readout) = **0.607** —
+  readout rises with committed bits ∝ confidence (cross-talk/position
+  decode add noise, so <1 but clearly positive). The map grades a
+  feature's importance by its bit count, exactly as designed.
+- QUALITY SIGNAL BLOCKED: high-readout vs low-readout objects are BOTH
+  ~0.00 GT-correct — the deploy-budget seg head (mIoU 0.041) is too weak
+  and miscalibrated (confidently wrong), so confidence does not track
+  correctness and the significance cannot grade quality HERE. The
+  mechanism is sound; the seg head is the limiter (same bottleneck as P4
+  — usable per-cell labels need distillation/coarser classes, not
+  from-scratch deploy-budget learning). Anti-oracle: GT only scores the
+  correctness split; the map uses the net's own predictions + confidence.
+
+## 2026-07-15 — seg-head bottleneck characterized: class-count helps but does not fix deploy-budget segmentation
+
+Addendum to P4 (the recurring seg-head limiter). Retrained the same
+deploy-budget vision net with FEWER classes to test whether class
+imbalance alone caps the seg head:
+  40 classes: mIoU 0.041, pixacc(non-void) 0.329
+  10 classes: mIoU 0.100, pixacc(non-void) 0.429   (tracking unchanged 0.948)
+Fewer classes help (mIoU 2.4x, pixacc +0.10) but the seg head stays weak
+— usable per-cell segmentation is NOT reachable at 20k params / Y8-luma /
+half-res even at 10 classes. The bottleneck is fundamental (capacity +
+mono input + resolution), not merely imbalance. Confirms the P4 verdict:
+the deploy per-cell LABEL head needs cross-modal DISTILLATION (a teacher
+provides labels, as the pinned spec intends) or a larger net; the
+TRACKING head (retrieval 0.95, int4-robust) is the deploy-carrying head.
+This closes the seg-head thread — the fix is distillation, out of scope
+for a from-scratch deploy-budget net.
+
+## 2026-07-15 — the tracking descriptor is a translation-equivariant CONTENT signature (works for the right reason)
+
+Probe of the deploy-carrying head: it was trained on PHOTOMETRIC jitter
+only (luma brightness/contrast/gamma), so does it survive the GEOMETRIC
+shifts a real tracking key must? Per-cell retrieval (band-limited
+candidate set) on real NYUv2:
+  trained photometric jitter (shift 0):     0.840
+  untrained geometric 1-cell shift:         0.926
+  untrained geometric 2-cell shift:         0.929
+The descriptor is MORE robust to (untrained) geometric shifts than to
+(trained) photometric jitter — because it is a translation-EQUIVARIANT
+content signature: when a feature moves, its descriptor moves with it
+(CNN translation equivariance), so cell(i,j) in the shifted image matches
+cell(i,j+shift) in the original. That is exactly the property a tracking
+key needs (follow the content, not the pixel). Confirms the tracking head
+is a genuine tracking descriptor, robust to both appearance jitter and
+viewpoint shift — not an artifact of the training augmentation. With the
+int4 weight-robustness and 2.5 KB BNN budget, this is the strong,
+deploy-ready head of the unified vision net (the seg head remains the
+distillation-blocked one).
+
+## 2026-07-15 — queryable-map tolerance to loop-correction ERROR: graceful to ~0.5 m (sub-metre bound)
+
+`sspax/semantic_transform.py robustness` — the transform algebra is exact,
+but a real graph correction is APPROXIMATE. Translating the map by the true
+t plus an error e, then querying at the true shifted positions, chair recall
+vs |e|:
+  err 0.0/0.1/0.25 m : 1.00 / 1.00 / 0.94
+  err 0.5 m          : 1.00
+  err 1.0 m          : 0.44
+  err 2.0 m          : 0.00
+The queryable map degrades GRACEFULLY: recall holds to ~0.5 m correction
+error, decays past ~1 m, gone by 2 m. The tolerance (~sub-metre) is set by
+the query's spatial decode/match resolution (~0.8 m match window), NOT the
+finest ladder wavelength (lambda_min 0.25 m) — the map is MORE forgiving
+than lambda_min. Deploy reading: a loop correction accurate to ~0.5 m keeps
+the semantic map queryable — a comfortably achievable bound for real
+closures. So the queryable+transformable map is robust to realistic
+graph-correction residuals, not just the exact algebra. Anti-oracle:
+synthetic, positions score recall only.
+
+## 2026-07-15 — "one bounded vector, DUAL USE" tested directly: place descriptor + queryable semantic map coexist in one D-vector
+
+`sspax/dual_use.py` — the strong form of the core contribution: can ONE
+bounded D=360 vector be BOTH a metric place descriptor (revisit matching)
+AND a queryable semantic map, or do the roles destroy each other?
+  combined = alpha*place_vec + (1-alpha)*sem_vec   (16 scenes, shared W_POS)
+  alpha:      1.0   0.9   0.7   0.5   0.3   0.1   0.0
+  place-AUC:  1.00  1.00  1.00  1.00  1.00  1.00  1.00
+  chair-recall: 0.00 0.00 0.77 0.86 0.86 0.86 0.86
+FEASIBLE: at alpha=0.5 the SAME vector gives place-AUC 1.00 AND
+chair-recall 0.86 — both roles usable at once. Interference is mild and
+ASYMMETRIC: place matching is robust across all alpha (bundling semantic
+content never hurts it), while the semantic query needs enough weight
+(alpha <= ~0.7; at alpha>=0.9 the place term swamps the bindings ->
+recall 0). HONEST CAVEATS: (1) place-AUC is 1.0 even at alpha=0 because
+distinct scenes have distinct OBJECTS, so semantic content also
+discriminates places (realistic — a revisit sees the same geometry AND
+objects — but it means this easy, non-aliased place task does not isolate
+geometric matching or stress the interference); the aliased-place wall
+regime is a separate, harder question. (2) The clean alternative is
+separate/concatenated vectors (2x storage, zero interference); the
+shared-vector result shows the SINGLE-vector form is feasible at a small
+capacity cost. Anti-oracle: synthetic, GT scores only.
+
+## 2026-07-15 — rule-4 CORRECTIONS to two recent semantic-map positives (transform algebra stands; robustness + dual-use framing overstated)
+
+Read-only audit of the three most recent positives. RESULT A (the transform
+algebra: translation = phase mult bit-exact, rotation = permutation exact
+on-lattice, query localizes class-specifically with random-code control →0)
+is SOUND — keep as banked. Two framing corrections:
+
+- CORRECTION to "queryable-map tolerates ~0.5 m correction error / graceful
+  degradation": the audit is right that this OVERSELLS. Translation is
+  LOSSLESS — the SSP peak is exact at ANY t (Result A), so NOTHING in the
+  representation degrades. The recall-vs-error curve merely measures the
+  QUERY's spatial match window (`semantic._match` tol=0.8 m): translating by
+  t+e puts the peak exactly at x+t+e, and recall = fraction with |e|<0.8 m.
+  Honest restatement: a loop correction must land within the query's ~0.8 m
+  match window; the representation itself adds no error at any correction
+  magnitude. The number is a harness property, not representational
+  robustness. (The non-monotone 0.25→0.5 dip is small-count noise around
+  the tol, confirming this.)
+
+- CORRECTION to "one vector = place + semantic, both coexist at alpha=0.5":
+  the place-AUC=1.0 column at alpha<1 is a CONTAMINATED metric — the revisit
+  vector reuses the SAME sem_vec verbatim (not re-encoded from the jittered
+  revisit), so at alpha<1 the match is an identical-vector match, not
+  geometric place matching (control: alpha=0 diag sim ==1, off-diag mean
+  0.072). So the sweep NEVER stresses the place side, and the claim "place
+  survives semantic interference" is NOT supported — RETRACTED. What HOLDS:
+  (i) pure place at alpha=1 gives AUC 1.0 on the real jittered revisit (the
+  geometric place role works on its own); (ii) the SEMANTIC query survives
+  bundling with a place background down to alpha~0.5 (recall 0.86, random-code
+  control → 0.00 confirms it is class-specific, not spatial). So the honest
+  dual-use statement is one-directional: the semantic map survives an added
+  place term to alpha~0.5; whether place survives an added semantic term is
+  UNTESTED here (the place task was saturated). Anti-oracle held throughout
+  (GT scores only); the fixes are framing, not code.
+
+## 2026-07-15 — regression gate PASS after the session's additions (non-breaking, verified)
+
+Pre-push verification that this session's work (7 new sspax modules —
+ladder_rule, learn_scale_real, lidar_ring, semantic_capacity,
+semantic_transform, dual_use, vision/segnet, vision/objmap_nyu — all
+IMPORT-ONLY on the frozen core, rule 1; + docs) did not regress anything:
+- `tests/test_smoke.py`: SMOKE PASS — 49 modules import, bit-exact selftest OK.
+- spot flagship acceptance (lidar-only vs withheld odometry, TARGET PLATFORM):
+  ATE **0.039** med 0.033 — reproduces the banked 0.039 EXACTLY, and confirms
+  the classroom/"spot" data fetched this session (HF, parsed to scans.npz)
+  drives the shipped pipeline correctly.
+The frozen core is untouched; every new artifact subclasses or imports only.
+
+## 2026-07-15 — lattice choice for the QUERYABLE map: geometry-INSENSITIVE (unlike place) — one lattice serves both roles
+
+`sspax/semantic_lattice.py` — connects the place-lattice thread to the
+semantic-map thread. All lattices at matched D=240, chair query, 24 scenes,
+8-object load; clean metrics recall + localisation precision:
+  ring-oct6   recall 0.95  precision 0.08 m
+  azel-oct6   recall 0.93  precision 0.09 m   (the place-ADOPTED lattice)
+  azel-house  recall 0.87  precision 0.07 m
+  fib3d-oct6  recall 0.93  precision 0.09 m
+  ringstag    recall 0.96  precision 0.09 m
+Query quality is nearly IDENTICAL across geometries (recall 0.87-0.96,
+precision ~0.08 m) — the semantic query is geometry-INSENSITIVE. This
+contrasts with PLACE, which IS geometry-sensitive (azel-oct6 0.947 > ring
+0.904 at D240, honest classroom). Mechanism: the semantic query is a LOCAL
+position decode (one object at a known-ish spot), which any reasonable
+lattice resolves; PLACE is a GLOBAL appearance comparison where the
+direction distribution matters. Deploy implication: the place-adopted
+azel-oct6 serves the semantic query well too (0.93 / 0.09 m) — ONE lattice
+for BOTH the metric-place and semantic-query roles, no place/semantic
+tension. (Anti-oracle: synthetic, GT scores only. A contrast metric was
+dropped as numerically unstable — off-object readout ≈ 0 blows up the
+ratio; recall+precision are the clean measures.)
+
+## 2026-07-15 — the semantic-map LADDER is the lever (and has a place/semantic TENSION)
+
+`sspax/semantic_lattice.py run_ladder` — companion to the geometry result.
+Fixed ring-oct6 geometry (60 dirs), 6-rung ladders of different wavelength
+RANGE (D=360 fixed), chair query, ~12 m room:
+  fine   0.1-1.6 m : recall 0.98  precision 0.09 m   <- best (fine object scale)
+  oct6   0.25-8 m  : recall 0.91  precision 0.07 m
+  wide   0.25-90 m : recall 0.59  precision 0.07 m   <- diluted (rungs too sparse)
+  coarse 2-90 m    : recall 0.24  precision 0.11 m   <- worst (no fine resolution)
+The LADDER matters enormously (recall 0.24-0.98) while GEOMETRY did not
+(0.87-0.96, prior entry) — geometry-insensitive + ladder-sensitive, the
+SAME shape of law as place. BUT a genuine place/semantic TENSION emerges in
+the ladder: the semantic QUERY wants FINE rungs (sub-metre, object-
+localisation scale — fine 0.98), whereas PLACE wants COARSE-reaching rungs
+(venue scale — banked coarse16-wins-buildings). A shared 6-rung WIDE ladder
+that tries to span both dilutes each (query 0.59). Resolution options: more
+rungs (larger D to span object+venue scales), or per-role ladders, or accept
+the tradeoff. Corrects the earlier optimistic "one lattice, no tension"
+reading: geometry is shared freely, but the LADDER is the contested knob.
+Anti-oracle: synthetic, GT scores only.
+
+## 2026-07-15 — the place/semantic ladder tension is FUNDAMENTAL (more rungs do NOT resolve it) — dual-use needs per-role ladders
+
+`sspax/semantic_lattice.py run_ladder_resolve` — tested my proposed
+resolution (span object-fine + venue-coarse in one many-rung ladder).
+It FAILS. Chair query recall, ring-oct6 geometry, 12 m room:
+  6-rung  wide 0.25-90 (D360): 0.59
+  12-rung wide 0.1-90  (D720): 0.63   <- barely better; NOT recovered
+  12-rung fine 0.1-8   (D720): 0.95   <- only fine ladders work
+Adding rungs does not help because the COARSE rungs place needs actively
+DILUTE the semantic query: a 90 m wavelength is near-constant across a 12 m
+room, so it contributes a DC-like phase that adds cross-object cross-talk
+without localising. So the place/semantic ladder tension (place wants
+coarse-reach, query wants fine) is FUNDAMENTAL, not a resolution-budget
+issue — a shared WIDE ladder compromises the query regardless of D. Deploy
+consequence for a dual-use (place + semantic) bounded map: use SEPARATE
+ladders per role (a fine object-scale ladder for the semantic bindings + a
+coarse venue-scale ladder for the place descriptor, e.g. bundled as two
+sub-bands / two vectors), OR accept a compromised role. Honest negative on
+my own proposed fix; the geometry-shared / ladder-contested split (prior
+two entries) stands, now with the ladder tension shown irreducible.
+
+## 2026-07-15 — significance grading BUYS effective capacity for important objects (connects significance + capacity)
+
+`sspax/semantic_capacity.py significance_capacity` — the two banked
+mechanisms combine: capacity is bounded (~sqrt-ish D), but SIGNIFICANCE
+(committed bit count) lets you ALLOCATE it. 3 important chairs commit all
+k=12 bits; background objects commit b bits; chair recall vs background load
+(D=360):
+  bg-objects   graded b=3   equal b=12
+     4           0.72         0.61
+     8           0.69         0.56
+     16          0.64         0.25
+     32          0.47         0.14
+     48          0.36         0.04
+Graded significance beats equal-weight at EVERY load and the gap WIDENS
+with it — at 48 background objects, 0.36 vs 0.04 (9x). De-prioritised
+(low-bit) background objects contribute less to the bounded bundle -> less
+cross-talk on the important-object query, so what matters survives far more
+load. So significance is not just a readout-strength knob (banked earlier)
+— it is an effective CAPACITY lever: the bounded map spends its finite
+capacity on what matters. Refines the "capacity is limited -> tile"
+conclusion: within a tile, grade features by importance to fit more of what
+counts. Clean (chair-recall metric, same scenes, only b varies, large
+monotone effect). Anti-oracle: synthetic, GT scores only.
+
+## 2026-07-15 — rule-4 audit of the semantic-map lattice/ladder/significance ablations: all 4 SOUND (mechanisms confirmed), one minor metric caveat
+
+Batched read-only audit of the four recent ablations (geometry-insensitive,
+ladder-is-lever, tension-fundamental, significance-buys-capacity). All
+reproduced bit-closely; anti-oracle clean throughout. Verdicts:
+- SIGNIFICANCE BUYS CAPACITY — SOUND, mechanism NAILED. The chair signal is
+  INVARIANT to b (~12-13 both graded and equal); the entire effect is the
+  NOISE FLOOR scaling with committed bits (SNR = sig/noise tracks recall).
+  A disjoint-bit control (background bits forced to never collide with a
+  chair query bit) keeps the graded advantage nearly intact (0.44 vs 0.21
+  at 48 bg) — so it is generic superposition cross-talk reduction, not mere
+  bit-collision. Precise: de-prioritised few-bit objects inject
+  proportionally less cross-talk; the fixed-height important signal survives
+  more load. Confirmed real.
+- LADDER IS THE LEVER + TENSION FUNDAMENTAL — SOUND, confirmed quantitatively
+  by the pre-detection decode kernel: FWHM tracks recall (fine 0.15 m →0.98,
+  coarse 5.0 m →0.24), and the far-field DC pedestal (set by the PRESENCE of
+  coarse rungs, not their count) explains why more rungs don't resolve it
+  (12-rung wide pedestal 0.34 ≈ 6-rung wide 0.36; fine drops to 0.086). Not
+  detect() artifacts; D genuinely matched.
+- GEOMETRY-INSENSITIVE — SOUND across the load curve (all geometries collapse
+  TOGETHER at load 16 → ~0.4, load 32 → ~0.1; not a saturation ceiling).
+  CAVEAT (adopted): the PRECISION column is non-discriminating — all
+  geometries report ~grid-floor 0.07-0.09 m (grid step 0.2 m), so precision
+  cannot separate lattices; RECALL is the real evidence (and it also shows
+  insensitivity). The load-8 spread (0.87-0.96) scrambles with load = seed
+  noise, not a geometry ranking. Conclusion (geometry free, ladder contested)
+  stands; read it off recall, not precision.
+No retractions — the careful-design pass produced defensible results; the
+only fix is to lean on recall over the grid-floored precision metric.
+
+## 2026-07-15 — the bounded SEMANTIC MAP survives low-precision (FPGA polar-quant): ~4 bits/cell keeps queries alive
+
+`sspax/semantic_quant.py` — tests the deploy-substrate claim for the SEMANTIC
+map (the vision descriptor net already quantizes to int4; this is the MAP's
+stored phasors, the bounded EBR content) under the FPGA polar-quant model
+(`core.q_polar_np`: nph phase bins x nmag magnitude levels). Chair-query
+recall (D=360, float baseline 1.00):
+  nph  nmag  map-only  map+roles  bits/cell
+  64    8     1.00      1.00        9
+  32    8     0.97      0.97        8
+  16    4     1.00      0.97        6
+   8    4     0.97      0.97        5
+   8    2     0.97      0.97        4
+   4    2     0.93      0.93        3
+The map survives aggressive quantization: at 4 bits/cell (nph=8 phase x
+nmag=2 mag) recall is 0.97, and 3 bits/cell still holds 0.93 — quantizing
+the ROLES too barely adds cost (map+roles ~ map-only). Footprint: a D=360
+map at 4 bits/cell is ~180 bytes — trivially EBR-resident. So the queryable
+map fits the low-precision (BNN-regime) FPGA substrate the thesis claims, at
+a handful of bits per D-cell, with negligible query loss. Standard VSA
+phase-noise robustness (well-understood mechanism); clean float-baseline +
+sweep + roles-too control. Anti-oracle: synthetic, GT scores only.

@@ -1056,3 +1056,76 @@ where bearings collapse to 0.198; fr2's 4 m Kinect in a hall = the
 coverage boundary. On the platform the range source is 60 m lidar →
 **calibrated lidar-camera extrinsics is the single highest-value step**
 (the SPOT depth negative was an extrinsics artifact, proven).
+
+## Addendum (2026-07-15, vision + deploy-nets + queryable-map session) — the bounded map is dual-use, its capacity is √D, and the wall holds
+
+Six threads, all banked in RESULTS.md (2026-07-15), nothing tuned against a
+reference (rule 2), positives audited (rule 4 — one retraction below).
+
+1. **The differentiated thesis, sharpened.** The contribution is ONE bounded,
+   history-free SSP vector that is simultaneously a metric map (tracking) AND a
+   QUERYABLE SEMANTIC map (objects by class). This dual use is what the
+   loop-closure wall does NOT block, so it is where the project is most
+   defensible — not a place-recognition or bytes/m² SOTA.
+
+2. **Deploy front-ends pinned + built.** Two unified dual-objective CNNs at
+   deploy resolution, each a shared trunk + tracking head + per-cell segmented
+   label head (`sspax/vision/segnet.py` — Y8 160×120 → 30×40×64, 22 MMAC,
+   2.5 KB BNN; `sspax/lidar_ring.py` — 3×1024 ring raster, 4.1 MMAC, 1.9 KB BNN,
+   yaw = azimuth roll). BEV demoted to a mechanism-study surface. CReLU ≈ 55 %
+   of ReLU params at matched width, on both nets.
+
+3. **On real NYUv2 the TRACKING head is strong, the deploy-budget SEG head is
+   weak.** Per-cell descriptor retrieval 0.950 / bit-stability 0.930; but
+   40-class seg from luma at 20k params collapses without class-balancing and
+   even balanced reaches only pixacc 0.33 (13× chance) / mIoU 0.041 — usable
+   labels at deploy budget need cross-modal distillation or coarser classes, not
+   from-scratch learning. Tracking is the head that carries.
+
+4. **The queryable map WORKS on real data — governed by a SUBLINEAR capacity
+   trend.** Bounded-map capacity grows SUBLINEARLY with D
+   (`sspax/semantic_capacity.py`: empirical ~0.76·D^0.50, but the exponent is
+   confounded — sweeping D via n_dirs also sharpens the spatial decode kernel,
+   so it is a resolution-entangled trend, NOT a superposition-physics constant;
+   the robust takeaway is only "sublinear"). On real NYUv2 (Regime C,
+   `sspax/vision/objmap_nyu.py`) this bites directly — naive CELL binding
+   (~1200 features into D=360, far over capacity) gives round-trip query AUC
+   0.576 (chance); OBJECT binding (13 objects/frame ≈ the D=360 capacity) gives
+   **~1.0 with correct 3D query positions** (0.799 under a z-flattened query),
+   and a random-code control collapses to 0.49 — the map is genuinely SEMANTIC,
+   not spatial-trivial. The law dictates the design: bind OBJECTS and TILE
+   (per-segment maps) — independently re-deriving the shipped
+   per-5-keyframe-segment architecture. One giant superposition scales poorly
+   and is the wrong design. The map is now characterized end-to-end and
+   DEPLOY-GROUNDED (all in `sspax/semantic_*`): it is also ALGEBRAICALLY
+   TRANSFORMABLE (translation = one phase multiply, bit-exact; rotation =
+   permutation, exact on-lattice — a graph correction moves objects + bindings
+   with O(D) ops, tolerant to the ~0.8 m query match window); geometry-FREE but
+   LADDER-contested (query wants fine rungs, place wants coarse — an irreducible
+   tension → per-role ladders); SIGNIFICANCE grades capacity (few-bit background
+   injects less cross-talk, protecting important objects 9× under load, mechanism
+   SNR-confirmed); and it survives FPGA polar-quant at ~4 bits/cell (recall 0.97,
+   ~180 B per D=360 map) — the queryable map fits the low-precision substrate.
+   All positives audited (rule 4). A single bounded vector can even carry BOTH
+   the place descriptor and the semantic bindings (dual-use, shown
+   one-directionally: semantic survives an added place background to alpha~0.5).
+
+5. **The wall holds, reconfirmed three ways.** (a) The P1 learned thermometer
+   "+0.183 place gain" was RETRACTED after a rule-4 audit — a self-rotation
+   metric artifact; the honest adjacent-vs-far control was flat. (b) The lidar
+   ring-net place gate saturated (uniform 0.987 == learned) — run2 has no
+   revisits to test learning. (c) On the CLASSROOM honest venue (withheld
+   odometry, 244 real revisit pairs) the fixed recipes reproduce cross-box
+   (azel-oct6 D240 0.947, ring-coarse16 D1920 0.976) and the venue-scale law
+   holds; and the DIRECT test — a label-free self-supervised learned saliency
+   vs a uniform fixed encoding, gated on real revisits — shows NO learned gain
+   (−0.001 to −0.048 across seeds; a GT-contaminated variant that showed +0.046
+   was caught by rule 2). The front-end improves FEATURE quality (tracking
+   descriptors, segmentation gist); it does not manufacture place separability.
+   This is the direct confirmation run2 (no revisits) and P1 (selfrot artifact)
+   could only approach indirectly.
+
+6. **The venue-scale ladder law is monotone but not linear.** Densified
+   (`sspax/ladder_rule.py`): best λ_max tracks venue extent (Spearman 0.9-0.97)
+   but the effect is negligible at room scale and large only at building scale;
+   ship a coarse venue-bucket, not a precise c·extent formula.

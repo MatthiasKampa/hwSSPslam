@@ -61,7 +61,8 @@ on SO(3) decode, ~0.05 on yaw cos — the storage model survives).
 - `sspax/semantic.py` — binary-descriptor binding → **queryable map**
   ("highlight the chairs": P=R=1.0, 4 cm, within capacity).
 - `sspax/vision/tinycnn.py` — FPGA-fittable vision CNN + 64-bit descriptor head,
-  pretrained on CIFAR-100. See `sspax/LEARNED_FRONTEND.md`.
+  pretrained on CIFAR-100 (whole-image; SUPERSEDED for the map by segnet below).
+  See `sspax/LEARNED_FRONTEND.md`.
 - `sspax/realbench.py` — pure-numpy REAL-DATA transfer gates (school/tum/
   verify/mv/preset), runs on the no-JAX deploy box.
 - `sspax/headio.py` — the unified-net HEAD EXPORT CONTRACT (int8 npz +
@@ -69,6 +70,53 @@ on SO(3) decode, ~0.05 on yaw cos — the storage model survives).
   bit stability, objmap2 semantic-key harness. Train anywhere, gate here.
 - `sspax/ladder_extent.py` — extent×λ_max mechanism study behind the
   venue-adaptive ladder preset (`sspslam/lattice_presets.ladder_of_extent`).
+
+## Deploy front-ends + bounded queryable map (2026-07-15b)
+
+Pinned network geometry (TRAINING_PROGRAM.md "Network geometry"): TWO unified
+dual-objective CNNs at deploy resolution, each a shared trunk + a tracking head
+(per-cell saliency/cutoff/descriptor) + a per-cell SEGMENTED-label head. Both
+emit a SPATIAL map (never a global descriptor) so features bind at positions.
+
+- `sspax/vision/segnet.py` — the vision net: Y8 luma 160×120 → /4 trunk
+  30×40×64, seg (40-class) + tracking (desc) heads. ~22 MMAC/frame, 2.3 KB BNN,
+  exact numpy-forward parity, CReLU ≈ 55 % of ReLU params at matched width.
+- `sspax/lidar_ring.py` — the lidar mirror on the deploy ingest RING raster
+  (3×1024 rings-as-channels, 1D-azimuth trunk; yaw = exact azimuth ROLL).
+  4.1 MMAC/frame, 1.9 KB BNN. BEV is now mechanism-study only.
+- `sspax/vision/objmap_nyu.py` — **Regime C**, the queryable map end-to-end:
+  segnet per-cell class → back-projected to 3D → bound into the bounded SSP
+  map → query a class → objects light up ("highlight the chairs"). On real
+  NYUv2, object-level round-trip AUC **~1.0** (0.799 under a z-flattened query);
+  a random-code control collapses to 0.49 → the map is genuinely SEMANTIC.
+- `sspax/semantic_transform.py` — the queryable map is also ALGEBRAICALLY
+  TRANSFORMABLE: translation = map ⊙ exp(iW·t) (bit-exact, any t), rotation =
+  index permutation (exact on-lattice). A graph correction moves the whole map
+  (objects + class bindings) with one O(D) op; queries still localise in the new
+  frame. Unifies queryable + transformable on one bounded vector.
+- `sspax/semantic_capacity.py` — the bounded-map CAPACITY trend: capacity is
+  SUBLINEAR in D (empirical ~0.76·D^0.50, but the exponent is
+  resolution-confounded — not a physics constant; only "sublinear" is
+  load-bearing). One giant superposition scales poorly — so the bounded-memory
+  win comes from TILING (per-segment maps), reinforcing the shipped architecture.
+- `sspax/learn_scale_real.py` — thermometer scale head on real lidar (P1). Its
+  "+0.183 place gain" was RETRACTED (rule-4 audit: a self-rotation-metric
+  artifact; the honest adjacent control was flat). Reconfirms the loop-closure
+  wall — the front-end cannot manufacture place separability.
+- `sspax/ladder_rule.py` — densified venue-scale ladder rule: the extent→λ_max
+  law is monotone (Spearman 0.9-0.97) but NOT linear; effect is large only at
+  building scale. Recommend coarse venue-bucketing, not a formula.
+- `sspax/semantic_capacity.py`/`semantic_lattice.py`/`semantic_quant.py`/
+  `semantic_transform.py`/`dual_use.py` — the bounded map characterized: capacity
+  sublinear (→tile) + SIGNIFICANCE allocates it (9× important-object protection);
+  geometry-FREE but LADDER-contested (per-role ladders); survives FPGA polar-quant
+  at ~4 bits/cell; place+semantic dual-use in one vector (one-directional). All
+  positives audited (rule 4).
+
+Honest place is scoreable on the CLASSROOM venue (withheld odometry, real revisit
+pairs): the banked recipes reproduce cross-box (azel-oct6 D240 0.947,
+ring-coarse16 D1920 0.976), and a DIRECT learned-vs-fixed test shows NO learned
+place gain — reconfirming the loop-closure wall on the honest venue.
 
 ## Verdict
 
