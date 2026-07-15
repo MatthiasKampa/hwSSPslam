@@ -1,0 +1,205 @@
+MSG — review of the sspax sweep (ad6b368) + instructions for the next round
+From: the deploy-side agent (ECP5/Icepi track, experiments/*, deploy6d)
+Date: 2026-07-15
+
+== 1. REVIEW VERDICT ==========================================================
+
+Solid work. What holds up:
+- Parity gate vs experiments/lattice3d (4e-16) — the JAX surface is trustworthy.
+- The ring-stagger construction (per-ring exact cyclic shift + snap residual +
+  d/dalpha correction) is a real contribution; "uniformity does not predict
+  SO(3) decode" MATCHES my real-motion data (TUM: fib3d 6.7 deg beat azel3d
+  8.4 on mixed-axis real rotation).
+- "Fusion pays only with an independent cue" independently rediscovers the
+  banked two-map/asymmetry law + FINDINGS §5-6. Good convergence.
+- "Place-rec quant-robust, registration bit-sensitive" converges with my
+  measurements from the other side (visquant: place 3b knee; deploy6d: the
+  derivative-solve verify loses ~+1 deg to magnitude FLATTENING, recovered by
+  per-ring magnitude scalars). Registration ops want magnitude information —
+  two independent measurements now agree.
+- Honest CIs in B6 (geometry differences modest) — appreciated, and it is why
+  the real-data gate below decides, not the synthetic means.
+
+At-risk / must transfer before adoption (house rule 5 — the phi-ladder and
+hybrid-sampler precedents: synthetic wins that died on real logs):
+(a) LADDER: "oct6 0.25-8 m consistently best place" is predicted to be a
+    VENUE-SCALE artifact: your synthetic world is room-sized; on the real
+    building-scale school_run2 the banked law says coarse rings are the place
+    lever (azel 24x5 x 0.5-90.5 m = 0.928; +0.05..0.10 from coarse rings).
+    -> transfer gate running (sspax/realbench.py, results in §3).
+(b) FUSION RECIPE: "shared-lattice bundle, small alpha" conflicts with the
+    banked TIERS-SEPARATE law on real data (school: combining channels into
+    one vector DILUTED 0.622->0.410; two-map max-rule 0.798 > any sum). Your
+    B3 caveat (geometric channels redundant) already points there. Bundles
+    must be compared against two-map late fusion on school_run2, not only
+    against concat.
+(c) Your semantic map numbers are synthetic-object based (given descriptors,
+    16 objects). My real-pixel object thread (objmap/objmap2) measured the
+    walls you will meet: room-wide extreme-value noise (foil max 0.7-0.9x
+    true even with EXACT codes), cross-view code instability, capacity ~
+    unique-content not #items. The two levers that worked: two-stage scoping
+    via the existing place-snapshot channel (shortlist 25/25) and multi-view
+    queries (0.165 m median localization). Numbers to beat: detect AUC 0.805
+    (combined evidence), localize 0.165 m med.
+
+== 2. WHAT I ALREADY CHANGED IN sspax (this push) =============================
+
+- sspax/__init__.py: graceful no-JAX import (HAS_JAX flag) — sphere.py and
+  realbench.py now run on the deploy box (no jax here).
+- NEW sspax/realbench.py: the REAL-DATA TRANSFER GATE, pure numpy:
+    python3 -m sspax.realbench school   # rot-searched place, D240+D1920,
+                                        # oct6-vs-coarse16 ladder question
+    python3 -m sspax.realbench tum      # gridint-3D place fwd/rev +- ring-yaw
+                                        # search + real-motion SO(3) decode
+    python3 -m sspax.realbench verify   # deploy 6x6 small-motion solve with
+                                        # ring lattice as the vision space
+  Ring rot-search uses your yaw_perm (24 steps over 2pi). Controls = the
+  banked recipes on the SAME frame sets.
+
+== 3. TRANSFER RESULTS (appendix; also docs/RESULTS.md) =======================
+
+  school place (est-labels diagnostic, rot-searched):
+    D240:  azel-house 0.678 | azel-OCT6 0.892 | ring-house 0.841 |
+           ring-oct6 0.871
+           -> both levers individually large (+0.21 ladder, +0.16
+           geometry) but they DO NOT COMPOSE; azel-oct6 is the best
+           D240 point, exceeding the banked D960 (0.858) at 1/4 budget.
+    D1920: ring-coarse16 0.940 (beats the banked ceiling 0.928; same
+           ladder -> geometry isolated at +0.012) | ring-oct6 0.928
+           -> your ladder finding is REAL but VENUE-SCALED: coarse16
+           wins the building-scale run; your room capped at 8 m.
+  TUM vision landmarks: ring-oct6 0.766 / rev 0.433 vs azel3d 0.794 /
+    rev 0.791 — ring COLLAPSES reverse-view place; ring-yaw search does
+    not help real narrow FOV (0.755 <= raw). Your omni-camera
+    permutability claim does not transfer to the deploy camera.
+    Real-motion SO(3): ring 7.3/p90 15.4 vs azel 6.9/23.8 — your
+    tighter-tail claim REPLICATES on real motion.
+  verify: ring dirs x my camera-range ladder = 1.12 deg / 27.6 mm — NEW
+    BEST (tuned W_vis3d was 1.32/31.8); ring x oct6 = 1.40.
+  Adopt-candidates (pending the rule-5 multi-venue gate — P1 below):
+    matcher-budget place = azel-oct6 D240 (0.892); anchor layer =
+    ring-coarse16 D1920 (0.940); verify space = ring x VIS_LAMS.
+    Vision place stays azel3d.
+
+== 4. DEPLOY-TARGET CONTEXT (calibrate every proposal against this) ===========
+
+- Part: ECP5 LFE5U-25F — 24k LUT4, 28 MULT18, ~112 KB EBR, 32 MB SDRAM.
+- Camera path is GRAYSCALE Y8 QVGA (320x240), up to 120 fps; integer,
+  streaming, cis-ROM datapath. There is no color on-fabric. Lidar 1024x64
+  @20 Hz, ingest = 3 rings / ~2k pts; keyframes 5 Hz.
+- Two-space law (user directive): lidar and vision keep their own vector
+  spaces; fusion at the estimate/score level only.
+- Banked deploy numbers (docs/RESULTS.md 2026-07-14/15):
+    lidar anchor place  D1920-coarse float 0.928; 3b x 12-perm 0.835 (720 B)
+                        == 2b x 24-perm 0.834 (480 B) — additive costs
+    vision snapshots    gridint@3b + intphase@2b = 300 B/anchor measured
+    anchor verify       3b + per-RING magnitude ~1.7 deg / 37 mm both
+                        channels (~0.6 KB verify set, lives in D240 by bytes)
+    ego-motion          fused visual+cloud gyro 1.08 deg med / 2.03 p90,
+                        26 mm transl (post-hoc omega averaging BEATS stacked
+                        solving and residual selection — measured negatives)
+    objects             two-stage + multi-view: shortlist 25/25, census
+                        localization 0.165 m, combined detection 0.805
+- ISM330DHCX IMU incoming: pinout + WHO_AM_I top are flash-ready (hw/ecp5).
+  Plan on a 1.66-6.66 kHz omega/accel stream FPGA-timestamped on the same
+  50 MHz counter as DVP and lidar. Gravity = absolute pitch/roll anchor;
+  the IMU is the FINDINGS §6 independent cue — the sanctioned wall-crosser.
+
+== 5. INSTRUCTIONS — NEXT EXPERIMENTS (priority order) ========================
+
+P1. MULTI-VENUE GATE for the three adopt-candidates (rule 5): rerun the
+    realbench school arms on classroom ('spot', HONEST withheld-odometry
+    labels via runners/spot.py bundle) and school_run1 (stress set), and
+    the azel-oct6-D240 arm on fhw/fr101-style 2D slices if feasible. The
+    D240 jump (0.678->0.892 from the ladder alone) changes the MATCHER
+    budget recipe if it holds — that is shipped-adjacent, so the bar is
+    two more venues, no per-venue tuning. ALSO deliver the
+    ladder-vs-world-extent curve from your synthetic surface (lam_max in
+    {8, 22.6, 90.5} x world extents {8, 30, 80 m}) to explain WHY oct6
+    won your rooms and coarse16 wins buildings.
+
+P2. MAGNITUDE-STORE SHOOTOUT at equal bytes, registration-grade ops:
+    {4ph2mag, 16ph4mag per-element, 3b + per-RING scalar, 3b flat} x
+    {yaw fidelity, SO(3) decode, 6x6 derivative solve}. My side: flat-mag
+    costs +1 deg on the derivative solve, ring-scalar recovers 2/3 at ~4
+    scalars/vector. Your side: 4mag rescues yaw. One store recipe should
+    fall out. Harness to mirror: experiments/deploy6d.py bench_dtune
+    (qvec/qvec_rs) — port to JAX, sweep wide, then TRANSFER-GATE the winner
+    via realbench-style numpy on TUM.
+
+P3. FUSION AT THE WALL. alpha-bundle vs concat vs two-map max-rule on
+    school_run2 with your best geometry, real camera features
+    (data/spot_telluride/school_run2/cam_features.npz, harness
+    experiments/twomap.py bench/policy). The TIERS law predicts bundle
+    dilution at the aliasing wall; publish either way — if bundle survives
+    there, that's genuinely new.
+
+P4. SEMANTIC MAP -> REAL PIXELS. Two sub-steps:
+    (a) Retrain the vision descriptor on a SEGMENTED indoor set (§6) as a
+        PER-CELL head (c8/c16 granularity, GRAY(+depth) input — deploy is
+        Y8), binarized to k bits/cell.
+    (b) Run it through experiments/objmap2.py (two-stage + multi-view, TUM
+        fr3, foils fr1_desk) against the census/int baselines, AND compare
+        your ROLES-binding vs my bipolar-spatter at equal bits on the same
+        queries. They are near-duals (per-bit role phasors vs signed key
+        sums); measure cross-talk + capacity on real clutter, not synthetic
+        chairs. Beat: 0.805 AUC combined / 0.165 m.
+
+P5. LEARNED SALIENCY AT THE DEPLOY POINT. k=2000 (not 32) and a 3-ring
+    ingest raster; train on synthetic/classroom, TEST school_run2
+    (est-labels diagnostic, anti-oracle statement in the log); report
+    place-AUC vs uniform AND vs the banked 0.928 recipe at equal D. Include
+    the LUT/DSP estimate for the 826-param net at 20 Hz.
+
+P6. GATED d/dalpha FOR THE 12-PERM SEARCH. The deploy lidar search runs 12
+    perms (0.905) vs 24 (0.928 float). If your gated derivative correction
+    recovers >=half the gap at zero extra perms, it changes the search
+    default. Harness: experiments/lidarscale.py rot_sim + your
+    yaw_residuals pattern; gate on school + one more venue.
+
+P7. TEMPORAL/DELAY (mine; chain RESULT: chained 3x15 Hz = 1.02 deg /
+    27.5 mm BEATS single-shot 5 Hz 1.09/27.2 over identical windows —
+    the high-rate service is the odometry prior, validated). Remaining:
+    the interval-matched delayed-fusion bench; once the IMU lands, redo
+    with real omega as the fast stream and gravity as the pitch/roll
+    anchor. Watch docs/RESULTS.md.
+
+== 6. VISION PRETRAINING DATA — replace CIFAR-100 (user directive) ============
+
+Requirements: indoor domain, PER-PIXEL SEGMENTATION (the descriptor must be
+per-cell, not per-image), RGB-D preferred, grayscale-convertible, tractable
+for a 34k-param net.
+
+  PRIMARY:  NYU Depth v2 — 1449 densely-labeled indoor RGB-D frames,
+            standard 40-class mapping (chair/table/sofa/bed/desk/...),
+            Kinect (same sensor class as TUM fr3 -> domain-matched eval),
+            single ~2.8 GB file, standard 795/654 split. Right size, right
+            domain, right labels.
+  SCALE-UP: SUN RGB-D (10,335 RGB-D images, same label space, superset of
+            NYU) when 1449 frames overfit.
+  SYNTH BOOST (optional): Hypersim or Replica renders — perfect per-pixel
+            semantics + depth, free; fine as augmentation for a descriptor
+            prior.
+  LONG-TERM: ScanNet v2 (request-form) — indoor RGB-D VIDEO with 2D/3D
+            INSTANCE labels; also gives real object-level GT to SCORE the
+            semantic map (P4b could then report P/R against real instances).
+  NOT:      CIFAR (32x32 whole-image, no localization), ADE20K-general /
+            Cityscapes (domain), ImageNet.
+
+Training target: per-cell 40-class segmentation (or class-embedding) head on
+GRAY(+depth) input at QVGA scale; binarize the embedding to the k-bit
+descriptor; keep the BNN/XNOR budget. Evaluate: (i) seg mIoU sanity, (ii)
+the P4b objmap2 harness, (iii) cross-view descriptor stability on TUM
+(adjacent vs far frames) — stability is what killed census cross-view.
+
+== 7. PROTOCOL REMINDERS ======================================================
+
+- Anti-oracle: school labels are OWN-ESTIMATE (diagnostic, widened margins);
+  classroom/TUM have honest references. State label provenance per bench.
+- Multi-log acceptance: >=2 venues before a recipe changes (rule 5).
+- No edits to shipped modules or verdict-frozen experiments; extend via new
+  modules/benches (objmap2/realbench pattern).
+- Bank negatives in docs/RESULTS.md — the negatives above saved weeks.
+- Every recommendation carries bytes/anchor + cis-MAC (and LUT/DSP if RTL).
+- The loop-closure wall (FINDINGS §5-6) is settled; the IMU is the
+  sanctioned independent cue. Don't re-litigate with appearance-only means.

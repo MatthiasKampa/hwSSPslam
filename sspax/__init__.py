@@ -14,18 +14,27 @@ built as latitude rings with a half-azimuth stagger between layers, while each
 ring stays exactly yaw-permutable (azel3d's virtue). A common yaw is therefore
 *approximately* an index permutation — the deliberate middle ground.
 """
-from sspax.core import (
-    LAMS, N_DIR, encode, encode_batch, make_lattices, W_of,
-    dirs_az, dirs_fib, dirs_azel, dirs_rand,
-    perm_of, apply_perm, so3_perms, q_polar,
-)
+# The sphere layout + realbench are pure numpy and must import on
+# boxes WITHOUT jax (the ECP5 deploy box runs the real-data transfer
+# gate there); the jit/vmap core degrades gracefully.
+try:
+    from sspax.core import (
+        LAMS, N_DIR, encode, encode_batch, make_lattices, W_of,
+        dirs_az, dirs_fib, dirs_azel, dirs_rand,
+        perm_of, apply_perm, so3_perms, q_polar,
+    )
+    HAS_JAX = True
+except ImportError:                    # no jax on this box
+    HAS_JAX = False
 from sspax.sphere import (
     dirs_ringstag, ring_layout, nn_uniformity, yaw_perm,
 )
 
 __all__ = [
+    "HAS_JAX",
+    "dirs_ringstag", "ring_layout", "nn_uniformity", "yaw_perm",
+] + ([
     "LAMS", "N_DIR", "encode", "encode_batch", "make_lattices", "W_of",
     "dirs_az", "dirs_fib", "dirs_azel", "dirs_rand",
     "perm_of", "apply_perm", "so3_perms", "q_polar",
-    "dirs_ringstag", "ring_layout", "nn_uniformity", "yaw_perm",
-]
+] if HAS_JAX else [])

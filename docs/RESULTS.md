@@ -7953,3 +7953,51 @@ learned *appearance* descriptor is the independent cue that makes cam+lidar
 binding non-redundant — the reason to pretrain vision on real images. Open:
 vision pretraining accuracy (pending download); scaling capacity with D; an
 end-to-end joint (lidar+vision) SLAM+semantics objective.
+
+## 2026-07-15 — sspax TRANSFER GATE (sspax/realbench.py + scratch_attrib240): the sweep's ladder finding is REAL and venue-scaled, the ring geometry is niche; a D240 recipe jump falls out (azel-oct6 0.892)
+
+The incoming sspax sweep (ad6b368, synthetic JAX surface) put up: ring-
+stagger-const geometry + oct6 (0.25-8 m) ladder as cross-modality winner.
+Real-data gate (pure numpy; sspax/__init__ now degrades gracefully
+without jax so this runs on the deploy box):
+
+**school place (est-labels diagnostic, rot-searched 24):**
+  D240:  azel-house 0.678 (banked-class) | azel-OCT6 **0.892** |
+         ring-house 0.841 | ring-oct6 0.871
+  → BOTH levers are individually large (+0.21 ladder, +0.16 geometry)
+    but DO NOT COMPOSE — azel-oct6 alone is the best D240 point,
+    EXCEEDING the banked D960 (0.858) at 1/4 the budget. LADDER IS THE
+    LEVER, again — now at the matcher budget.
+  D1920: ring-coarse16 **0.940** (beats the banked ceiling 0.928; same
+         ladder → geometry effect isolated at +0.012) | ring-oct6 0.928
+  → the VENUE-SCALE ladder law holds on their geometry too (coarse16 >
+    oct6 on the building-scale run — their synthetic room capped at 8 m).
+**TUM vision landmarks:** ring-oct6 0.766 with rev 0.433 vs azel3d 0.794
+  / rev **0.791** — the ring geometry COLLAPSES reverse-view place;
+  ring-yaw search does not help real narrow FOV (0.755 ≤ raw; the omni
+  "camera rewards permutability" claim does not transfer). Real-motion
+  SO(3): ring med 7.3 / p90 **15.4** vs azel 6.9 / 23.8 — the tighter-
+  tail claim REPLICATES.
+**verify (small motion):** ring dirs × the tuned camera-range ladder =
+  **1.12° / 27.6 mm — new best** (W_vis3d 1.32/31.8); ring × oct6 1.40.
+
+VERDICTS: (1) adopt-candidate: azel-oct6 D240 for the matcher-budget
+place layer and ring-coarse16 D1920 for the anchor layer — BOTH pending
+the rule-5 multi-venue gate (classroom + a second school run; single
+venue, est labels so far). (2) vision place stays azel3d (reverse-view
+collapse disqualifies ring). (3) verify space adopt-candidate: ring ×
+VIS_LAMS. (4) The sweep's synthetic→real transfer record: ladder law
+GENERALIZED, geometry claims SPLIT (decode-tail yes, place niche,
+camera no).
+
+### deploy-rate chaining (deploy6d chain, fr3 @15 Hz stride-2 parse): chaining small steps BEATS the single-shot keyframe decode — the high-rate service is the odometry prior, not just latency
+
+60 keyframe windows of 3×15 Hz steps, stacked-GN two-space gyro per
+step: **chained 1.02° / 27.5 mm** vs single-shot-over-the-window 1.09°
+/ 27.2 mm. Composition error does not accumulate faster than the
+big-step linearization it replaces (and rotation improves). At the
+deploy rates (20 Hz cloud / 120 fps visual) the per-step motion is
+4-8× smaller still — trend favorable. The temporal design (interval-
+matched buffered fusion + delayed-state re-anchoring) stands on this:
+the 120 Hz chain is the master integrator. IMU delay-bench redo filed
+for when the ISM330DHCX lands.
