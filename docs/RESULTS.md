@@ -7464,3 +7464,154 @@ coherence reference, PCM) instead of a private gate. STATUS: banked as
 per-environment OPT-IN (fhw-class halls; v1.0 numbers) pending v2;
 graph-only (no map-content mutation), deterministic, and the natural
 consumer of the SDRAM frozen tier in the headroom plan.
+
+### frozen-bank v2/v2.1 — the admission surface fully mapped; fhw record 0.242 (deterministic)
+
+v2 (SHIPPED admission replicated verbatim on raw-raw matches: per-ring
+coherence vs coh_ref EMA, analytic Hessian, ridge probes,
+_coh_response soft inflation): belg FLIPS TO A WIN 2.042 (28 loops
+from 1), stata celld 0.193 holds, fhw 0.610, but fr101 REGRESSES
+2.132 — soft-inflating GOOD raw matches weakens true edges on the
+point-stable log. v2.1 STRICT (same gates, accept-or-reject, full
+weights): fr101 recovers 1.827, **fhw 0.242 = the best fhw in project
+history** (beats replay-R1 0.241 — and deterministic, graph-only, no
+band), stata 0.209 / belg 2.729 small losses (their inflated-weak
+edges were the helpful ones). VARIANT TABLE: v1.0 wins {fr101, fhw},
+v2 wins {belg, stata, fhw}, v2.1 wins {fr101, fhw!}; spot no-op
+always; fhw wins under EVERY variant. The axis is WEIGHT SEMANTICS:
+clean-match venues want full weights, ambiguous venues want the soft
+ramp — same per-environment surface as every admission thread.
+STATUS: per-environment OPT-IN (fhw-class: v2.1, 4.05x; aliased
+flagship: v2-celld) — suite-default filed pending a weight-semantics
+reconciliation (e.g. WELL-tier -> full weight, else soft — v2.2).
+Mechanism verdict unchanged: REAL, large where revisits exist,
+deterministic, and the SDRAM frozen tier's consumer.
+
+## 2026-07-14 — camera eve: the full OV5640 DVP front SIM-GATED + two flash-ready tops; frame-rate turned into a measured servo, not a recall claim (hw/ecp5 rtl/{sccb,ov5640_init,dvp_capture,top_ov5640_id,top_ov5640_snap}.v, host/{gen_ov5640_rom,hw_snap}.py)
+
+Sensor lands tomorrow; tonight every layer between the header pins and
+the fast9 core was written and machine-gated in sim, so the physical
+bring-up ladder (README) is wiring + four gates.
+
+- **SCCB master** (`rtl/sccb.v`, quarter-phase open-drain, write +
+  repeated-start read): `SCCB PASS: write ACKed, chip-ID reads 0x5640`
+  against a bit-level behavioral slave (`make sim-sccb`).
+- **Init ROM** (`host/gen_ov5640_rom.py`): parses the VENDORED
+  esp32-camera tables (host/vendor/, Apache-2.0 — silicon-proven
+  defaults) and emits 178 entries = defaults + **Y8 grayscale format**
+  (luma direct, one byte/pixel — halves DVP bandwidth vs YUYV; the
+  pipeline is luma-only) + QVGA 2×2-binned windowing computed by
+  replicating ov5640.c set_framesize/set_image_options (the esp32
+  driver computes these in code — they are in NO vendor table) + a rate
+  section (PLL profile re-derived for XCLK 25 MHz). Selftest asserts
+  symbol resolution, section boundaries, and the exact QVGA window
+  registers (0x3808..0x380F = 320/240/2060/984).
+- **ROM walker** (`rtl/ov5640_init.v`): `INIT-ROM PASS: 172 writes in
+  order, all ACKed` — the tb replays the GENERATED hex against the real
+  sccb master + slave model (`make sim-init`). (Tb lesson re-learned:
+  drive stimulus at negedge; a posedge-blocking `go` pulse raced the
+  DUT's always block and was invisible.)
+- **DVP capture** (`rtl/dvp_capture.v`): all-sysclk 2FF-oversampled
+  PCLK-edge capture (no CDC at ≤12.5 MHz PCLK = 4× oversample),
+  VSYNC-rise→fall clean-frame arming, Y8/YUYV byte select with
+  FSM-local line parity, snapshot to EBR, free-running
+  frames/lines/bytes-line counters. `DVP PASS: Y8 + YUYV snapshots
+  bit-exact, counters OK` — per-frame-seeded LFSR patterns prove WHICH
+  frame landed (armed mid-frame-1 must capture frame 2), both formats
+  (`make sim-dvp`). Tb bug worth remembering: verification is slower
+  than a frame, so verify-while-streaming slipped the vsync sync by one
+  frame — the pass decodes showed the DUT had correctly captured frame
+  5's luma; restructured to phase-sequential fork/join.
+- **Tops built** (combined LPF `build/cam.lpf`): `top_ov5640_id.bit`
+  (chip-ID hello, 186 MHz) and `top_ov5640_snap.bit` (power seq → auto
+  init ROM → armed snapshot → UART dump; 82.4 MHz, 41/56 EBR for the
+  76.8 KB frame buffer, 1.1k LUT, 0 DSP). The snap top carries a
+  UART→SCCB register passthrough ('W'/'r') and a 13-byte measured
+  report ('R': frame count, lines/frame, bytes/line, init status).
+- **Frame-rate policy**: the OV5640 PLL/divider chain is only
+  half-documented and the esp32 driver's exact set_pll encoding is not
+  reproducible from the vendored headers alone — so the ROM's rate
+  section is labeled PREDICTED (~25 fps, PCLK ~12.5 MHz @ XCLK 25 MHz)
+  and 60/120 fps is reached by stepping 0x3036 (PLL mult) / 0x380E-F
+  (VTS) LIVE over the passthrough against the report's measured frame
+  counter (`host/hw_snap.py` prints the fps estimate). Recall-risk off
+  the critical path; the gate is silicon-measured numbers.
+- **Host gate** (`host/hw_snap.py`): init-nerr==0 → chip-ID 0x5640 →
+  geometry 240×320 → fps → snapshot std-floor (dead-bus detector) +
+  golden fast9 servo smoke → `SNAP GATE PASS`. Writes build/snap.pgm
+  (file only, per protocol).
+
+Deferred, with reasons: fast9 EBR-ify (line buffers as LUTRAM cost
+~2-3k LUT at W=320 — the step-3 streaming top has 23k free, so
+EBR-ify is an optimization, not a blocker); async-FIFO/PLL capture
+domain (only needed at the 120 fps rung). Status table + bring-up
+ladder updated in hw/ecp5/README.md.
+
+## 2026-07-15 — DEPLOY VERIFIED, sim + silicon, no camera needed (hw/ecp5 rtl/tb_top_snap.v; board re-checked after a brief USB disconnect)
+
+User: "cam is not attached yet — just test in simulation and also verify
+the deploy." Two layers, both machine-gated:
+
+- **Full-system sim** (`rtl/tb_top_snap.v`, uart BFM host + the tb_sccb
+  bit-level slave + a synthetic DVP source; top parameterized W/H/boot/
+  SCCB-div/ms-cycles so the whole run is ~21 ms sim time):
+  `TOP-SNAP PASS: init + chip-ID + write + snapshot + report
+  end-to-end` — boot sequencer → auto init ROM (688 slave ACKs = exactly
+  172 writes × 4 bytes through the real SCCB engine) → 'r' chip-ID
+  passthrough → 'W' register write → 'S' armed snapshot bit-exact
+  against exactly ONE per-frame-seeded LFSR source frame → 'R' report
+  (n_bytes/lines/bytes-per-line all correct). Rebuilt after
+  parameterization: 83.3 MHz, same EBR/LUT footprint.
+  (Two tb lessons: `matches` is a SystemVerilog-2012 reserved word under
+  iverilog -g2012; mixed initialized/plain `integer` declaration lists
+  don't parse.)
+- **Silicon, no camera**: fast9 gate reflashed after the USB blip —
+  `HW PASS: 3364 centres bit-exact on silicon (t=12)` (board healthy,
+  full build→flash→UART→compute path re-verified). Then
+  `top_ov5640_snap.bit` flashed and probed: **NO-CAM DEPLOY PROBE
+  PASS** — init_done with nerr=172 (every ROM write walked the real
+  pins and NACKed against the pulled-up bus: the exact no-slave
+  signature, and the count proves the entire ROM executed on silicon),
+  chip-ID read 0xFF/err=1 (floating bus), frame counter 0 over 1 s (no
+  PCLK). Tomorrow's bring-up is now wiring + the ladder gates only; the
+  board is left running top_ov5640_snap.
+
+## 2026-07-15 — vision snapshot-library quantization law (S-corner; experiments/visquant.py): intphase is 2b-FREE, gridint wants 3b where views overlap — the ≤0.5 KB/anchor deploy claim is now MEASURED at 300 B
+
+school_run2 (est labels, diagnostic margins; lidar float rot 0.720) and
+spot classroom (withheld odometry; lidar 0.705), W_vis_fib D240,
+phase-only quant (house semantics), max-rule fusion vs the float lidar
+channel:
+
+- **intphase (precision/verify channel): 2b costs NOTHING anywhere** —
+  classroom vis 0.999→0.996, adj-rep 0.997→0.994; school vis/fused
+  actually IMPROVE (0.448→0.498 / 0.748→0.775). 120 B/anchor.
+- **gridint (cross-view place channel): 3b is the knee on view-overlap
+  venues** — classroom vis 0.949→0.935@3b (−0.014) but 0.889@2b
+  (−0.060), fused 0.862→0.852@3b vs 0.792@2b. On the aliased school
+  every quant level is neutral-to-positive (0.622→0.669 vis at 4b/3b/2b
+  — quantization as regularization; fused −0.016). 180 B/anchor @3b.
+- Adjacent-frame repeatability (the ego-motion proxy) holds 0.81–0.99
+  at every level on both venues — the 120 fps service is
+  quantization-insensitive.
+
+RECIPE for deploy v1.2: gridint@3b (180 B) + intphase@2b (120 B) =
+**300 B/anchor** for the two vision channels (vs the 480 B float
+single-channel budget line and the ≤0.5 KB claim). [CORRECTION, same
+session: this entry first cited the lidar 2b law as "0.925 vs 0.928" —
+wrong recall; the banked lidar numbers at D1920-coarse are float 0.928,
+3b 0.862 (the knee), 2b 0.834 — the VISION channels quantize far more
+gracefully than the lidar channel.] Per-ring-scale quantization (finer
+phase on coarse rings) remains filed.
+
+### joint lidar deploy point (scratch_deploypoint.py): quant x rot-search costs compose ADDITIVELY; 3b x 12-perm ≡ 2b x 24-perm
+
+D1920-coarse on school_run2 (est labels; banked singles reproduced
+exactly: float/24 0.928, 3b/24 0.862): float/12 0.905, 3b/12 0.835,
+2b/24 0.834, 2b/12 0.805. Deltas stack linearly (−0.066 for 3b, −0.094
+for 2b, −0.023..−0.029 for 12-perm). ACTIONABLE EQUIVALENCE: **3b×12
+(0.835, 720 B/anchor, half the rotation-search compute) ≡ 2b×24 (0.834,
+480 B/anchor, full compute)** — store-vs-T-corner trade at equal
+fidelity; pick per platform pressure. Deploy v1.2 default: 3b store ×
+12-perm search (best fidelity-per-compute; the 24-perm search can be
+enabled per-query for verification-grade matches).

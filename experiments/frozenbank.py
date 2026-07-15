@@ -47,9 +47,10 @@ INFL_POW = 2.0                   # weight inflation by 1/coh^p (belg fix)
 
 
 class FrozenBankSLAM(F.BandSLAM):
-    def __init__(self, policy="cell", **kw):
+    def __init__(self, policy="cell", strict_frozen=True, **kw):
         super().__init__(**kw)
         self.policy = policy
+        self.strict_frozen = strict_frozen
         self.frozen = []             # dict(pts, w, owner, rel, k, vec)
         self.fcells = set()
         self.n_frozen = self.n_fatt = self.n_fclose = 0
@@ -78,16 +79,48 @@ class FrozenBankSLAM(F.BandSLAM):
         if (np.hypot(cand[0] - est[0], cand[1] - est[1]) > GATE_T
                 or abs(S.wrap(cand[2] - est[2])) > GATE_R):
             return
-        # v1.5 coherence gate + weight inflation (the naive fixed-weight
-        # accept distorted belg 2.64->4.9: aliased raw matches at full
-        # strength; the shipped admission uses exactly this pattern)
-        PW = pts @ S._rot(cand[2]).T + cand[:2]
-        sv = np.exp(1j * (PW @ L.W[L.MAIN].T)).T @ w
-        coh = float(np.abs(np.vdot(B, sv))
-                    / max(np.linalg.norm(B) * np.linalg.norm(sv), 1e-12))
-        if coh < COH_FLOOR:
+        # v2: the SHIPPED admission, replicated verbatim on the raw-raw
+        # match (v1.0 fixed-weight crashed belg; v1.5's 2-constant gate
+        # fixed belg but lost fr101/stata — per-regime, as always). Per-
+        # ring coherence + analytic translation-Hessian + ridge probes ->
+        # self._coh_response (all session constants + the coh_ref EMA).
+        if self.coh_ref is None:
             return
-        infl = (1.0 / max(coh, 1e-3)) ** INFL_POW
+        PWf = f["pts"] @ S._rot(pf[2]).T + pf[:2]
+        Bfull = np.exp(1j * (PWf @ L.W.T)).T @ f["w"]
+        sv = L.ENC.shift(cand[:2]) * L.encode(pts @ S._rot(cand[2]).T, w)
+        c = (np.conj(Bfull) * sv).reshape(L.N_RING, L.N_ANG)
+        Br = Bfull.reshape(L.N_RING, L.N_ANG)
+        svr = sv.reshape(L.N_RING, L.N_ANG)
+        coh = c.sum(1).real / (np.linalg.norm(Br, axis=1)
+                               * np.linalg.norm(svr, axis=1) + 1e-12)
+        cM = c[:4].ravel()
+        nrmM = (np.linalg.norm(Br[:4].ravel())
+                * np.linalg.norm(svr[:4].ravel()) + 1e-12)
+        K = (L.W[L.MAIN] * (cM.real / nrmM)[:, None]).T @ L.W[L.MAIN]
+        evals, evecs = np.linalg.eigh(K)
+        l_weak, l_strong = float(evals[0]), float(evals[1])
+        ts = np.arange(-1.2, 1.21, 0.06)
+        s0 = float(cM.real.sum())
+        far = np.abs(ts) >= 0.35
+        ridge = [0.0, 0.0]
+        for j, u in enumerate((evecs[:, 0], evecs[:, 1])):
+            proj = L.W[L.MAIN] @ u
+            sc = (np.exp(1j * ts[:, None] * proj[None, :]) @ cM).real
+            ridge[j] = float(sc[far].max() / max(s0, 1e-12))
+        infl = self._coh_response(coh, l_weak, l_strong, ridge[0],
+                                  ridge[1], est, self.k)
+        if infl < 0:
+            return
+        # v2.1 (STRICT mode): accept-or-reject — an inflatable (weak)
+        # match is rejected outright; accepted ones enter at full weight.
+        # v2's soft inflation regressed fr101 (good raw matches weakened);
+        # v1.0 full-weight crashed belg (junk at full strength). Strict =
+        # the shipped gates decide membership, weights stay strong.
+        if self.strict_frozen and infl > 1.0:
+            return
+        if self.strict_frozen:
+            infl = 1.0
         aid_c, rel_c = self.kf_ref[-1]
         if aid_c == f["owner"] or aid_c not in self.segvec:
             return
@@ -96,8 +129,12 @@ class FrozenBankSLAM(F.BandSLAM):
         key = (f["owner"], aid_c)
         if key in getattr(self, "banned", set()):
             return
-        edge = (f["owner"], aid_c, Z, 1 / (SIG_T * infl),
-                1 / (SIG_R * infl), "loop")
+        lever = np.hypot(est[0] - self.anchors[f["owner"]][0],
+                         est[1] - self.anchors[f["owner"]][1])
+        sig_t = np.sqrt(0.08 ** 2 + (0.05 * lever) ** 2)
+        sig_r = np.deg2rad(2.0)
+        edge = (f["owner"], aid_c, Z, 1 / (sig_t * infl),
+                1 / (sig_r * infl), "loop")
         if key in self.edge_seen:
             self.edges[self.edge_seen[key]] = edge
         else:

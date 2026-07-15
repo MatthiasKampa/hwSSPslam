@@ -106,3 +106,38 @@ cross-view channel.
 | two-map **max-rule** | school **0.798** > lidar 0.720 | **RECIPE at the wall** |
 | per-anchor snapshot library + max-sim | architecture (FINDINGS A10) | **RECIPE (vision map lifecycle)** |
 | confidence-adaptive α | — | FILED |
+
+## E. Object/appearance world-map encodings (experiments/objmap.py, 2026-07-15)
+
+The "find objects in the map from cam data" family: camera cells lifted
+to 3D world points, appearance bound as a complex amplitude, bundled
+into bounded per-segment vectors; query = template patch → matched
+filter → translation-correlation decode (O(D)/candidate, the map's own
+algebra).
+
+**Appearance-binding law (measured in objmap selftests — applies to ANY
+decode-against-the-map use of appearance, unlike the place-similarity
+use in §C where harmonics are fine):**
+
+| binding | cross-code kernel | verdict |
+|---|---|---|
+| 3-harmonic cyclic (the §C place scheme) | ~1/√3-coherent | ✗ bump forest, clusters AT the true answer (difference-density peaks at 0) |
+| uniform per-bit phase keys | 0 at ≥1 flip | ✗ no grace — census flips bits across views routinely |
+| concentrated per-bit keys (±2π/3) | sinc-graceful | ✗ forest returns via near-Hamming code pairs |
+| per-(bit,value) random phasors | matching_bits/8 ≈ **0.5 for random pairs** | ✗ half-coherent clutter (measured, subtle) |
+| **bipolar spatter** A[c]=Σₖ±e^{iKₖ}/√8 | (8−2·Hamming)/8, zero-mean random pairs | ✓ linear grace + pseudo-random cross-talk; kernel law verified 0.85 (theory 0.75 + clutter) |
+
+Scalar codes (orientation, intensity): FPE with random per-row
+exponents — graceful and forest-free by construction.
+
+**Decode/search laws:** scale-split decode (coarse rings for the wide
+search — fine-ring lobes fall between coarse grid samples), iterated
+re-centred refine (single-box refine clips edge peaks); ladder must be
+SMEAR-MATCHED to the data (real depth+cell world-point noise ~5-10 cm
+decoheres sub-0.5 m rings — they only add map noise; synthetic clean
+data wants them). Detection margin against room-wide extreme-value
+noise is thin for single 25-cell templates (foil max ≈ 0.7-0.9× true
+even with exact codes at 400 items) → architectural direction:
+segment-scoped two-stage retrieval (which-segment first, metric decode
+inside), bigger/multi-view templates. Real-data verdicts: RESULTS
+2026-07-15.
