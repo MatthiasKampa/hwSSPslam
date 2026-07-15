@@ -75,8 +75,31 @@ feature's write is per-ring modulated,
 
     contribution_i = Σ_r m_r(latent_i) · w_i · exp(i W_r · p_i)
 
-with `m_r` a small learned head (or a per-bit → per-ring LUT). This
-subsumes, as special cases, everything the project hand-tuned:
+with `m_r` a small learned head (or a per-bit → per-ring LUT).
+
+**Head form: THERMOMETER output, i.e. learned BLANKING** (user
+2026-07-15). `m_r` is not R free values but a monotone thermometer code
+over the ladder: the net emits one scalar per feature — the finest
+USEFUL scale — and rings finer than the cutoff are BLANKED (optionally a
+second scalar for a coarse cutoff → a scale BAND). Why this form:
+  - it matches the physics: the banked sensor-coherence-length law
+    (λ_min ≈ 2πσ_r — sub-coherence rings are dead bytes) says every
+    feature HAS a finest useful scale; the net learns it per feature
+    instead of one global hand pick;
+  - the house already hand-built the static version twice: the
+    smear-matched ladder (objmap) and the span15g thermometer
+    MIN_SCALES anti-alias fade (webvis) — this replaces both with a
+    learned, feature-conditioned cutoff;
+  - 1-2 scalars/feature regularizes and stays interpretable (report the
+    cutoff distributions per class);
+  - on-fabric it is literally blanking: a comparator per ring
+    (ring_idx ≥ cutoff → accumulate), zero multipliers — cheaper even
+    than the LUT form.
+Training: straight-through estimator on the thermometer step (or a
+sigmoid ramp annealed to hard blanking); quantization-aware from the
+start.
+
+This subsumes, as special cases, everything the project hand-tuned:
   - m_r constant            = the fixed ladder recipes (oct6, coarse16,
                               half-oct, smear-matched VIS_LAMS — all of
                               lidarscale TUNE was hand-searching this);
