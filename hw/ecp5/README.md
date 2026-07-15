@@ -103,15 +103,22 @@ cis-ROM addressable.
 
 ## Deploy variant v1 (2026-07-14 coherence; every number banked in RESULTS)
 
-**v1.4 adopt-candidates from the sspax transfer gate (2026-07-15,
-pending the rule-5 multi-venue gate — see RESULTS "sspax TRANSFER
-GATE"):** matcher-budget place = azel-OCT6 D240 (school 0.892 — the
-wide-octave ladder alone, exceeds banked D960 at 1/4 budget); anchor
-layer = ring-coarse16 D1920 (0.940 > banked 0.928); verify space =
-ring-dirs × VIS_LAMS (1.12°/27.6 mm). Vision place stays azel3d (ring
-collapses reverse-view). Ego-motion validated at rate: chained 3×15 Hz
-1.02° beats single-shot 5 Hz 1.09° — the high-rate service is the
-odometry prior.
+**v1.4 adopted (2026-07-15, rule-5 multi-venue gate PASSED — RESULTS
+"MULTI-VENUE rule-5 gate"; run: `python3 -m sspax.realbench mv`):**
+matcher-budget place = **azel-OCT6 D240** (honest classroom 0.947 vs
+house 0.817; school runs +0.15/+0.19 diagnostic — every venue, both
+label kinds); anchor layer = **ring-coarse16 D1920** (0.976 honest /
+0.940 / 0.816 — best-or-tied everywhere). Ring geometry at D240 NOT
+adopted (venue-dependent; the lever is the LADDER — 8 az × 6 octaves
+beats 60 dirs × house ladder at equal D). Verify space = ring-dirs ×
+VIS_LAMS (1.12°/27.6 mm; TUM-only so far). Vision place stays azel3d
+(ring collapses reverse-view). Ego-motion validated at rate: chained
+3×15 Hz 1.02° beats single-shot 5 Hz 1.09° — the high-rate service is
+the odometry prior. **Delay law (experiments/delayfuse.py): fusion of
+the slow cloud tier into the fast chain MUST be interval-matched
+(ring buffer one keyframe interval deep + delayed-state re-anchoring
+= latency-invariant 3.81°); timestamp-ignorant mixing loses the whole
+fusion gain by d = one keyframe interval (4.25° = no-fusion).**
 
 **Sensors → services**
 - Lidar 1024×64 @ 20 Hz: ingest **3 rings (16/33/50), ~2k pts** (≈1/40
@@ -240,19 +247,35 @@ headroom goes to (in current expected-value order):
 | VIN 3V3 / GND | 17 / 25,30,34,39 | (camera takes 3V3 pin 1) |
 
 No pin collisions with the camera map; `make build/full.lpf` composes
-board + camera + IMU constraints (safe for any top). Bring-up rung 1 is
-flash-ready pre-arrival: `rtl/spi_reg.v` (mode-3 register master,
-3.125 MHz SCLK, SPI PASS vs a bit-level ST-style slave) +
-`rtl/top_ism330_id.v` — send any UART byte, expect **0x6B** (WHO_AM_I)
-+ INT status. Ladder after silicon hello: (2) CTRL config + polled
-gyro/accel reads → offline comparison against the visual/cloud gyros
-on the same motion; (3) FIFO streaming with FPGA timestamps on the
-SAME 50 MHz counter as DVP/lidar (the single-clock-owner rule from the
-delay design — the IMU is the highest-rate stream and the temporal
-anchor); (4) fusion experiments: gravity = absolute pitch/roll anchor
-for the 6-DoF layer, gyro = drift baseline vs our 1.08° fused
-visual+cloud service, and the IMU/wheel-slip residual class from
-FINDINGS §6 as the wall-crossing independent cue.
+board + camera + IMU constraints (safe for any top). Rungs 1 AND 3 are
+flash-ready pre-arrival (camera-eve pattern, 2026-07-15):
+- rung 1 `rtl/top_ism330_id.v` — send any UART byte, expect **0x6B**
+  (WHO_AM_I) + INT status (`rtl/spi_reg.v` mode-3 master, 3.125 MHz
+  SCLK, SPI PASS vs a bit-level ST-style slave).
+- rung 3 `rtl/top_ism330_stream.v` — boot-configures the part (417 Hz
+  XL+G, BDU+IF_INC, gyro DRDY→INT1) and streams one 21-byte frame per
+  INT1 rise, stamped with the free-running **shared 50 MHz counter**
+  (the cross-sensor time base from the delay design; ts unit 20 ns):
+  `AA 55 | ts48 LE | OUT 0x22..0x2D (12 B) | XOR`. Cmds: 'G'/'g'
+  stream on/off (off at boot), 'I' re-init, 'R' hello, 'W'/'r' raw
+  register passthrough (rate/FS tuning without rebuild). No-slave-safe.
+  Sim gate `make sim-imu-stream` = **IMU-STREAM PASS** (cfg 4/4
+  captured, hello, 3 frames sync+xor+ts-spacing+data exact, 'g'
+  silent, passthrough); build 170 MHz vs 50 constraint:
+  `make TOP=top_ism330_stream RTL="rtl/spi_reg.v ../ice40/rtl/uart.v
+  rtl/top_ism330_stream.v" LPF=build/full.lpf build prog`.
+  Silicon gate: `python3 hw/ecp5/host/hw_imu.py` (hello → config
+  readback → rate/checksum/monotone-ts gates → gravity 0.9–1.1 g +
+  gyro-bias <3 dps at rest → writes `scratch/imu_log.npz`) →
+  **IMU STREAM GATE PASS**.
+Remaining ladder after silicon hello: (2) polled-read comparison
+against the visual/cloud gyros on the same motion (the stream log
+covers this — rung 3 subsumes rung 2 unless SPI itself misbehaves);
+(4) fusion experiments: gravity = absolute pitch/roll anchor for the
+6-DoF layer, gyro = drift baseline vs our 1.08° fused visual+cloud
+service, the delayfuse third tier (IMU = master integrator), and the
+IMU/wheel-slip residual class from FINDINGS §6 as the wall-crossing
+independent cue.
 
 Bring-up ladder (each step machine-gated like the fast9 silicon gate):
 1. SCCB chip-ID read → expect 0x5640 (the hello-world).

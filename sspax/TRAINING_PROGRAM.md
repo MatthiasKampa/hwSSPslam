@@ -21,9 +21,11 @@ is the SLAM objective itself:
   ingest raster in; existing `learn_lidar.py` is the seed.
 - vision: CellWeightNet — Y8 QVGA in, per-c16-cell weight out, replacing
   the intensity/gradmag heuristics in gridint/gyro encodes.
-- gates: school+classroom place vs the banked/attributed recipes at equal
-  D (azel-oct6 D240 0.892, ring-coarse16 D1920 0.940); gyro vs 1.13°;
-  verify vs 1.12°/27.6 mm. Two venues minimum (rule 5).
+- gates: school+classroom place vs the ADOPTED v1.4 recipes at equal D
+  (multi-venue-gated 2026-07-15: azel-oct6 D240 = 0.947 classroom
+  honest / 0.892 school est; ring-coarse16 D1920 = 0.976 / 0.940 —
+  `python3 -m sspax.realbench mv` reproduces); gyro vs 1.13°; verify vs
+  1.12°/27.6 mm. Two venues minimum (rule 5).
 
 ## Regime B — WITHOUT the VSA: label latents (semantic descriptors)
 

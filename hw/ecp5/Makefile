@@ -74,6 +74,13 @@ sim-spi:
 	  rtl/tb_spi.v
 	cd build && $(TOOLS)/vvp tb_spi.vvp
 
+sim-imu-stream:
+	@mkdir -p build
+	$(TOOLS)/iverilog -g2012 -o build/tb_ism330_stream.vvp \
+	  rtl/spi_reg.v ../ice40/rtl/uart.v rtl/top_ism330_stream.v \
+	  rtl/tb_ism330_stream.v
+	cd build && $(TOOLS)/vvp tb_ism330_stream.vvp
+
 prog: $(B).bit
 	$(TOOLS)/openFPGALoader -b icepi-zero $<
 

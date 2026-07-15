@@ -20,8 +20,14 @@ harnesses, against the banked recipes:
            lattice-agnostic nearest-direction permutation grid).
   verify   the deploy small-motion 6x6 verify with ringstag as the
            VISION space vs the tuned camera-range W_vis3d.
+  mv       the multi-venue rule-5 gate for the adopt-candidates:
+           classroom 'spot' (HONEST withheld kinematic odometry) +
+           school_run1 (est DIAGNOSTIC; distinct multi-room traverse) +
+           school_run2 (est DIAGNOSTIC — its honest gated-LIO window has
+           NO >=40-gap revisits within 1.0 m; place is unscoreable on
+           honest labels there, banked 2026-07-15).
 
-Usage: python3 -m sspax.realbench school|tum|verify
+Usage: python3 -m sspax.realbench school|tum|verify|mv
 """
 import sys
 
@@ -80,6 +86,54 @@ def bench_school(run="school_run2"):
         rep = L3._auc(S[adj, adj + 1], S[di, dj])
         print(f"  {name} (D{len(W):4d}): AUC {auc:.3f}  adj {rep:.3f}",
               flush=True)
+
+
+def bench_mv():
+    """Multi-venue gate (2026-07-15 verdict: azel-oct6 D240 and
+    ring-coarse16 D1920 PASS — wide-octave ladder lever holds on honest
+    labels; ring-vs-azel geometry at D240 is venue-dependent, not
+    adopted)."""
+    EL5 = [-40, -20, 0, 20, 40]
+    arms = [
+        ("azel-house    D240 ", L3.make_lattices()["azel3d"], None),
+        ("azel-oct6     D240 ", LS.azel_W(8, EL5, OCT6), None),
+        ("ring-oct6     D240 ", None, (40, OCT6)),
+        ("azel-coarse16 D1920", LS.azel_W(24, EL5, LS.LAMC16), None),
+        ("ring-coarse16 D1920", None, (120, LS.LAMC16)),
+        ("ring-oct6     D1920", None, (320, OCT6)),
+    ]
+    for run, labels in (("spot", "ref"), ("school_run2", "ref"),
+                        ("school_run1", "est")):
+        pick, kts, pose, kind = L3.sample_kf(run, 110, need_ref=True,
+                                             labels=labels)
+        if pose is None:
+            print(f"{run}: no {labels} labels — skipped", flush=True)
+            continue
+        full, _ = L3.load_clouds(run, kts)
+        keep = [i for i, c in enumerate(full) if c is not None
+                and len(c) > 300]
+        pr = dict(same_r=1.0, far_lo=4.0) if labels == "est" else {}
+        (si, sj), (di, dj) = L3._pairs(pose[keep], **pr)
+        adj = np.arange(len(keep) - 1)
+        print(f"\nMV gate {run} (labels={kind}, {len(keep)} frames, "
+              f"same/diff {len(si)}/{len(di)}):", flush=True)
+        if len(si) < 8 or len(di) < 8:
+            print("  DEGENERATE pair counts — venue not scoreable",
+                  flush=True)
+            continue
+        for name, W, ringspec in arms:
+            if ringspec is not None:
+                nd, lams = ringspec
+                W, _ = W_ring(nd, lams)
+                V = np.stack([L3.encode(W, full[i]) for i in keep])
+                S = ring_rotsim(V, nd, len(W) // nd)
+            else:
+                V = np.stack([L3.encode(W, full[i]) for i in keep])
+                S = LS.rot_sim(V, W, 24)
+            print(f"  {name} (D{len(W):4d}): "
+                  f"AUC {L3._auc(S[si, sj], S[di, dj]):.3f}  "
+                  f"adj {L3._auc(S[adj, adj + 1], S[di, dj]):.3f}",
+                  flush=True)
 
 
 def bench_tum(seq=V6.SEQ):
@@ -183,4 +237,4 @@ def bench_verify(seq=V6.SEQ):
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "school"
     dict(school=bench_school, tum=bench_tum,
-         verify=bench_verify)[cmd]()
+         verify=bench_verify, mv=bench_mv)[cmd]()

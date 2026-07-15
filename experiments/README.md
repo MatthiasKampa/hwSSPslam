@@ -400,3 +400,16 @@ vs 0.83 lidar-alone** (classroom, withheld-odometry labels). Run:
 `python3 -m experiments.lattice3d [selftest|disp|rot|place|cam] [run]`.
 Camera features via `runners/spot_cam.py` (FAST-9 servoed to lidar point
 parity — golden model `hw/ecp5/host/golden_cam.py`, RTL `hw/ecp5/rtl/`).
+
+**Temporal fusion under delay (2026-07-15)** — `experiments/delayfuse.py`:
+the two-tier timing design measured (fast vision chain @15 Hz proxy, slow
+cloud keyframe estimates arriving d steps late; identical omega-average
+fusion, only window bookkeeping differs). Verdict: **interval-matched
+buffered fusion (ring buffer + delayed-state re-anchoring) is
+latency-INVARIANT (3.81° at every d≥1); timestamp-ignorant latest-sample
+mixing decays monotonically and equals no-fusion at d = one keyframe
+interval (4.25° vs fast-only 4.21°)** — the buffer is required design.
+Run: `python3 -m experiments.delayfuse [bench|selftest]`. IMU third tier
+filed for ISM330DHCX arrival. Multi-venue lattice gate lives in
+`sspax/realbench.py mv` (adopted: azel-oct6 D240, ring-coarse16 D1920 —
+see RESULTS).

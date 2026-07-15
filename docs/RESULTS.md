@@ -8122,3 +8122,88 @@ The sspax ring lattice **reproduces the deploy transfer numbers on real data**
 synthetically: **ring-coarse16 (0.939) > ring-oct6 (0.927)** at D1920 — coarse
 rings win at building scale (+0.012), the venue-scale law. The learned front-end
 program (P5) can now be tested on this venue directly.
+## 2026-07-15 — MULTI-VENUE rule-5 gate (sspax.realbench mv): azel-oct6 D240 + ring-coarse16 D1920 PASS; the ladder lever holds on HONEST labels; ring-at-D240 is venue-dependent (not adopted)
+
+The transfer-gate winners were single-venue (school_run2) with
+OWN-ESTIMATE diagnostic labels. Gate across three venues, six arms
+(house azel D240 baseline, the candidates, + controls; rot-searched
+24 both families; anti-oracle: labels score pairs only):
+
+**classroom 'spot' (HONEST withheld kinematic odometry, 179/4144
+same/diff pairs):**
+  D240:  azel-house 0.817 | azel-OCT6 **0.947** | ring-oct6 0.904
+  D1920: azel-coarse16 0.904 | ring-coarse16 **0.976** | ring-oct6 0.976
+**school_run1 (est DIAGNOSTIC — LIO diverged, ok=0/2075, so no honest
+window; distinct multi-room traverse; THIN 21 same-pairs — direction
+only):**
+  D240:  azel-house 0.593 | azel-oct6 0.745 | ring-oct6 0.822
+  D1920: azel-coarse16 0.787 | ring-coarse16 0.816 | ring-oct6 0.815
+**school_run2 (prior transfer numbers, est DIAGNOSTIC):** house 0.700 /
+  azel-oct6 0.892 / ring-coarse16 0.940 / azel-coarse16 0.928.
+
+VENUE FACT banked: school_run2's honest gated-LIO window (342/836 kf)
+contains NO >=40-gap revisits within 1.0 m (first same-pairs at 1.5 m:
+21) — honest-label place separability is structurally unmeasurable
+there; classroom carries the honest verdict.
+
+VERDICTS: (1) **azel-oct6 D240 ADOPTED for the matcher-budget 3D place
+layer** (+0.130 honest, +0.152/+0.192 diagnostic over house — every
+venue, both label kinds). Sharpest form of the ladder law: 8 azimuths
+x 6-octave ladder beats 60 directions x house ladder at equal D —
+azimuth-snap coarseness is cheap, scale coverage is not. (2)
+**ring-coarse16 D1920 ADOPTED for the anchor layer** (0.976 honest /
+0.940 / 0.816 — best-or-tied everywhere; ring-oct6 ties on classroom =
+ladder saturates at high D). (3) ring geometry at D240 NOT adopted
+(0.904 vs azel 0.947 honest classroom; wins run1; splits run2 — venue-
+dependent, and vision already disqualified ring for place). Runnable:
+`python3 -m sspax.realbench mv` (scratch_mvgate.py = the run artifact).
+
+## 2026-07-15 — DELAY bench (experiments/delayfuse.py): interval-matched buffered fusion is latency-INVARIANT; timestamp-ignorant mixing loses the whole slow-tier gain by one keyframe interval of delay
+
+The temporal-design question measured (fr3 @15 Hz stride-2 proxy, 40
+gated horizons of 12 steps = 0.8 s; fast tier = vision-only per-step
+GN chain, slow tier = cloud-only GN per 3-step keyframe interval
+arriving d fast-steps late; identical omega-average fusion math both
+policies — window bookkeeping is the ONLY difference; selftest gates
+d=0 equality + algebra identities + synthetic-reversal ordering):
+
+  fast-only         rot med 4.21 p90 6.87 | transl med 125.6 mm
+  d=0 (both)        3.76 / 6.70 | 111.7 mm      (fusion gain baseline)
+  naive   d=1/2/3   3.88 / 4.09 / **4.25** (== no fusion at 200 ms)
+  matched d=1/2/3   **3.81 / 6.53 | 115.2 mm — constant in d**
+
+The buffered policy re-anchors each measurement against exactly its
+own interval, so arrival time cannot matter (only the last window's
+measurement missing the horizon differs from d=0: 3.76→3.81). The
+naive policy fuses against the newest window; its error grows
+monotonically with window mismatch and the fusion value is fully
+destroyed at d = one keyframe interval. Deploy reading: at 5 Hz
+keyframes the expected 50-100 ms cloud latency = d~0.25-0.5 intervals
+— already in the naive-degradation regime; the ring buffer (one
+keyframe interval of per-step increments, delayed-state re-anchoring)
+is REQUIRED design, not nicety. Honest tail note: naive shows slightly
+better p90 transl (171-186 vs 182 mm) — noise-level, all medians and
+rot tails favor matched. IMU tier redo filed for when the ISM330DHCX
+lands (same harness, 3-tier).
+
+## 2026-07-15 — ISM330DHCX rung-3 streaming top pre-built and sim-gated (IMU day = wiring only, camera-eve pattern)
+
+`hw/ecp5/rtl/top_ism330_stream.v` + `tb_ism330_stream.v` (bit-level
+ST-style slave with register file + DRDY generator + UART BFMs):
+boot config {CTRL3_C 0x44, CTRL1_XL 0x60, CTRL2_G 0x60, INT1_CTRL
+0x02} then one 21-byte frame per INT1 rise — `AA 55 | ts48 (SHARED
+free-running 50 MHz counter, 20 ns units — the cross-sensor time base
+the delay design needs) | 12 B gyro+accel | XOR`; 'G'/'g'/'I'/'R'/
+'W'/'r' command set (passthrough = rate/FS tuning without rebuild);
+no-slave-safe. `make sim-imu-stream` = **IMU-STREAM PASS** (cfg 4/4
+captured exact, hello 6B, 3 frames sync+xor+ts-spacing+data exact,
+'g' silent, passthrough OK); build clean at **170.2 MHz** vs 50
+constraint on build/full.lpf. Host gate `host/hw_imu.py` (hello →
+config readback → rate/drop/monotone gates → gravity + gyro-bias rest
+physics → scratch/imu_log.npz for the rung-4 fusion baselines).
+Defect banked: time-zero `always @*` X — a case-mux fed by an
+initialized-but-never-changed select shifts X out the SPI for the
+entire first transaction (sim-only, silicon unaffected); fixed
+structurally with a function-ROM (evaluates at call time). Second
+sighting class of "tb stimulus/initialization races" — prefer
+function-ROMs over always@* muxes for boot-path constants.
