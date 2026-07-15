@@ -134,22 +134,33 @@ P3. FUSION AT THE WALL. alpha-bundle vs concat vs two-map max-rule on
     dilution at the aliasing wall; publish either way — if bundle survives
     there, that's genuinely new.
 
-P4. SEMANTIC MAP -> REAL PIXELS. Two sub-steps:
-    (a) Retrain the vision descriptor on a SEGMENTED indoor set (§6) as a
-        PER-CELL head (c8/c16 granularity, GRAY(+depth) input — deploy is
-        Y8), binarized to k bits/cell.
-    (b) Run it through experiments/objmap2.py (two-stage + multi-view, TUM
-        fr3, foils fr1_desk) against the census/int baselines, AND compare
-        your ROLES-binding vs my bipolar-spatter at equal bits on the same
-        queries. They are near-duals (per-bit role phasors vs signed key
-        sums); measure cross-talk + capacity on real clutter, not synthetic
-        chairs. Beat: 0.805 AUC combined / 0.165 m.
+P4. LEARNED FRONT-END PROGRAM — the goal structure is now specced in
+    sspax/TRAINING_PROGRAM.md (READ IT FIRST; it is the user's goal
+    statement made operational). Three regimes x two modalities:
+      A  through-VSA, self-supervised, for SLAM feature quality
+         (weights into the differentiable encode; place/registration/
+         verify losses; k=2000 deploy scale);
+      B  no-VSA supervised label latents on SEGMENTED data (§6): k-bit
+         per-cell label vectors that are BOTH the semantic binding key
+         AND the encoding-strength weight (w ~ significance popcount);
+         lidar side via cross-modal distillation (vision labels lifted
+         through registered depth teach a geometry-only net);
+      C  through-VSA end-to-end for OBJECT-FINDING (bind->bundle->decode
+         with localization-margin + cross-view-consistency + foil
+         losses; init from B). Evaluate via experiments/objmap2.py;
+         beat 0.805 AUC / 0.165 m; compare ROLES vs bipolar-spatter at
+         equal bits.
+      PLUS scale-mapping: the latent can modulate PER-RING write
+         strength m_r(latent) — learning the ladder allocation all the
+         hand-tuned recipes were searching (see the spec's
+         "Scale-mapped modulation" section; must beat fixed ladders at
+         equal D/bytes; report the learned profiles).
 
-P5. LEARNED SALIENCY AT THE DEPLOY POINT. k=2000 (not 32) and a 3-ring
-    ingest raster; train on synthetic/classroom, TEST school_run2
-    (est-labels diagnostic, anti-oracle statement in the log); report
-    place-AUC vs uniform AND vs the banked 0.928 recipe at equal D. Include
-    the LUT/DSP estimate for the 826-param net at 20 Hz.
+P5. REGIME-A LIDAR FIRST STEP (the concrete slice of P4-A): SaliencyNet
+    at k=2000 + 3-ring ingest raster; train synth/classroom, TEST
+    school_run2 (est-labels diagnostic, anti-oracle statement in the
+    log); report place-AUC vs uniform AND vs azel-oct6 D240 0.892 /
+    ring-coarse16 D1920 0.940 at equal D. LUT/DSP estimate at 20 Hz.
 
 P6. GATED d/dalpha FOR THE 12-PERM SEARCH. The deploy lidar search runs 12
     perms (0.905) vs 24 (0.928 float). If your gated derivative correction
