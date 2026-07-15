@@ -74,11 +74,14 @@ CELLS = jnp.asarray(_cell_centers())
 # --------------------------------------------------------------------------
 class SaliencyNet(nn.Module):
     ch: int = 8
+    crelu: bool = False        # CReLU: half the filters, same activation width
 
     @nn.compact
     def __call__(self, grid):                          # grid (B,G,G,3)
-        x = nn.relu(Conv(self.ch, (3, 3))(grid))
-        x = nn.relu(Conv(self.ch, (3, 3), strides=(2, 2))(x))  # 2x down
+        from sspax.nnconv import crelu as _cr
+        act = _cr if self.crelu else nn.relu
+        x = act(Conv(self.ch, (3, 3))(grid))
+        x = act(Conv(self.ch, (3, 3), strides=(2, 2))(x))  # 2x down
         sal = Conv(1, (1, 1))(x)[..., 0]            # (B,GD,GD) logits
         zc = Conv(1, (1, 1))(x)[..., 0]             # learned cell height
         return sal, zc
@@ -203,14 +206,14 @@ def evaluate(params, model, seed0=9000, n=24, k=32):
     return auc(vL), auc(vU), k, frac
 
 
-def train(steps=400, bs=16, lr=3e-3, seed=0):
-    model = SaliencyNet()
+def train(steps=400, bs=16, lr=3e-3, seed=0, netkw=None, save=True):
+    model = SaliencyNet(**(netkw or {}))
     key = jax.random.PRNGKey(seed)
     dummy = jnp.zeros((1, G, G, 3))
     params = model.init(key, dummy)
     n_par = sum(x.size for x in jax.tree.leaves(params))
-    print(f"SaliencyNet params: {n_par}  (int8 ~{n_par} B; lattice D={W_LAT.shape[0]})",
-          flush=True)
+    print(f"SaliencyNet({netkw or {}}) params: {n_par}  "
+          f"(int8 ~{n_par} B; lattice D={W_LAT.shape[0]})", flush=True)
     opt = optax.adam(lr)
     st = opt.init(params)
 
@@ -238,13 +241,32 @@ def train(steps=400, bs=16, lr=3e-3, seed=0):
     print(f"post-train AUC learned {aL:.3f}  uniform {uL:.3f}  at k={k} "
           f"features ({frL*100:.0f}% cells fire, vs ~3300 raw pts)", flush=True)
     print(f"delta over uniform baseline: {aL-uL:+.3f} AUC", flush=True)
-    import pickle
-    from pathlib import Path
-    out = Path(__file__).resolve().parents[1] / "scratch" / "learned_lidar.pkl"
-    with open(out, "wb") as f:
-        pickle.dump(jax.tree.map(np.asarray, params), f)
-    print(f"saved params -> {out}", flush=True)
-    return params, model
+    if save:
+        import pickle
+        from pathlib import Path
+        out = Path(__file__).resolve().parents[1] / "scratch" / "learned_lidar.pkl"
+        with open(out, "wb") as f:
+            pickle.dump(jax.tree.map(np.asarray, params), f)
+        print(f"saved params -> {out}", flush=True)
+    return params, model, (n_par, aL, uL)
+
+
+def compare_crelu(steps=400):
+    """CReLU param-efficiency: matched activation width, half the filters."""
+    print("=== CReLU vs ReLU param efficiency (learned lidar saliency) ===")
+    configs = [("ReLU  ch8", dict(ch=8, crelu=False)),
+               ("CReLU ch4", dict(ch=4, crelu=True)),   # 8-wide act, half filters
+               ("ReLU  ch4", dict(ch=4, crelu=False)),  # 4-wide control
+               ("CReLU ch8", dict(ch=8, crelu=True))]   # 16-wide, more capacity
+    rows = []
+    for name, kw in configs:
+        _, _, (npar, aL, uL) = train(steps, netkw=kw, save=False)
+        rows.append((name, npar, aL))
+    print("\n  config      params   place-AUC (uniform ref "
+          f"{uL:.3f})   AUC/param")
+    for name, npar, aL in rows:
+        print(f"  {name:10s} {npar:6d}   {aL:.3f}            "
+              f"{(aL-0.5)/npar*1e4:.2f}e-4", flush=True)
 
 
 if __name__ == "__main__":
@@ -252,3 +274,5 @@ if __name__ == "__main__":
     print(f"jax devices: {jax.devices()}", flush=True)
     if cmd == "train":
         train()
+    elif cmd == "crelu":
+        compare_crelu()

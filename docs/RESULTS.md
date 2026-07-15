@@ -8019,3 +8019,106 @@ Full Icepi-Zero allocation model with explicit SLAM reserves (10 DSP,
   int8; early stride-2 (line buffers are the EBR cost); keyframe tier
   is where capacity lives. Ceilings written into TRAINING_PROGRAM.md;
   README headroom item 3 rewritten around the program.
+
+---
+
+## 2026-07-15 (cont.) — sspax P1: ladder-vs-world-extent curve (explains the venue-scale artifact)
+
+**Directive (msg.txt P1):** explain WHY the sweep's oct6 (0.25–8 m) ladder won
+the synthetic rooms but the deploy transfer gate found coarse16 (0.5–90.5 m)
+wins building-scale school_run2. `sspax/ladder_extent.py`: fixed geometry
+(ring_arc_const_s0.5_r6, D=360), rotation-searched lidar place AUC, sweep world
+EXTENT × ladder λ_max. Synthetic, anti-oracle (same-place = jittered view pairs).
+
+| extent \ λ_max | 8 m | 22.6 m | 90.5 m |
+|---|---|---|---|
+| **8 m** (room) | **0.909** | 0.905 | 0.876 |
+| **30 m** (hall) | 0.835 | **0.890** | 0.864 |
+| **80 m** (building) | 0.776 | 0.798 | **0.814** |
+
+The best λ_max tracks the venue extent **exactly** (8→8, 30→22.6, 80→90.5). The
+mechanism: place discriminability peaks when the coarsest ring ≈ scene scale;
+below that the coarse rings can't resolve global layout, and the fine rings
+alias across a large room. So the sweep's "oct6 best" was REAL but venue-scaled —
+oct6 matched the 8 m rooms; coarse16 matches buildings. Confirms the deploy
+agent's rule-5 transfer critique at the mechanism level: **a fixed ladder is
+venue-suboptimal; λ_max should track venue extent.** This motivates the learned
+scale-modulation (TRAINING_PROGRAM P4): let the net discover the allocation
+instead of hand-picking λ_max per venue.
+
+---
+
+## 2026-07-15 (cont.) — sspax P4 scale-modulation: mechanism built, HONEST synthetic negative
+
+**Directive (TRAINING_PROGRAM.md P4):** learn the ladder allocation via a
+THERMOMETER blanking head — per-cell finest-useful-scale cutoff, rings finer
+than cutoff blanked (on-fabric: per-ring comparator, zero multipliers).
+`sspax/learn_scale.py`: ScaleNet (1778 params, cuDNN-free convs) + differentiable
+per-ring-masked SSP encode, contrastive place loss across mixed extents {8,30,80 m},
+full ladder 0.25–90.5 m (D=360). Straight-through hard blanking at eval.
+
+**Result — honest negative on the synthetic surface.** No aliasing regime where
+blanking helps: aligned views make the full ladder trivially perfect (1.000 at
+every extent), so the learned head correctly converges to **cutoff≈0 (keep all
+rings)** and lands at 0.925 mean (the learned saliency head slightly hurts a
+saturated task, −0.075 vs full ladder); full ±180° rotation drops every ladder
+to chance (~0.51) — box-rooms are too self-similar under arbitrary heading. The
+mechanism is sound (the learned cutoff is the *correct* policy for a no-aliasing
+task), but the synthetic world cannot reward blanking. This reinforces the
+deploy agent's rule-5 discipline: **synthetic means don't decide ladder policy;
+the learned-blanking advantage needs real building-scale aliasing (school_run2).**
+The module is the transfer-gate candidate; `ladder_extent.py` (best λ_max tracks
+venue extent) is the transferable synthetic result that motivates it.
+
+Budget (vs the Fable-agent CNN envelope, this push): ScaleNet 1778 params ≈ 222 B
+BNN — trivially inside the @120 fps BNN tier (3.3 Gbop/frame); the deploy-scale
+k=2000 learned front-end (P5) has vast headroom. Mechanism is BNN-first ready.
+
+---
+
+## 2026-07-15 (cont.) — sspax: CReLU param efficiency for the learned front-ends
+
+**Directive (user):** try CReLU for more param efficiency. Added `crelu` to
+`sspax/nnconv.py` (concat[relu(x), relu(-x)] — both activation phases from the
+same filters; on-fabric a sign-flip + relu, no extra MACs) and a `crelu` flag to
+SaliencyNet. Comparison on the learned lidar saliency (k=32 place-rec, GPU, 400
+steps, uniform-random ref 0.707):
+
+| config | params | place-AUC |
+|---|---|---|
+| ReLU  ch8 | 826 | 0.940 |
+| **CReLU ch4** | **422** | **0.962** |
+| ReLU  ch4 | 270 | 0.848 |
+| CReLU ch8 | 1418 | 0.887 |
+
+**CReLU ch4 beats ReLU ch8 at HALF the parameters (+0.022 AUC).** ch4+CReLU
+gives an 8-wide activation from 4 filters, outperforming 8 ReLU filters; the
+half-filter ReLU control (ch4) collapses to 0.848, so the gain is CReLU's
+phase-preservation, not just width. AUC/param nearly doubles (10.9e-4 vs
+5.3e-4). CReLU ch8 (1418) overfits the small synthetic task — the sweet spot is
+CReLU at LOW channels, which is exactly what the FPGA weight budget wants.
+Adopt: CReLU-low-channel as the default for the deploy-scale front-ends.
+
+---
+
+## 2026-07-15 (cont.) — sspax: REAL-DATA transfer gate reproduced on this box (school_run2)
+
+Fetched the SPOT school_run2 pointclouds (47 shards, 2.3 GB, HF
+lorinachey/spot-telluride-workshop-dataset) + parsed to scans.npz; run2 lacks
+odometry_lio_sam on HF, so a placeholder zero-pose ref_lio.npz was dropped in
+(anti-oracle: est-labels use the pipeline's OWN lidar-only estimate `fin`, never
+the reference). Ran `sspax/realbench.py school` (est-labels DIAGNOSTIC,
+rot-searched 24):
+
+| arm | this box | deploy agent (msg §3) |
+|---|---|---|
+| ring-oct6 D240 | 0.870 | 0.871 |
+| ring-coarse16 D1920 | **0.939** | 0.940 |
+| ring-oct6 D1920 | 0.927 | 0.928 |
+| azel-oct6 D720 | 0.881 | — |
+
+The sspax ring lattice **reproduces the deploy transfer numbers on real data**
+(±0.001). Confirms on REAL building-scale data what `ladder_extent.py` predicted
+synthetically: **ring-coarse16 (0.939) > ring-oct6 (0.927)** at D1920 — coarse
+rings win at building scale (+0.012), the venue-scale law. The learned front-end
+program (P5) can now be tested on this venue directly.

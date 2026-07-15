@@ -34,6 +34,15 @@ def conv2d(x, w, b, stride=1, padding="SAME"):
     return col @ wm + b
 
 
+def crelu(x):
+    """Concatenated ReLU: [relu(x), relu(-x)] on the channel axis. Doubles the
+    activation width from the SAME filters (both phases kept), so a layer needs
+    ~half the filters for comparable capacity — param-efficient, and on-fabric
+    it is just a sign flip + relu (no extra MACs). Halves the next layer's input
+    channels' weight count too."""
+    return jnp.concatenate([nn.relu(x), nn.relu(-x)], axis=-1)
+
+
 class Conv(nn.Module):
     features: int
     kernel_size: tuple = (3, 3)
