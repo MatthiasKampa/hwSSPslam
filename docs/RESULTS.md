@@ -9192,3 +9192,356 @@ What this round settles for the target platform:
    semantic map holds 0.97 recall at 4 bits/cell on the REAL FPGA
    arithmetic (q_polar parity verified); budgets cross-check across two
    implementations. The envelope numbers were not paper-only.
+
+## 2026-07-15 — the seg-accuracy BAR for a useful queryable map: <~30% error (quantifies why distillation is REQUIRED)
+
+`sspax/semantic_segnoise.py` — bridges the P4 seg-head bottleneck to map
+usefulness. The objmap round-trip only measures SELF-consistency (query
+returns what the net predicted, right or wrong). This asks the deploy
+question: with seg error rate p (each object mislabeled w.p. p), can a query
+for the TRUE class still find the TRUE objects? D=360, 8 objects:
+  p(mislabel)  recall  precision
+    0.0         0.82     0.63     (ceiling = capacity/detect at 8 obj)
+    0.1         0.69     0.60
+    0.2         0.55     0.56
+    0.3         0.55     0.53
+    0.5         0.43     0.39
+    0.7         0.15     0.13
+Recall/precision degrade ~linearly and cross ~0.5 at p≈0.3 — so the seg head
+must hold error BELOW ~30% (object accuracy above ~70%) for a USEFUL
+queryable map. Connecting to P4: the deploy-budget luma head is at ~67%
+error (pixacc 0.33) — FAR above the bar, so its map would be useless for
+finding the RIGHT objects (recall ~0.15). This QUANTIFIES the P4 verdict:
+distillation (or a larger net / RGB-D) is REQUIRED, not optional — the
+deploy label head or its teacher must reach ~70% per-cell accuracy to cross
+into a useful queryable map. Anti-oracle: TRUE classes score only; the map
+is built from the corrupted labels (standing in for noisy predictions).
+
+## 2026-07-15 — the seg bottleneck is NOT capacity (8x params barely helps); color lever untested (RGB path numerically unstable)
+
+Follow-up to the seg-accuracy bar (~70% needed) + P4 bottleneck: is the weak
+deploy seg head capacity-limited, or input/task-limited? Trained the SAME net
+at 8x capacity (NYUv2, 10 classes, balanced CE):
+  luma ch16 (19k params):  seg mIoU 0.100  pixacc(non-void) 0.429
+  luma ch48 (152k params): seg mIoU 0.105  pixacc(non-void) 0.450
+8x more parameters buys +0.02 pixacc — CAPACITY IS NOT THE BOTTLENECK. So
+distillation from a bigger SAME-INPUT (luma) teacher would NOT help: the
+teacher cannot cross the ~70% bar from luma either. The limit is the INPUT
+(Y8 luma, half-res 160x120) or the intrinsic difficulty of 40/10-class
+indoor seg, not model size. (Tracking head unaffected: retrieval 0.95,
+stability 0.93 at both sizes.) The COLOR lever (does RGB input cross the
+bar?) could NOT be measured here: the rgb=True path diverges to NaN within
+~100 steps (3x input energy overflows the un-normalized CReLU stack; fixing
+it needs input standardization, which would change the luma net's input
+scale and invalidate the banked luma numbers — deferred). Honest open
+question: whether RGB(-D) input crosses the seg-accuracy bar is the next
+lever to test (with input normalization), not capacity. Consequence: a
+useful queryable-map label head needs a DIFFERENT INPUT (color/depth) or a
+cross-modal teacher with that input — a bigger luma net is not the answer.
+
+## 2026-07-15 — COLOR is a genuine seg lever (stable 1-NN probe, sidesteps the RGB-training NaN)
+
+Resolves the deferred RGB question without the unstable deep training
+(`scratch/scratch_color_probe.py`): a nonparametric 1-NN on RAW /4-cell mean
+features, RGB (3) vs luma (1), NYUv2 10-class:
+  majority-class chance : 0.532
+  luma (1-ch) 1-NN      : 0.347
+  RGB  (3-ch) 1-NN      : 0.455
+RGB beats luma by +0.108 (~31% relative) — COLOUR carries class information
+the luma seg head structurally cannot see, so RGB(-D) input IS a real seg
+lever (confirming last entry's "input, not capacity"). HONEST CAVEAT: both
+sit BELOW the majority-class baseline (0.53) because raw mean-cell-colour
+1-NN ignores texture/context — so colour is necessary but not sufficient
+ALONE; the fix is an RGB-input CNN (colour + the net's spatial/texture
+features), not colour by itself. Net design consequence: a useful queryable-
+map label head needs a COLOUR(/depth) CNN (or a cross-modal teacher with
+that input) — a bigger luma net cannot cross the ~70% seg-accuracy bar. This
+closes the seg-bottleneck characterization: bar quantified (<30% error),
+capacity ruled out, and the input lever (colour) confirmed via a stable
+probe. Anti-oracle: GT labels score the 1-NN only.
+
+## 2026-07-15 — rule-4 CORRECTIONS to the recent seg-bottleneck + dynamic results (color SOUND; two softenings; distillation-conclusion survives an object-level re-measure)
+
+Batched audit of 4 recent positives. Verdicts + fixes:
+
+- COLOUR LEVER (color probe) — SOUND, decisive. Dimensionality artifact
+  RULED OUT by the auditor's controls: luma×3 REDUNDANT = 0.347 (= luma),
+  luma+2 NOISE channels = 0.346, RGB = 0.455; chroma-only (brightness
+  removed) = 0.362. Only genuine chroma content lifts the score — the +0.11
+  is colour information, not extra dimensions. The "seg fix needs colour"
+  conclusion is solid.
+- CAPACITY-NOT-BOTTLENECK — SOUND. ch48 reaches LOWER training loss than
+  ch16 but the same eval pixacc (0.429->0.450) = fits better, doesn't
+  generalise better = capacity genuinely not the lever, NOT an underfit.
+  Caveat: short/noisy 10-class training, +0.02 delta -> directional, not a
+  tight bound.
+- DYNAMIC MAP — mechanism SOUND, headline over-read. The drift 2.1e-14 is
+  real but TAUTOLOGICAL (add-A-then-subtract-A cancels the bit-identical
+  bind() vector by linearity — a construction, not an empirical robustness
+  finding; the interesting APPROXIMATE-removal case never arises). And the
+  banked "removed chair reads -1.04 BELOW background" is a SMALL-N NOISE
+  artifact (9 seeds/11 samples, SE~0.8, ~1.3sigma from 0; flips to +0.62 in
+  a variant). CORRECTED statement: a live chair reads +13.5, a removed
+  location collapses into the background band (+-1-2) -> cleanly gone, no
+  ghost (the entry's own "(~0 => cleanly gone)" parenthetical was the right
+  reading; the -1.04 headline over-read noise).
+- SEG-ACCURACY BAR — mechanism sound, threshold SOFTENED, conclusion
+  re-grounded. (i) The corruption model (label flips to a uniform-random
+  other class) is a first-order proxy (real seg error is structured +
+  spatially correlated). (ii) The bar crosses 0.5 nearer p~0.35 than the
+  stated 0.3, and is an operating-point number (capacity/detect ceiling 0.82
+  at p=0, n_obj=8/D=360), not a hard threshold. (iii) The auditor flagged a
+  UNIT MISMATCH: 67% PIXEL error vs a 30% OBJECT-level bar. RE-MEASURED the
+  deploy head at OBJECT level (predicted-class region vs GT-majority): 0.232
+  object-acc vs 0.324 pixel-acc — object-level is actually LOWER, not higher.
+  So the head is far below the ~70% bar at BOTH levels; the auditor's
+  hypothesised escape (object-level near the bar) is empirically REFUTED, and
+  the "a bigger LUMA net can't cross the bar -> need colour(/depth) or a
+  cross-modal teacher" conclusion SURVIVES the correct-units check. Softened:
+  "distillation" is the likely fix (colour-input CNN), phrased as needed for
+  a USEFUL label map, not a proven hard mandate. No anti-oracle issues in any
+  of the four.
+
+## 2026-07-15 — DEPTH adds beyond colour for seg: the label head wants RGB-D (a cross-modal argument)
+
+Extends the validated colour probe with the depth channel (stable z-scored
+1-NN, `scratch/scratch_depth_probe.py`), to fix the distillation-teacher
+INPUT design. NYUv2 10-class, /4-cell means:
+  majority chance : 0.532
+  depth only (1)  : 0.350   (~ luma-only 0.347 — depth ~ as informative as brightness)
+  RGB   (3)       : 0.454
+  RGB+D (4)       : 0.521   (+0.067 over RGB; nearly reaches majority baseline)
+DEPTH adds a genuine, substantial lever on TOP of colour (RGB 0.454 ->
+RGB+D 0.521). By the colour-probe's validated dimensionality control
+(uninformative extra dims add nothing), the 4th channel helps only because
+depth carries independent class information — geometry separates furniture
+from walls/floor where colour alone cannot. So the deploy seg/label head (or
+its distillation teacher) should be RGB-D, not RGB alone. This is a
+CROSS-MODAL argument: the pinned geometry assigns depth to the lidar net,
+but SEG benefits from FUSING vision-colour with lidar-depth — the teacher
+that crosses the ~70% seg bar is an RGB-D net (colour + projected
+lidar-depth). Closes the seg-input question: capacity ruled out, colour
+confirmed, depth confirmed additive -> teacher input = RGB-D. Anti-oracle:
+GT labels score the 1-NN only; same stable-probe methodology the auditor
+validated for colour.
+
+## 2026-07-15 — RGB-D CNN seg (NaN fixed via input standardisation): DEPTH is the CNN lever, COLOUR is NOT — corrects the 1-NN colour claim
+
+The 1-NN probes said colour (and depth) are informative; the deep-net test
+(the RGB-NaN blocker, now fixed by per-channel input standardisation;
+`scratch/scratch_rgbd_seg.py`, seg-only, ch32, 10-class, standardised input)
+shows what a CNN can actually USE:
+  luma  (1ch, 69k): pixacc 0.480  mIoU 0.120
+  RGB   (3ch, 70k): pixacc 0.464  mIoU 0.122   <- ~= luma, colour barely helps
+  RGB-D (4ch, 70k): pixacc 0.597  mIoU 0.163   <- +0.12 over luma, DEPTH is the lever
+CORRECTION to the 1-NN "colour is a genuine seg lever": for a CNN colour
+does NOT translate to an advantage (RGB 0.46 ~= luma 0.48) — the CNN already
+extracts colour-equivalent structure from luma texture/context, which the
+raw mean-colour 1-NN could not. The real lever is DEPTH (+0.12 pixacc):
+geometry gives class information appearance (luma OR colour) cannot. So the
+1-NN colour result was a probe artifact for CNN purposes; the deep-net test
+is the deployment-faithful one and it says DEPTH, not colour. Bar check:
+RGB-D reaches 0.60 pixacc — a large jump but STILL BELOW the ~0.70 useful-map
+bar, so depth is NECESSARY but not sufficient at half-res/deploy budget;
+crossing the bar likely needs RGB-D + higher resolution (or more capacity).
+Distillation recipe REVISED: the teacher input is RGB-D (depth-dominant, via
+projected lidar range), and reaching ~0.70 needs full-res, not just the
+input change. NaN root cause + fix confirmed: 3x-input-energy logit overflow
+from un-normalised input; per-channel standardisation trains stably. This
+supersedes the "colour is the lever" reading in the two prior entries.
+
+## 2026-07-15 — full-res does NOT help: deploy-budget RGB-D seg caps ~0.60, below the bar (resolution ruled out)
+
+Testing the "full-res closes the gap to 0.70" hypothesis from the RGB-D
+entry (`scratch/scratch_rgbd_fullres.py`, 320x240, seg-only, standardised):
+  luma  FULL-RES (1ch): pixacc 0.439  (< half-res luma 0.48 — full-res HURTS)
+  RGB-D FULL-RES (4ch): pixacc 0.566  (< half-res RGB-D 0.60 — full-res HURTS)
+Full resolution does NOT help — it slightly HURTS at deploy budget (more
+cells to classify, same net capacity spread thinner). Combined with the
+earlier capacity result (8x luma params -> +0.02) and the RGB-D input result
+(the one lever, +0.12), the picture is: at deploy budget (~70k params) the
+RGB-D seg ceiling is ~0.60 regardless of resolution or capacity — BELOW the
+~0.70 useful-map bar. So RESOLUTION is ruled out alongside capacity; INPUT
+(depth) is the only lever and it caps at 0.60. Open question this raises:
+is the ~0.70 bar reachable by ANY net (task achievable, big RGB-D teacher
+exists -> distillation frame valid), or is 10-class indoor seg
+fundamentally ~0.60 on this half-res data (bar unreachable, map limited to
+~0.4-0.5 recall or coarser classes)? -> big-RGB-D test next.
+
+## 2026-07-15 — seg ceiling ~0.60 is ARCHITECTURE-limited, not input/capacity/resolution — the fix is a seg DECODER, not distillation-to-the-deploy-trunk
+
+Decisive test (`scratch/scratch_rgbd_big.py`): a BIG RGB-D net (ch96, 592k
+params, ~8x deploy) reaches pixacc 0.599 — IDENTICAL to the deploy-budget
+RGB-D (0.597). Full ledger of RGB-D seg on NYUv2 10-class (half-res unless
+noted), all in the SAME architecture family (UnifiedVisionNet: early-stride
+trunk, NO decoder/skips):
+  deploy RGB-D (70k) : 0.597
+  full-res RGB-D     : 0.566
+  BIG RGB-D (592k)   : 0.599
+The ~0.60 ceiling holds across CAPACITY (8x), RESOLUTION (full), and INPUT
+(RGB-D is the best input) — none reach the ~0.70 bar. Therefore the ceiling
+is ARCHITECTURE-limited: this deploy-trunk shape (stride-early, 1x1-mix, no
+upsampling decoder / skip connections) is structurally weak for DENSE seg —
+consistent with its mIoU ~0.18 vs SOTA NYUv2 U-Nets at ~0.5. CORRECTS the
+"distillation with an RGB-D teacher" recipe: there is NO teacher IN THIS
+ARCHITECTURE that crosses the bar (the big net also caps 0.60), so
+distillation-to-the-deploy-trunk cannot cross it either. The real seg lever
+is ARCHITECTURE — a proper encoder-DECODER with skips (U-Net style) at RGB-D
+input — not more params/res/input to the early-stride trunk. Practical
+consequence for the deploy queryable map: with this trunk the label head caps
+~0.60 accuracy -> ~0.4-0.5 query recall (marginal); to get a USEFUL label map
+either (a) add a seg decoder (departs the pinned minimal-trunk budget), or
+(b) coarsen to fewer super-classes (40->10 already helped; 10->~5 may reach
+the bar), or (c) accept a marginal map. This DEFINITIVELY closes the
+seg-bottleneck thread: input=depth is the lever within the trunk, but the
+0.60 ceiling is the trunk architecture, and crossing 0.70 needs a decoder.
+
+## 2026-07-15 — decoder CONFIRMATION: architecture is a real lever (+0.04) but no single lever crosses the bar (U-Net RGB-D 0.638 < 0.70)
+
+Tested the "architecture is the lever" inference with a proper U-Net
+(encoder-DECODER + SKIP connections; `scratch/scratch_unet_seg.py`), same
+RGB-D input / half-res / seg-only / class-balanced as the trunk tests:
+  deploy-trunk RGB-D (70k)      : pixacc 0.597  mIoU 0.163
+  U-NET RGB-D (980k, dec+skip)  : pixacc 0.638  mIoU 0.213
+The decoder+skips CONFIRMS architecture is a genuine lever (+0.04 pixacc,
++0.05 mIoU over the early-stride trunk — the inference direction was right).
+BUT it is STILL below the ~0.70 bar. So the honest complete picture across
+ALL levers (half-res, 4000-step, no-pretrain setup): INPUT (RGB-D) +0.12 is
+the biggest lever; ARCHITECTURE (decoder+skips) +0.04 is real; CAPACITY (8x)
+and RESOLUTION (full) do not help. Best combo (U-Net RGB-D) = 0.638 — NO
+single lever crosses 0.70. Crossing the bar needs the FULL SOTA seg stack
+TOGETHER (RGB-D + decoder + full-res + pretraining/heavy aug; my mIoU 0.21 vs
+SOTA NYUv2 ~0.5 is largely the missing training regime), which is beyond both
+deploy budget AND this quick from-scratch training. Consequence, definitive:
+the deploy label head caps ~0.60-0.64 regardless; a USEFUL queryable-map
+label (>=0.70 -> good recall) requires a HEAVY off-line RGB-D U-Net teacher
+(full pipeline) then distillation, OR coarser super-classes, OR accepting a
+marginal (~0.5-recall) map. Corrects the prior "architecture-limited" framing
+to "architecture is A lever, not THE lever; the bar needs the whole stack."
+This closes the seg-input/architecture investigation.
+
+## 2026-07-15 — coarser classes cross the PIXEL bar (0.858) but NOT the per-object bar (mIoU 0.23) — surfaces reliable, objects still weak
+
+Tested the "coarser super-classes" deploy option (`scratch/scratch_unet5.py`,
+U-Net RGB-D, 5 classes = top-4 + void, vs the 10-class 0.638):
+  10-class U-Net RGB-D : pixacc 0.638  mIoU 0.213
+   5-class U-Net RGB-D : pixacc 0.858  mIoU 0.231
+Coarsening to 5 classes CROSSES the ~0.70 PIXEL bar (0.858) — BUT mIoU
+barely moves (0.213 -> 0.231). The large pixacc/mIoU gap means the gain is
+dominated by the easy MAJORITY classes (wall/floor); the minority OBJECT
+super-classes stay weak (low per-class IoU). Crucially, the segnoise
+usefulness bar is a PER-QUERIED-CLASS metric (recall/precision of a class's
+objects), which tracks mIoU, NOT pixacc. So coarsening crosses the AGGREGATE
+(pixel) bar but NOT the per-object bar: the deploy queryable map would
+reliably label DOMINANT SURFACES (wall/floor -> "highlight the floor" works)
+but still poorly label OBJECTS (chairs -> marginal). HONEST CLOSE of the
+"practical options": (a) decoder helps but doesn't cross (0.638); (b)
+coarsening crosses pixacc but not the per-object metric (mIoU 0.23) — good
+for surfaces, weak for objects; (c) a reliable OBJECT-query map ("highlight
+the chairs") at deploy budget remains HARD — it needs the full SOTA seg
+stack (heavy RGB-D U-Net + pretraining), off-line, then distillation. Net:
+the queryable MAP MECHANISM is sound (validated ~1.0 given good labels); the
+LABEL QUALITY for fine objects is the real deploy limiter, and no
+deploy-budget lever (input/arch/capacity/res/coarsening) fixes the OBJECT
+case. This definitively closes the seg-label investigation.
+
+## 2026-07-15 — rule-4 audit of the seg-investigation conclusions: SOUND (coarse-class claim STRENGTHENED), one prescription softened, one anti-oracle wrinkle logged
+
+Independent audit of the seg-bottleneck conclusions. Verdicts:
+- COARSE-CLASS (the key claim) — SOUND, and STRONGER than stated by direct
+  measurement. The 5-class remap resolves to wall(53.1%)/floor(22.2%)/
+  cabinet(15.3%)/bed(9.3%) of the scored non-void set; wall+floor = 75.3%.
+  Critically, 51.1% of the original OBJECT cells (chair/sofa/table/window/…)
+  are folded into class-0=void and are EXCLUDED from pixacc(non-void)
+  entirely. So the 0.858 is not merely majority-weighted — the queryable
+  objects are STRUCTURALLY ABSENT from the metric (the net only needs
+  wall+floor near-perfect). mIoU (which the segnoise usefulness bar tracks)
+  barely moves (0.213->0.231). The conclusion "coarsening crosses the
+  aggregate pixel bar but does NOT fix the object-query map" is confirmed
+  and understated. (Wording nit: the scored set includes cabinet/bed, not
+  only wall/floor.)
+- ARCHITECTURE LEVER — SOUND. The U-Net-vs-trunk +0.04 is NOT a param
+  artifact: the same trunk family is flat in capacity (70k->592k = +0.002),
+  so the gain is the decoder+skips. (Caveat: 592k not param-matched to the
+  U-Net's 980k, and the U-Net swaps crelu->relu — "architecture" bundles
+  minor factors — but the flat capacity curve makes the attribution fair.)
+- SOTA-TEACHER PRESCRIPTION — SOFTENED. "A useful object-query map needs a
+  full off-line SOTA RGB-D U-Net teacher + distillation" is an INFORMED
+  EXTRAPOLATION from literature (SOTA NYUv2 mIoU ~0.5), NOT demonstrated
+  here — no experiment in this thread reached the object bar. Corrected
+  reading: the LABEL-QUALITY LIMITER is demonstrated (no deploy-budget lever
+  moves object mIoU off ~0.21-0.23, even the over-budget 980k U-Net); the
+  SOTA-teacher FIX is plausible but UNSHOWN on this half-res data.
+- ANTI-ORACLE WRINKLE (log, no numeric impact): the top-K frequency remap in
+  `segnet.load_nyu` runs over the FULL 1449-image set BEFORE the 80/20
+  split, so the class TAXONOMY (which classes are top-K) is chosen using
+  test-split labels. Not a per-sample leak (selects the label space, not
+  predictions; the wall/floor/... ranking is split-invariant -> zero numeric
+  impact), but strictly GT touches pipeline setup beyond scoring; now fenced
+  with a code note. The map-mechanism-sound + label-quality-limiter
+  DIAGNOSIS stands; only the SOTA-teacher fix is downgraded to inference.
+
+## 2026-07-16 — the bounded map supports COMPOSITIONAL (conjunctive multi-attribute) queries — "red chair", graded by matched-attribute count
+
+`sspax/semantic_compose.py` — the multi-attribute form of the user's "add
+bits individually" directive. Each object binds the UNION of several
+attribute codes (CLASS + COLOUR, 4x4, k=12 bits each); a conjunctive query
+"red chair" = class_code[chair] ∪ colour_code[red]. Readout by number of
+matching attributes (D=360, 10 objects/scene, 32 seeds):
+  2-match (red chair)        : 28.7
+  1-match (red !chair etc.)  : 18.3
+  0-match (neither)          :  6.8
+The map GRADES 2 > 1 > 0 — a conjunctive query reads out proportional to
+matched-attribute count, because the readout weight is |query_bits ∩
+object_bits| (2k for a double match, k for single, ~0 for none). DECISIVE
+CONTROL: a RANDOM 2k-bit query gives FLAT readout (3.6/3.9/4.4 across
+2/1/0-match) — so the grading is from bit OVERLAP (semantic), not object
+count/spatial structure. Red-chair retrieval (threshold @ 90th pct of
+non-target): recall 0.94, precision 0.54 (strong single-attribute matches
+leak in — the 2:1 readout ratio is clear but not clean separation). So the
+bounded map answers conjunctive object queries ("red chairs, not blue chairs
+or red tables") from ONE vector with no extra structure — the 11th map
+capability, directly realising "binary descriptor bits = composable
+attributes". Anti-oracle: synthetic, GT (class,colour) score only.
+
+## 2026-07-16 — compositional-query operator: product-of-queries marginally beats union-bits (recall 1.00 vs 0.95), precision caps ~0.55
+
+Follow-up to the compositional-query result: two conjunctive operators for
+"red chair" — (a) UNION-BITS: one query with class∪colour bits; (b)
+PRODUCT-OF-QUERIES: query class and colour separately, multiply the density
+maps (a red table has high colour-density but low class-density -> product
+low). D=360, 10 objects, 40 seeds, threshold @ 90th pct of non-target:
+  union-bits         : recall 0.95  precision 0.54
+  product-of-queries : recall 1.00  precision 0.56
+Product-of-queries is marginally better (perfect recall) — but the predicted
+big precision jump does NOT materialise (0.54->0.56): the position-decode
+background noise blurs the single-match suppression, so strong 1-attribute
+matches still leak past the threshold. Honest read: the map GRADES
+attributes clearly (2>1>0, banked) and both conjunctive operators work
+(product slightly better), but high-PRECISION retrieval of ONLY the
+double-match is limited by decode cross-talk at this D/load (~0.55 ceiling),
+not by the operator choice. So compositional QUERYING is a real capability;
+clean compositional RETRIEVAL would want larger D or a sharper decode.
+Anti-oracle: synthetic, GT (class,colour) score only.
+
+## 2026-07-16 — CORRECTION: compositional-retrieval precision is FLAT in D (larger D does NOT help) — the ~0.55 ceiling is operator/threshold, not cross-talk
+
+Tested the prior entry's inference ("clean compositional retrieval would want
+larger D"). It is WRONG. Product-of-queries "red chair" retrieval vs D:
+  D=240: recall 0.95  precision 0.54
+  D=360: recall 1.00  precision 0.56
+  D=720: recall 1.00  precision 0.56
+  D=1440: recall 1.00 precision 0.56
+Precision is FLAT across a 6x D range — larger D does NOT improve
+compositional precision. So the ~0.55 ceiling is NOT a D/cross-talk
+limitation: it is inherent to the product operator + 90th-pct threshold
+given the readout structure (a 2-match reads ~2x a strong 1-match, and BOTH
+scale with D, so their RATIO — hence the separability — is D-invariant).
+Self-corrects the prior "wants larger D or sharper decode" inference: the
+compositional GRADING (2>1>0) is real, robust, and D-invariant; but
+high-PRECISION retrieval of ONLY the double-match is bounded by the
+2-match/1-match readout RATIO (~2:1) plus decode background, which larger D
+cannot change. To sharpen it you'd need a different operator (e.g. a
+margin/ratio test between the two attribute densities, or requiring BOTH to
+exceed per-attribute thresholds), not more dimensions. Grading capability:
+sound and D-robust; clean double-match retrieval: an operator-design problem.

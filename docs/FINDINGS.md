@@ -1076,11 +1076,35 @@ reference (rule 2), positives audited (rule 4 — one retraction below).
    of ReLU params at matched width, on both nets.
 
 3. **On real NYUv2 the TRACKING head is strong, the deploy-budget SEG head is
-   weak.** Per-cell descriptor retrieval 0.950 / bit-stability 0.930; but
-   40-class seg from luma at 20k params collapses without class-balancing and
-   even balanced reaches only pixacc 0.33 (13× chance) / mIoU 0.041 — usable
-   labels at deploy budget need cross-modal distillation or coarser classes, not
-   from-scratch learning. Tracking is the head that carries.
+   weak — and the fix is INPUT (RGB-D), not capacity.** Per-cell descriptor
+   retrieval 0.950 / bit-stability 0.930 (int4-robust, translation-equivariant);
+   but 40-class seg from luma at 20k params reaches only pixacc 0.33 / mIoU 0.041
+   (object-level acc 0.23). The bottleneck was characterized end-to-end (all
+   stable, audited): (a) a useful queryable-map LABEL head needs seg accuracy
+   above ~70% (error <~30-35%), and the deploy head is far below at both pixel
+   (0.32) and object (0.23) level; (b) CAPACITY is ruled out — 8× params buys
+   +0.02 pixacc (fits training better, generalises the same); (c) the lever is
+   DEPTH, not colour — the deep-net test (RGB-D CNN, input-standardised) shows
+   luma 0.48 ≈ RGB 0.46 (colour barely helps a CNN; it already extracts
+   colour-equivalent structure from luma texture, so the raw 1-NN colour
+   advantage does NOT translate) but RGB-D 0.60 (+0.12 — geometry gives class
+   info appearance cannot); (d) NO SINGLE LEVER crosses the bar — capacity (8×:
+   0.599≈0.597) and resolution (full: 0.57) don't help; a proper U-Net decoder
+   +skips DOES help (0.597→0.638, architecture is a genuine lever) but the best
+   combo (U-Net RGB-D) still caps 0.638 < 0.70. So the deploy label head caps
+   ~0.60-0.64 regardless; crossing ~0.70 needs the FULL SOTA seg stack together
+   (RGB-D + decoder + full-res + pretraining/heavy aug — mIoU 0.21 vs SOTA ~0.5
+   is largely the missing training regime), beyond both deploy budget and
+   from-scratch training. The LABEL-QUALITY LIMITER is demonstrated (no
+   deploy-budget lever — input/arch/capacity/res/coarsening — moves object mIoU
+   off ~0.21-0.23; even the over-budget 980k U-Net caps there, and coarsening's
+   0.858 pixacc structurally EXCLUDES ~51% of object cells from the metric). The
+   FIX is inference, not result: a useful object-query map PLAUSIBLY needs a
+   heavy off-line RGB-D U-Net (full SOTA training regime) then distillation —
+   but that was NOT shown reachable on this half-res data; coarser super-classes
+   or a marginal (~0.5-recall) map are the other options. Tracking is the head
+   that carries at deploy budget today; the label head is a demonstrated hard
+   sub-problem whose fix remains an untested inference.
 
 4. **The queryable map WORKS on real data — governed by a SUBLINEAR capacity
    trend.** Bounded-map capacity grows SUBLINEARLY with D
@@ -1109,6 +1133,14 @@ reference (rule 2), positives audited (rule 4 — one retraction below).
    All positives audited (rule 4). A single bounded vector can even carry BOTH
    the place descriptor and the semantic bindings (dual-use, shown
    one-directionally: semantic survives an added place background to alpha~0.5).
+   It is also DYNAMICALLY UPDATABLE (add=bundle / remove=subtract, O(D), no
+   drift over arbitrary edit histories) and COMPOSITIONAL — an object binding
+   the UNION of attribute codes (class+colour) answers CONJUNCTIVE queries
+   ("red chair"), grading objects by matched-attribute count (2>1>0, D-robust,
+   random-query control flat); clean double-match RETRIEVAL is an operator-design
+   problem (precision ~0.55, D-invariant), but the compositional grading is
+   sound. This directly realises the "binary bits = composable attributes"
+   directive.
 
 5. **The wall holds, reconfirmed three ways.** (a) The P1 learned thermometer
    "+0.183 place gain" was RETRACTED after a rule-4 audit — a self-rotation

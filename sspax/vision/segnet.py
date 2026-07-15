@@ -98,10 +98,21 @@ def _resize_nn(img, hw):
 _LUMA = np.array([0.299, 0.587, 0.114], np.float32)
 
 
-def load_nyu(hw=IN_HW, max_n=None):
-    """NYUv2 labeled .mat -> (luma (N,H,W,1) [0,1], labels40 (N,H,W)).
-    Deploy-faithful: RGB collapsed to Y8 luma (depth belongs to the lidar net).
-    Remaps 894 raw ids -> 39 most-frequent + 0=other (deterministic)."""
+def load_nyu(hw=IN_HW, max_n=None, rgb=False):
+    """NYUv2 labeled .mat -> (img (N,H,W,C) [0,1], labels40 (N,H,W)).
+    Deploy-faithful default: RGB collapsed to Y8 luma (1 ch; depth belongs to the
+    lidar net). rgb=True keeps 3 channels (input-lever probe) — NOTE: rgb training
+    is currently UNSTABLE (diverges to NaN: 3x input energy overflows the
+    un-normalised CReLU stack, and luma_jitter assumes [0,1]); needs coordinated
+    input standardisation + jitter rework before use. See docs/RESULTS.md
+    2026-07-15 "seg bottleneck is NOT capacity".
+    Remaps 894 raw ids -> N_CLASS-1 most-frequent + 0=other (deterministic).
+    ANTI-ORACLE NOTE (rule 2): the top-K frequency TAXONOMY is chosen over the
+    FULL set here, before any train/test split — it touches test labels for
+    label-SPACE selection (not predictions). The frequency ranking is
+    split-invariant, so ZERO numeric impact on reported accuracies (scoring-space
+    setup, not a per-sample leak); fit the taxonomy on the train split if used
+    beyond these diagnostics."""
     import h5py
     with h5py.File(NYU, "r") as f:
         imgs, labs = f["images"], f["labels"]
@@ -109,8 +120,8 @@ def load_nyu(hw=IN_HW, max_n=None):
         Y, L = [], []
         for i in range(N):
             im = np.array(imgs[i]).transpose(2, 1, 0).astype(np.float32) / 255.0
-            lum = _resize_nn(im @ _LUMA, hw)[..., None]
-            Y.append(lum.astype(np.float32))
+            px = _resize_nn(im, hw) if rgb else _resize_nn(im @ _LUMA, hw)[..., None]
+            Y.append(px.astype(np.float32))
             L.append(_resize_nn(np.array(labs[i]).T, hw).astype(np.int32))
     Y = np.stack(Y); L = np.stack(L)
     ids, cnt = np.unique(L, return_counts=True)
@@ -191,12 +202,13 @@ def _miou(pred, L4, n_class):
     return float(np.mean(ious)) if ious else 0.0
 
 
-def train(steps=600, bs=8, lr=2e-3, seed=0, w_desc=0.5, real=None, save=True):
+def train(steps=600, bs=8, lr=2e-3, seed=0, w_desc=0.5, real=None, save=True,
+          ch=CH, rgb=False):
     print(f"jax devices: {jax.devices()}", flush=True)
     if real is None:
         real = NYU.exists() and NYU.stat().st_size > 2_500_000_000
     if real:
-        X, Y = load_nyu(); ncls = N_CLASS
+        X, Y = load_nyu(rgb=rgb); ncls = N_CLASS
         print(f"  NYUv2 (Y8 luma {X.shape[1:]}, {len(X)} imgs, {ncls} classes, "
               f"resized to pinned half-res)", flush=True)
     else:
@@ -213,7 +225,7 @@ def train(steps=600, bs=8, lr=2e-3, seed=0, w_desc=0.5, real=None, save=True):
     cw[1:] = 1.0 / np.sqrt(cnt[1:] + 1.0)
     cw = jnp.asarray(cw / cw[1:].mean())
 
-    model = UnifiedVisionNet(n_class=ncls)
+    model = UnifiedVisionNet(n_class=ncls, ch=ch)
     params = model.init(jax.random.PRNGKey(seed), jnp.zeros((1,) + X.shape[1:]))
     n_par = sum(p.size for p in jax.tree.leaves(params))
     opt = optax.adamw(lr); st = opt.init(params)
