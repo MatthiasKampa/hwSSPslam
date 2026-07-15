@@ -8228,3 +8228,48 @@ half-res lidar (11 KB) or BNN weights restores margin. msg.txt §0
 addendum re-shapes the other agent's P3 (unified lidar net at ring
 raster, two heads) and P4 (NYUv2 = seg head of the SAME vision net,
 resized to deploy res).
+
+### verify-space second venue (sspax.realbench verify, fr1_desk + fr1_rpy): ring×VIS_LAMS NOT adopted — the fr3 both-axes win does not replicate on translation
+
+The last open v1.4 adopt-candidate gets its rule-5 second venue (fr1
+npz already local; 14/15 small-motion pairs each — thin, medians
+indicative). fr3 banked: ring-vislams 1.12°/27.6 mm BEAT W_vis3d
+1.32/31.8 on both axes. fr1_desk: rot 1.94 vs 2.19 (ring better) but
+transl 28.7 vs **20.2 mm** (ring +42% worse); fr1_rpy: rot 1.91 vs
+1.90 (tie; ring p90 3.28 vs 4.59 better) but transl 37.2 vs
+**30.8 mm** (+21%). Pattern across all three venues: the ring space is
+equal-or-better on ROTATION (and consistently tighter rot p90), the
+tuned azel W_vis3d is better on TRANSLATION everywhere except fr3.
+VERDICT: NOT adopted — translation feeds the 26–42 mm fused ego-motion
+service, so the vision verify space stays W_vis3d; ring×VIS_LAMS is
+filed as a rotation-tail specialist (revisit only if a rotation-only
+verify tier appears). Closes the v1.4 candidate list: 2 adopted
+(azel-oct6 D240, ring-coarse16 D1920), 2 not (ring-geometry D240,
+ring×VIS_LAMS verify).
+
+## 2026-07-15 — venue-adaptive ladder preset (sspslam/lattice_presets.ladder_of_extent + sspax.realbench preset): ONE static rule reproduces every hand-picked winner and fixes the scale-mismatched cell (+0.075)
+
+The msg-P5 deliverable, built from sspax/ladder_extent's 3×3 diagonal
+without waiting for the densified fit: both ADOPTED ladders are
+instances of ladder = geomspace(lam_min, EXTENT_C·extent, n_rings)
+with EXTENT_C=1.0 (oct6 = geomspace(0.25, 8, 6) at extent 8; LAMC16 =
+geomspace(0.5, 90.5, 16) — half-octave steps — at extent ~90). New
+lattice_presets machinery (add-only; selftest extended, smoke PASS):
+ladder_of_extent(extent, n_rings, lam_min), extent_of_points (robust
+percentile bbox). Extent input = the OWN-estimate-registered map bbox
+(deployable, anti-oracle-safe: reference labels score pairs only).
+
+Gate (realbench preset; mv pair protocol; run2 omitted per its banked
+venue fact): classroom 'spot' HONEST — measured extent 10.3 m;
+preset-azel D240 0.939 vs adopted azel-oct6 0.947 (−0.008, noise
+band); preset-ring D1920 0.975 vs adopted coarse16 0.976. school_run1
+est-DIAGNOSTIC (21 same-pairs, direction-only) — extent 19.5 m;
+preset-azel D240 **0.820 vs adopted azel-oct6 0.745 (+0.075)** — the
+rule scales the ladder to the building extent where the fixed D240
+recipe was room-scaled; preset-ring D1920 0.819 vs coarse16 0.816.
+VERDICT: ADOPTED as the venue-adaptive fallback — matches the
+per-venue hand-picked winner at every venue×budget cell and beats it
+where the hand pick was scale-mismatched; one formula replaces the
+per-venue ladder choice. EXTENT_C refines when the other agent's
+densified lam_max*(extent) fit lands (msg P5); the learned thermometer
+head (P1) must now beat THIS rule, not just the fixed recipes.

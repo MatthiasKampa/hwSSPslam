@@ -89,6 +89,12 @@ res 320×240 / 160×120 before training):
 - gates: seg mIoU sanity; cross-view descriptor stability on TUM (adjacent
   vs far — the failure mode that killed raw census); semantic-map P/R on
   real instances (ScanNet when available).
+- EXPORT + deploy-box gates (pinned 2026-07-15): serialize per the
+  `sspax/headio.py` contract (int8 npz, k-bit label-latent head, pinned
+  input res enforced); gate with `python3 -m sspax.headio stability|gate
+  <head.npz>` — cross-view bits (random-weights baseline 0.892/0.828:
+  read the gap) and the objmap2 semantic-key harness vs banked int
+  0.805 combined / census 3-view 0.165 m.
 
 ## Regime C — end-to-end THROUGH the VSA, for OBJECT-FINDING quality
 

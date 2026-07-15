@@ -89,6 +89,65 @@ def _is_full():
     return a1 > np.pi
 
 
+# --------------------------------------------------------------------------
+#  venue-adaptive place ladder (2026-07-15) — the deployable static cousin
+#  of the learned scale head. sspax/ladder_extent.py measured the mechanism
+#  behind the multi-venue verdict (adopted azel-oct6 wins rooms, ring-
+#  coarse16 wins buildings): the best coarsest wavelength TRACKS THE VENUE
+#  EXTENT (extent 8 -> lam_max 8, 30 -> 22.6, 80 -> 90.5 on the synthetic
+#  diagonal). Both ADOPTED ladders are instances of one rule,
+#      ladder = geomspace(lam_min, EXTENT_C * extent, n_rings):
+#  oct6 = geomspace(0.25, 8, 6) at extent 8; LAMC16 = geomspace(0.5, 90.5,
+#  16) at extent ~90. EXTENT_C=1.0 from the 3x3 diagonal; to be refined by
+#  the densified lam_max*(extent) fit (msg.txt P5) when it lands.
+#  Extent comes from the OWN map bbox (est-registered points) — never from
+#  reference poses (anti-oracle).
+# --------------------------------------------------------------------------
+EXTENT_C = 1.0                   # lam_max = EXTENT_C * extent (P5 fit pending)
+COH_LAM_MIN = 0.25               # sensor-coherence floor (lam_min ~ 2*pi*sig_r)
+
+
+def ladder_of_extent(extent_m, n_rings=6, lam_min=COH_LAM_MIN, c=EXTENT_C):
+    """Place-ladder preset for a venue of horizontal extent `extent_m`
+    (map bbox max span, own-estimate-registered): geometric ladder from
+    the sensor-coherence floor up to the venue scale. Returns a lam list
+    for the 3D place lattice builders (azel/ring x ladder)."""
+    lam_max = max(c * float(extent_m), 2.0 * lam_min)
+    return list(np.geomspace(lam_min, lam_max, n_rings))
+
+
+def extent_of_points(xy, lo=2.0, hi=98.0):
+    """Robust horizontal extent (max bbox span, percentile-fenced) of
+    own-estimate-registered map points or trajectory. Deployable: uses
+    the map's own content, no reference."""
+    p = np.asarray(xy, float).reshape(-1, np.asarray(xy).shape[-1])[:, :2]
+    span = np.percentile(p, hi, axis=0) - np.percentile(p, lo, axis=0)
+    return float(np.max(span))
+
+
+def selftest_extent():
+    oct6 = ladder_of_extent(8.0)
+    assert np.allclose(oct6, [0.25, 0.5, 1.0, 2.0, 4.0, 8.0]), oct6
+    print("  ladder_of_extent(8) == the adopted azel-oct6 ladder (exact)")
+    c16 = ladder_of_extent(90.5, n_rings=16, lam_min=0.5)
+    assert len(c16) == 16 and abs(c16[0] - 0.5) < 1e-9 \
+        and abs(c16[-1] - 90.5) < 1e-6
+    r = np.diff(np.log(c16))
+    assert np.allclose(r, r[0]), "geometric spacing"
+    assert abs(np.exp(r[0]) - np.sqrt(2)) < 1e-3   # half-octave steps
+    print("  ladder_of_extent(90.5, 16, 0.5) == the adopted ring-coarse16 "
+          "ladder (half-octave steps)")
+    rng = np.random.default_rng(7)
+    pts = rng.uniform([-4, -3], [4, 3], (5000, 2))
+    e = extent_of_points(pts)
+    assert 7.0 < e < 8.1, e
+    lam = ladder_of_extent(0.1)
+    assert lam[-1] >= 2 * COH_LAM_MIN     # degenerate-extent floor
+    print("  extent_of_points on an 8x6 box -> %.2f; degenerate floor ok"
+          % e)
+    print("selftest_extent ok")
+
+
 def selftest():
     set_polar()
     for k, v in _SHIPPED.items():
@@ -125,3 +184,4 @@ def selftest():
 
 if __name__ == "__main__":
     selftest()
+    selftest_extent()

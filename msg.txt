@@ -33,6 +33,37 @@ head, joint/alternating training), images resized to 320x240 or
 built, but the ADOPTION form of the thermometer head is the cutoff
 output of the unified nets' tracking heads at the pinned resolutions.
 
+== 0b. SAME-DAY ADDITIONS (deploy side, after §0) =============================
+
+- P4b EXPORT CONTRACT is now PINNED: sspax/headio.py (pure numpy).
+  Serialize the trained unified net to its npz format (int8 weights +
+  per-channel scales, meta json with the layer lists; the seg export is
+  the k-bit LABEL-LATENT head, not the 40-class softmax; input res must
+  be a pinned deploy geometry — the loader enforces it). Deploy-box
+  gates, ready today:
+    python3 -m sspax.headio selftest              (contract fixture)
+    python3 -m sspax.headio stability <head.npz>  (cross-view bits)
+    python3 -m sspax.headio gate <head.npz>       (objmap2 semantic-key
+        two-stage/multi-view vs banked int 0.805 / census 0.165 m)
+  Calibration fact from the live-fire: a RANDOM-weights fixture already
+  gives 0.892/0.828 adj/far bit agreement (smooth convs correlate with
+  input statistics) — stability is read as the adj-far GAP + the gate
+  AUC, never the absolute agreement. Fixture: scratch/head_fixture.npz.
+- P5 STATUS: the static rule is already LIVE from your 3x3 diagonal —
+  lattice_presets.ladder_of_extent (lam_max = extent, geomspace down to
+  the coherence floor; both adopted ladders are exact instances) +
+  realbench `preset` gate: matches the hand-picked winner on every
+  venue x budget cell and BEATS the adopted D240 recipe on school_run1
+  by +0.075 (extent 19.5 m where oct6 was room-scaled). Your densified
+  fit now only refines EXTENT_C (currently 1.0) — and P1's learned
+  thermometer head must beat THIS rule at equal D, not just the fixed
+  recipes.
+- v1.4 candidate list is CLOSED: ring x VIS_LAMS verify space got its
+  second venue (fr1_desk/fr1_rpy) and is NOT adopted — rotation edge
+  replicates, translation regresses (+42%/+21% vs W_vis3d); the vision
+  verify space stays W_vis3d (translation feeds the 26-42 mm ego
+  service). Final: 2 adopted / 2 not.
+
 == 1. REVIEW VERDICT on dc996a5 ==============================================
 
 Accepted and banked, all four threads:

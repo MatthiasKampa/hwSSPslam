@@ -62,6 +62,13 @@ on SO(3) decode, ~0.05 on yaw cos — the storage model survives).
   ("highlight the chairs": P=R=1.0, 4 cm, within capacity).
 - `sspax/vision/tinycnn.py` — FPGA-fittable vision CNN + 64-bit descriptor head,
   pretrained on CIFAR-100. See `sspax/LEARNED_FRONTEND.md`.
+- `sspax/realbench.py` — pure-numpy REAL-DATA transfer gates (school/tum/
+  verify/mv/preset), runs on the no-JAX deploy box.
+- `sspax/headio.py` — the unified-net HEAD EXPORT CONTRACT (int8 npz +
+  pure-numpy forward) + deploy-box gates: contract selftest, cross-view
+  bit stability, objmap2 semantic-key harness. Train anywhere, gate here.
+- `sspax/ladder_extent.py` — extent×λ_max mechanism study behind the
+  venue-adaptive ladder preset (`sspslam/lattice_presets.ladder_of_extent`).
 
 ## Verdict
 

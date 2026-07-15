@@ -26,8 +26,15 @@ harnesses, against the banked recipes:
            school_run2 (est DIAGNOSTIC — its honest gated-LIO window has
            NO >=40-gap revisits within 1.0 m; place is unscoreable on
            honest labels there, banked 2026-07-15).
+  preset   the venue-adaptive ladder rule (lattice_presets.
+           ladder_of_extent, the static cousin of the learned scale
+           head): extent from the OWN-estimate-registered map bbox
+           (deployable; reference labels score pairs only), preset
+           ladders at both budgets vs the ADOPTED fixed recipes on
+           identical pairs. PASS = the one rule matches the per-venue
+           hand-picked winner at each budget.
 
-Usage: python3 -m sspax.realbench school|tum|verify|mv
+Usage: python3 -m sspax.realbench school|tum|verify|mv|preset
 """
 import sys
 
@@ -136,6 +143,67 @@ def bench_mv():
                   flush=True)
 
 
+def bench_preset():
+    """Extent->ladder rule vs the adopted fixed recipes (rule-5 pair
+    protocol of bench_mv; run2 omitted per its banked venue fact)."""
+    import sspslam.lattice_presets as LP
+    EL5 = [-40, -20, 0, 20, 40]
+    for run, labels in (("spot", "ref"), ("school_run1", "est")):
+        pick, kts, pose, kind = L3.sample_kf(run, 110, need_ref=True,
+                                             labels=labels)
+        if pose is None:
+            print(f"{run}: no {labels} labels — skipped", flush=True)
+            continue
+        full, _ = L3.load_clouds(run, kts)
+        keep = [i for i, c in enumerate(full) if c is not None
+                and len(c) > 300]
+        # deployable extent: own-estimate poses register the clouds; the
+        # map bbox is the rule input (est_cache is built by sample_kf)
+        if labels == "est":
+            est = pose
+        else:
+            L3.sample_kf(run, 8, labels="est")
+            d = L3.BASE if run == "spot" else L3.BASE / run
+            est = np.load(d / "est_cache.npz")["fin"][pick]
+        reg = []
+        for i in keep:
+            c, s = np.cos(est[i][2]), np.sin(est[i][2])
+            R = np.array([[c, -s], [s, c]])
+            reg.append(full[i][::16, :2] @ R.T + est[i][:2])
+        extent = LP.extent_of_points(np.concatenate(reg))
+        lad6 = LP.ladder_of_extent(extent, 6, 0.25)
+        lad16 = LP.ladder_of_extent(extent, 16, 0.5)
+        pr = dict(same_r=1.0, far_lo=4.0) if labels == "est" else {}
+        (si, sj), (di, dj) = L3._pairs(pose[keep], **pr)
+        print(f"\nPRESET gate {run} (labels={kind}, {len(keep)} frames, "
+              f"extent {extent:.1f} m -> lam_max {lad6[-1]:.1f}, "
+              f"same/diff {len(si)}/{len(di)}):", flush=True)
+        if len(si) < 8 or len(di) < 8:
+            print("  DEGENERATE pair counts — venue not scoreable",
+                  flush=True)
+            continue
+        arms = [
+            ("azel-oct6 ADOPTED  D240 ", LS.azel_W(8, EL5, OCT6), None),
+            ("azel-preset        D240 ", LS.azel_W(8, EL5, lad6), None),
+            ("ring-coarse16 ADPT D1920", None, (120, LS.LAMC16)),
+            ("ring-preset        D1920", None, (120, lad16)),
+        ]
+        for name, W, ringspec in arms:
+            if ringspec is not None:
+                nd, lams = ringspec
+                W, _ = W_ring(nd, lams)
+                V = np.stack([L3.encode(W, full[i]) for i in keep])
+                S = ring_rotsim(V, nd, len(W) // nd)
+            else:
+                V = np.stack([L3.encode(W, full[i]) for i in keep])
+                S = LS.rot_sim(V, W, 24)
+            adj = np.arange(len(keep) - 1)
+            print(f"  {name} (D{len(W):4d}): "
+                  f"AUC {L3._auc(S[si, sj], S[di, dj]):.3f}  "
+                  f"adj {L3._auc(S[adj, adj + 1], S[di, dj]):.3f}",
+                  flush=True)
+
+
 def bench_tum(seq=V6.SEQ):
     gray, depth, gt, K = V6.load(seq)
     pos = gt[:, :3]
@@ -236,5 +304,5 @@ def bench_verify(seq=V6.SEQ):
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "school"
-    dict(school=bench_school, tum=bench_tum,
-         verify=bench_verify, mv=bench_mv)[cmd]()
+    dict(school=bench_school, tum=bench_tum, verify=bench_verify,
+         mv=bench_mv, preset=bench_preset)[cmd]()
