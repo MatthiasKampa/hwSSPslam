@@ -98,12 +98,24 @@ def _is_full():
 #  diagonal). Both ADOPTED ladders are instances of one rule,
 #      ladder = geomspace(lam_min, EXTENT_C * extent, n_rings):
 #  oct6 = geomspace(0.25, 8, 6) at extent 8; LAMC16 = geomspace(0.5, 90.5,
-#  16) at extent ~90. EXTENT_C=1.0 from the 3x3 diagonal; to be refined by
-#  the densified lam_max*(extent) fit (msg.txt P5) when it lands.
+#  16) at extent ~90.
+#  P5 DENSIFIED-FIT VERDICT (sspax/ladder_rule.py, banked 2026-07-15): the
+#  law is MONOTONE (Spearman 0.90-0.97) but NOT linear — the through-origin
+#  constant is not identifiable (0.75 at n_rings=6 / 1.25 at n_rings=8,
+#  R^2 0.39/0.78; ring count rescales every rung, confounding the fit), so
+#  EXTENT_C stays 1.0 and will NOT be "refined" from that surface. The rule
+#  is retained because only its REACH constraint binds: ladder choice is
+#  nearly free below ~50 m (AUC spread 0.03-0.09) and matters hugely at
+#  building scale (0.21-0.22 at 80-120 m, where a too-fine ladder aliases
+#  catastrophically) — lam_max = extent guarantees scene-scale reach there
+#  and is harmless where the choice is free, i.e. the continuous formula
+#  IS the recommended coarse bucket in behavior. Caveat: ring-count
+#  invariance did NOT hold in the dense sweep; the preset is calibrated at
+#  the two adopted (n_rings, lam_min) combos above.
 #  Extent comes from the OWN map bbox (est-registered points) — never from
 #  reference poses (anti-oracle).
 # --------------------------------------------------------------------------
-EXTENT_C = 1.0                   # lam_max = EXTENT_C * extent (P5 fit pending)
+EXTENT_C = 1.0                   # not identifiable beyond ~[0.75, 1.25]; keep 1
 COH_LAM_MIN = 0.25               # sensor-coherence floor (lam_min ~ 2*pi*sig_r)
 
 

@@ -3,29 +3,48 @@ JAX/torch — the transfer-gate side of TRAINING_PROGRAM.md P4b).
 
 THE CONTRACT (one .npz per trained unified net):
   meta        json string:
-    version   1
+    version   1 | 2 (v2 = 2026-07-15c, shaped to the FIRST TRAINED nets
+              sspax/vision/segnet.py + sspax/lidar_ring.py; v1 files
+              still load — in_div defaults to 255, desc to absent)
     modality  "vision" | "lidar"
     in_h/in_w input resolution — MUST be a pinned deploy geometry
               (vision 240x320 or 120x160 Y8; lidar 3x1024 or 3x512
               ring raster, rings-as-channels)
     in_ch     1 (vision Y8) | 3 (lidar rings)
-    cell      trunk stride product (vision: 8 -> 30x40 cells at full res)
+    in_div    input scale divisor (v2): vision 255.0 (Y8 -> [0,1]),
+              lidar 1.0 (ring ranges stay in METERS — the nets train
+              on raw meters; /255 here was a v1 vision-ism)
+    cell      trunk stride product (any pinned combo that lands on the
+              30x40 vision cell grid: full res stride 8 or half res
+              stride 4; lidar: azimuth downsample, e.g. 4 -> 256 bins)
     act       "relu" | "crelu" (hidden layers; last layer of every
               stack is linear; CReLU doubles the NEXT layer's cin)
     trunk     [{kind: conv|dw|conv1d, k, s, cin, cout}, ...]
-    track     layer list -> (h, w, 2): [:, :, 0] = per-cell weight (use
-              max(0, .)), [:, :, 1] = thermometer scale cutoff
+    track     layer list -> (h, w, 1) or (h, w, 2): [:, :, 0] = per-cell
+              saliency weight (use max(0, .)); [:, :, 1] (optional) =
+              thermometer cutoff — RETIRED per the 2026-07-15 P1
+              retraction (kept loadable; two same-input 1x1 convs merge
+              exactly into one cout=2 conv if a trained net has both)
+    desc      (v2, optional) layer list -> (h, w, desc_bits) tracking-
+              descriptor activations; bits = act > 0 (sign binarize).
+              THE CARRYING HEAD on trained nets (NYUv2 retrieval 0.95,
+              int4-robust) — v1 had no slot for it.
+    desc_bits len of the descriptor (32 on the trained nets)
     seg       layer list -> (h, w, k_bits) LABEL-LATENT bit logits (the
               binarized class embedding — export THIS head, not the
-              40-class training softmax); bits = logits > thresh
-    k_bits    16 | 32
+              40-class training softmax); bits = logits > thresh.
+              OPTIONAL in v2 when desc is present (desc-only tracking
+              heads export now; the k-bit latent arrives with the
+              distillation round)
+    k_bits    16 | 32 (0 when seg absent)
     thresh    per-bit binarization thresholds (len k_bits)
-  arrays      per stack prefix T (trunk) / A (track) / G (seg):
+  arrays      per stack prefix T (trunk) / A (track) / G (seg) /
+              D (desc, v2):
     {P}{i}_w  int8 weights — conv: (cout, cin, k, k); dw: (cin, k, k);
               conv1d: (cout, cin, k)
     {P}{i}_s  float32 per-out-channel dequant scale (dw: per cin)
     {P}{i}_b  float32 bias
-  semantics   x = raw/255 in [0,1] float32, SAME zero pad (k//2),
+  semantics   x = raw/in_div float32, SAME zero pad (k//2),
               y = conv(x, w_int8 * s) + b; QAT on the training side
               maps into this exactly.
 
@@ -53,9 +72,9 @@ Gates provided here (run on the deploy box, rule-4 style):
 
 Usage:
   python3 -m sspax.headio selftest
-  python3 -m sspax.headio fixture scratch/head_fixture.npz [full|half] [k]
-  python3 -m sspax.headio stability <head.npz> [seq]
-  python3 -m sspax.headio gate <head.npz> [seq]
+  python3 -m sspax.headio fixture scratch/head_fixture.npz [full|half|lidar] [k]
+  python3 -m sspax.headio stability <head.npz> [seq]     (desc bits if present)
+  python3 -m sspax.headio gate <head.npz> [seq] [seg|desc]
 """
 import json
 import sys
@@ -77,9 +96,15 @@ def save_head(path, meta, arrays):
 def load_head(path):
     z = np.load(path)
     meta = json.loads(bytes(z["meta"]).decode())
-    assert meta["version"] == 1
+    assert meta["version"] in (1, 2)
+    meta.setdefault("in_div", 255.0)          # v1 semantics
+    meta.setdefault("desc", [])               # v1: no descriptor slot
+    meta.setdefault("seg", [])                # v2: desc-only heads allowed
+    meta.setdefault("k_bits", 0)              # (the k-bit latent arrives
+    meta.setdefault("thresh", [])             #  with the distillation round)
     stacks = {}
-    for pre, name in (("T", "trunk"), ("A", "track"), ("G", "seg")):
+    for pre, name in (("T", "trunk"), ("A", "track"), ("G", "seg"),
+                      ("D", "desc")):
         stack = []
         for i, L in enumerate(meta[name]):
             w = z[f"{pre}{i}_w"].astype(np.float32)
@@ -100,8 +125,11 @@ def _validate(meta):
               ("lidar"): [(3, 1024, 3), (3, 512, 3)]}
     assert res in ok_res[meta["modality"]], \
         f"input {res} is not a pinned deploy geometry (2026-07-15b)"
+    assert float(meta["in_div"]) > 0
     crelu = meta["act"] == "crelu"
-    for name in ("trunk", "track", "seg"):
+    for name in ("trunk", "track", "seg", "desc"):
+        if not meta[name]:
+            continue
         ch = meta["trunk"][0]["cin"] if name == "trunk" else \
             _out_ch(meta, "trunk", crelu, last_linear=False)
         for i, L in enumerate(meta[name]):
@@ -114,9 +142,13 @@ def _validate(meta):
     for L in meta["trunk"]:
         s *= L["s"]
     assert s == meta["cell"], (s, meta["cell"])
-    assert len(meta["thresh"]) == meta["k_bits"]
-    assert meta["seg"][-1]["cout"] == meta["k_bits"]
-    assert meta["track"][-1]["cout"] == 2
+    assert meta["seg"] or meta["desc"], "head must carry seg or desc bits"
+    if meta["seg"]:
+        assert len(meta["thresh"]) == meta["k_bits"]
+        assert meta["seg"][-1]["cout"] == meta["k_bits"]
+    assert meta["track"][-1]["cout"] in (1, 2)   # 1 = weight-only (cutoff
+    if meta["desc"]:                             # retired, P1 retraction)
+        assert meta["desc"][-1]["cout"] == meta["desc_bits"]
 
 
 def _out_ch(meta, name, crelu, last_linear=True):
@@ -156,10 +188,12 @@ def _run_stack(x, stack, act, last_linear=True):
 
 
 def forward(head, raw):
-    """raw: vision (H, W) uint8/float | lidar (3, W) float ring raster.
-    -> dict(track=(h, w, 2) raw outputs, logits=(h, w, k), bits bool)."""
+    """raw: vision (H, W) uint8/float | lidar (3, W) float ring raster
+    (raw METERS — in_div=1 for lidar; /255 only where meta says so).
+    -> dict(track=(h, w, 1|2) raw outputs, logits=(h, w, k), bits bool,
+    + desc=(h, w, desc_bits) sign bits when the head has one)."""
     m = head["meta"]
-    x = np.asarray(raw, np.float32) / 255.0
+    x = np.asarray(raw, np.float32) / float(m["in_div"])
     if m["modality"] == "vision":
         assert x.shape == (m["in_h"], m["in_w"]), x.shape
         x = x[:, :, None]
@@ -167,52 +201,102 @@ def forward(head, raw):
         assert x.shape == (m["in_h"], m["in_w"]), x.shape
         x = np.ascontiguousarray(x.T)          # (beams, rings-as-ch)
     trunk = _run_stack(x, head["trunk"], m["act"], last_linear=False)
-    track = _run_stack(trunk, head["track"], m["act"])
-    logits = _run_stack(trunk, head["seg"], m["act"])
-    bits = logits > np.asarray(m["thresh"], np.float32)
-    return dict(track=track, logits=logits, bits=bits)
+    out = dict(track=_run_stack(trunk, head["track"], m["act"]))
+    if head["seg"]:
+        logits = _run_stack(trunk, head["seg"], m["act"])
+        out["logits"] = logits
+        out["bits"] = logits > np.asarray(m["thresh"], np.float32)
+    if head["desc"]:
+        da = _run_stack(trunk, head["desc"], m["act"])
+        out["desc_act"] = da
+        out["desc"] = da > 0
+    return out
 
 
-def cell_bits(head, gray, pool=2):
-    """Seg-head bits pooled to a coarser cell grid (mean logits over
+def cell_bits(head, gray, pool=2, source="seg"):
+    """Per-cell bits pooled to a coarser cell grid (mean activations over
     pool x pool net cells -> threshold): the c16 objmap grid from the
-    c8 trunk at full res."""
+    30x40 trunk grid. source: "seg" (k-bit label latent > thresh) or
+    "desc" (tracking descriptor > 0 — the carrying head on trained nets).
+    A half-res head on full-res stored frames (TUM 240x320) subsamples 2x
+    (nearest — the trained nets' resize convention)."""
+    m = head["meta"]
+    gray = np.asarray(gray)
+    if (m["modality"] == "vision"
+            and gray.shape == (2 * m["in_h"], 2 * m["in_w"])):
+        gray = gray[::2, ::2]
     out = forward(head, gray)
-    lg = out["logits"]
-    h, w, k = lg.shape
-    lg = lg[:h - h % pool, :w - w % pool]
-    lg = lg.reshape(h // pool, pool, w // pool, pool, k).mean((1, 3))
-    return lg > np.asarray(head["meta"]["thresh"], np.float32)
+    a = out["logits"] if source == "seg" else out["desc_act"]
+    h, w, k = a.shape
+    a = a[:h - h % pool, :w - w % pool]
+    a = a.reshape(h // pool, pool, w // pool, pool, k).mean((1, 3))
+    th = (np.asarray(head["meta"]["thresh"], np.float32)
+          if source == "seg" else 0.0)
+    return a > th
 
 
 # --------------------------------------------------------------------------
-#  fixture (shape contract only — random weights)
+#  fixtures (shape contract only — random weights)
+#  "full"  = the v1 full-res vision shape (stride-8 trunk, no desc):
+#            exercises v1 back-compat through the v2 loader.
+#  "half"  = MIRRORS the first trained vision net (sspax/vision/segnet.py,
+#            NYUv2 2026-07-15): half res, stride-4 CReLU trunk -> 30x40x64,
+#            track = w+cut merged cout 2, desc 32, seg k-bit.
+#  "lidar" = MIRRORS the trained lidar net (sspax/lidar_ring.py): 3x1024
+#            ring raster in METERS (in_div 1), 1D CReLU trunk -> 256x64,
+#            track = w only (cout 1), desc 32, seg k-bit.
 # --------------------------------------------------------------------------
 def make_fixture(path, res="full", k_bits=16, seed=0):
-    full = res == "full"
-    T = [dict(kind="conv", k=3, s=2, cin=1, cout=8),
-         dict(kind="dw", k=3, s=1, cin=8, cout=8),
-         dict(kind="conv", k=1, s=1, cin=8, cout=16),
-         dict(kind="dw", k=3, s=2, cin=16, cout=16),
-         dict(kind="conv", k=1, s=1, cin=16, cout=32),
-         dict(kind="dw", k=3, s=2, cin=32, cout=32),
-         dict(kind="conv", k=1, s=1, cin=32, cout=64)]
-    A = [dict(kind="conv", k=1, s=1, cin=64, cout=2)]
-    G = [dict(kind="dw", k=3, s=1, cin=64, cout=64),
-         dict(kind="conv", k=1, s=1, cin=64, cout=128),
-         dict(kind="conv", k=1, s=1, cin=128, cout=k_bits)]
-    meta = dict(version=1, modality="vision",
-                in_h=240 if full else 120, in_w=320 if full else 160,
-                in_ch=1, cell=8, act="relu", trunk=T, track=A, seg=G,
-                k_bits=k_bits, thresh=[0.0] * k_bits)
+    if res == "full":
+        T = [dict(kind="conv", k=3, s=2, cin=1, cout=8),
+             dict(kind="dw", k=3, s=1, cin=8, cout=8),
+             dict(kind="conv", k=1, s=1, cin=8, cout=16),
+             dict(kind="dw", k=3, s=2, cin=16, cout=16),
+             dict(kind="conv", k=1, s=1, cin=16, cout=32),
+             dict(kind="dw", k=3, s=2, cin=32, cout=32),
+             dict(kind="conv", k=1, s=1, cin=32, cout=64)]
+        A = [dict(kind="conv", k=1, s=1, cin=64, cout=2)]
+        G = [dict(kind="dw", k=3, s=1, cin=64, cout=64),
+             dict(kind="conv", k=1, s=1, cin=64, cout=128),
+             dict(kind="conv", k=1, s=1, cin=128, cout=k_bits)]
+        meta = dict(version=1, modality="vision", in_h=240, in_w=320,
+                    in_ch=1, cell=8, act="relu", trunk=T, track=A, seg=G,
+                    k_bits=k_bits, thresh=[0.0] * k_bits)
+        D = []
+    elif res == "half":
+        T = [dict(kind="conv", k=3, s=2, cin=1, cout=16),
+             dict(kind="conv", k=3, s=2, cin=32, cout=16),
+             dict(kind="conv", k=3, s=1, cin=32, cout=32),
+             dict(kind="conv", k=1, s=1, cin=64, cout=32)]
+        A = [dict(kind="conv", k=1, s=1, cin=64, cout=2)]
+        D = [dict(kind="conv", k=1, s=1, cin=64, cout=32)]
+        G = [dict(kind="conv", k=1, s=1, cin=64, cout=k_bits)]
+        meta = dict(version=2, modality="vision", in_h=120, in_w=160,
+                    in_ch=1, in_div=255.0, cell=4, act="crelu", trunk=T,
+                    track=A, desc=D, desc_bits=32, seg=G,
+                    k_bits=k_bits, thresh=[0.0] * k_bits)
+    else:                                       # lidar
+        T = [dict(kind="conv1d", k=7, s=2, cin=3, cout=16),
+             dict(kind="conv1d", k=7, s=2, cin=32, cout=16),
+             dict(kind="conv1d", k=5, s=1, cin=32, cout=32),
+             dict(kind="conv1d", k=1, s=1, cin=64, cout=32)]
+        A = [dict(kind="conv1d", k=1, s=1, cin=64, cout=1)]
+        D = [dict(kind="conv1d", k=1, s=1, cin=64, cout=32)]
+        G = [dict(kind="conv1d", k=1, s=1, cin=64, cout=k_bits)]
+        meta = dict(version=2, modality="lidar", in_h=3, in_w=1024,
+                    in_ch=3, in_div=1.0, cell=4, act="crelu", trunk=T,
+                    track=A, desc=D, desc_bits=32, seg=G,
+                    k_bits=k_bits, thresh=[0.0] * k_bits)
     rng = np.random.default_rng(seed)
     arrays = {}
-    for pre, LL in (("T", T), ("A", A), ("G", G)):
+    for pre, LL in (("T", T), ("A", A), ("G", G), ("D", D)):
         for i, L in enumerate(LL):
             shp = ((L["cin"], L["k"], L["k"]) if L["kind"] == "dw"
+                   else (L["cout"], L["cin"], L["k"]) if L["kind"] == "conv1d"
                    else (L["cout"], L["cin"], L["k"], L["k"]))
             nch = L["cin"] if L["kind"] == "dw" else L["cout"]
-            fan = L["k"] ** 2 * (1 if L["kind"] == "dw" else L["cin"])
+            fan = (L["k"] * L["cin"] if L["kind"] == "conv1d"
+                   else L["k"] ** 2 * (1 if L["kind"] == "dw" else L["cin"]))
             arrays[f"{pre}{i}_w"] = rng.integers(
                 -64, 65, shp).astype(np.int8)
             arrays[f"{pre}{i}_s"] = np.full(
@@ -225,13 +309,21 @@ def make_fixture(path, res="full", k_bits=16, seed=0):
 
 def _mmacs(meta):
     tot, h, w = {}, meta["in_h"], meta["in_w"]
-    for name in ("trunk", "track", "seg"):
+    if meta["modality"] == "lidar":
+        h = 1                        # rings are channels; azimuth = spatial
+    for name in ("trunk", "track", "seg", "desc"):
+        if not meta[name]:
+            continue
         m, hh, ww = 0, h, w          # heads start at trunk-output res
         for L in meta[name]:
-            hh, ww = hh // L["s"], ww // L["s"]
-            mult = L["k"] ** 2 * (L["cin"] if L["kind"] != "dw" else 1)
-            m += hh * ww * mult * (L["cout"] if L["kind"] != "dw" else
-                                   L["cin"])
+            if L["kind"] == "conv1d":
+                ww = ww // L["s"]
+                m += ww * L["k"] * L["cin"] * L["cout"]
+            else:
+                hh, ww = hh // L["s"], ww // L["s"]
+                mult = L["k"] ** 2 * (L["cin"] if L["kind"] != "dw" else 1)
+                m += hh * ww * mult * (L["cout"] if L["kind"] != "dw" else
+                                       L["cin"])
         tot[name] = m
         if name == "trunk":
             h, w = hh, ww
@@ -241,43 +333,76 @@ def _mmacs(meta):
 def selftest():
     import tempfile
     import os
-    for res, hw in (("full", (30, 40)), ("half", (15, 20))):
+    # (fixture, trunk-grid, track cout, has desc)
+    cases = (("full", (30, 40), 2, False),      # v1 back-compat
+             ("half", (30, 40), 2, True),       # trained segnet mirror
+             ("lidar", (256,), 1, True))        # trained lidar_ring mirror
+    for res, hw, tc, has_d in cases:
         p = os.path.join(tempfile.gettempdir(), f"headio_{res}.npz")
         make_fixture(p, res, k_bits=16, seed=3)
         head = load_head(p)
         rng = np.random.default_rng(0)
-        img = rng.integers(0, 256, (head["meta"]["in_h"],
-                                    head["meta"]["in_w"])).astype(np.uint8)
-        o1 = forward(head, img)
-        o2 = forward(load_head(p), img)
-        assert o1["track"].shape == hw + (2,), o1["track"].shape
+        m = head["meta"]
+        raw = (rng.integers(0, 256, (m["in_h"], m["in_w"])).astype(np.uint8)
+               if m["modality"] == "vision" else
+               rng.uniform(0, 60, (m["in_h"], m["in_w"])))   # ranges, METERS
+        o1 = forward(head, raw)
+        o2 = forward(load_head(p), raw)
+        assert o1["track"].shape == hw + (tc,), o1["track"].shape
         assert o1["bits"].shape == hw + (16,)
         assert np.array_equal(o1["logits"], o2["logits"])   # determinism
         assert np.array_equal(o1["bits"], o2["bits"])
+        if has_d:
+            assert o1["desc"].shape == hw + (32,)
+            assert np.array_equal(o1["desc"], o2["desc"])
+        mm = _mmacs(m)
+        fr = mm["trunk"] + mm["track"] + mm.get("desc", 0)
         if res == "full":
-            cb = cell_bits(head, img)
+            cb = cell_bits(head, raw)
             assert cb.shape == (15, 20, 16)
-            mm = _mmacs(head["meta"])
-            print(f"  full-res fixture: trunk+track "
-                  f"{(mm['trunk'] + mm['track'])/1e6:.1f} MMAC "
-                  f"(budget line 11.3), seg {mm['seg']/1e6:.1f} "
-                  f"(class-head budget bound 16.7)")
-        print(f"  {res}: forward {hw} cells, deterministic, "
-              f"roundtrip exact")
-    print("headio selftest ok")
+            assert abs(fr / 1e6 - 11.3) < 0.2, fr           # budget line
+        elif res == "half":
+            cb = cell_bits(head, raw, source="desc")
+            assert cb.shape == (15, 20, 32)
+            # cross-impl budget check vs the trained segnet's own print
+            # (22 MMAC trunk+track+desc, sspax/vision/segnet.py fpga_cost)
+            assert abs(fr / 1e6 - 22.3) < 0.3, fr
+        else:
+            # lidar_ring fpga_cost prints 4.12 MMAC incl. its 40-class lab
+            # head; with the k16 latent head instead: 3.47 + 0.26 @kf
+            assert abs(fr / 1e6 - 3.47) < 0.1, fr
+        print(f"  {res}: forward {hw} cells (track {tc}"
+              f"{', desc 32' if has_d else ''}), deterministic, roundtrip "
+              f"exact; @frame {fr/1e6:.1f} MMAC, seg {mm['seg']/1e6:.1f}")
+    # desc-only head (seg deferred to the distillation round) must load
+    p = os.path.join(tempfile.gettempdir(), "headio_lidar.npz")
+    z = np.load(p)
+    meta = json.loads(bytes(z["meta"]).decode())
+    meta["seg"], meta["k_bits"], meta["thresh"] = [], 0, []
+    arrays = {k: z[k] for k in z.files if k != "meta" and not
+              k.startswith("G")}
+    p2 = os.path.join(tempfile.gettempdir(), "headio_desconly.npz")
+    save_head(p2, meta, arrays)
+    head = load_head(p2)
+    o = forward(head, np.random.default_rng(0).uniform(0, 60, (3, 1024)))
+    assert "logits" not in o and o["desc"].shape == (256, 32)
+    print("  desc-only head: loads, forwards (no seg stack)")
+    print("headio selftest ok (v1 back-compat + v2 trained-net mirrors)")
 
 
 # --------------------------------------------------------------------------
 #  gate 1: cross-view bit stability (the raw-census killer)
 # --------------------------------------------------------------------------
-def bits_stability(head_path, seq=None):
+def bits_stability(head_path, seq=None, source="auto"):
     import experiments.objmap as OM
     import experiments.vision6d as V6
     head = load_head(head_path)
+    if source == "auto":               # desc = the carrying head when present
+        source = "desc" if head["desc"] else "seg"
     seq = seq or OM.SEQ
     feats, gt = OM.load_feats(seq)
     gray, _, _, _ = V6.load(seq)
-    B = np.stack([cell_bits(head, g) for g in gray])
+    B = np.stack([cell_bits(head, g, source=source) for g in gray])
     pos = gt[:, :3]
     d = np.linalg.norm(pos[:, None] - pos[None], axis=2)
     adj, far = [], []
@@ -302,8 +427,8 @@ def bits_stability(head_path, seq=None):
                 bucket.append(
                     float((B[i, cy, cx] == B[j, y2, x2]).mean()))
     print(f"cross-view bit agreement ({seq.split('_freiburg')[-1]}, "
-          f"k={B.shape[-1]}; RANDOM-weights baseline 0.892 adj / "
-          f"0.828 far — read the gap, not the absolute):")
+          f"{source} bits k={B.shape[-1]}; RANDOM-weights baseline 0.892 "
+          f"adj / 0.828 far — read the gap, not the absolute):")
     print(f"  same cell adjacent frames: {np.mean(adj):.3f} (n={len(adj)})")
     print(f"  same cell far frames     : {np.mean(far):.3f} (n={len(far)})",
           flush=True)
@@ -381,23 +506,27 @@ def _mv_query_h(feats, apps, k, cy, cx, W, span=2, rad=0.4):
     return q, x0, ntot
 
 
-def gate_objmap(head_path, seq=None, nq=48, topk=3):
-    # nq=48 drawn -> ~16 kept matches the banked objmap2 protocol
+def gate_objmap(head_path, seq=None, nq=48, topk=3, key="seg"):
+    # nq=48 drawn -> ~16 kept matches the banked objmap2 protocol.
+    # key="seg" binds the k-bit label latent (the semantic key);
+    # key="desc" binds the tracking-descriptor bits (appearance key —
+    # the head the trained nets actually carry).
     import experiments.objmap as OM
     import experiments.objmap2 as O2
     import experiments.twomap as TM
     import experiments.lattice3d as L3
     import experiments.vision6d as V6
     head = load_head(head_path)
+    assert key == "seg" or head["desc"], "no desc head in this file"
     seq = seq or OM.SEQ
     rng = np.random.default_rng(OM.RNG)
     feats, gt = OM.load_feats(seq)
     gray, depth, _, K = V6.load(seq)
     map_kf, qry_kf = OM.split(len(feats))
     W = OM.W_map(960)
-    kb = head["meta"]["k_bits"]
+    kb = head["meta"]["k_bits"] if key == "seg" else head["meta"]["desc_bits"]
     keys = _head_keys(kb, len(W))
-    apps = [_app_h(cell_bits(head, g), keys) for g in gray]
+    apps = [_app_h(cell_bits(head, g, source=key), keys) for g in gray]
     groups = [list(map_kf[i:i + OM.SEG])
               for i in range(0, len(map_kf), OM.SEG)]
     maps = [(g, sum(_frame_vec_h(feats[k], apps[k], W) for k in g))
@@ -452,7 +581,7 @@ def gate_objmap(head_path, seq=None, nq=48, topk=3):
             a["n"] += 1
     ff, _ = OM.load_feats(OM.FOIL_SEQ)
     fgray, _, _, fK = V6.load(OM.FOIL_SEQ)
-    fapps = [_app_h(cell_bits(head, g), keys) for g in fgray]
+    fapps = [_app_h(cell_bits(head, g, source=key), keys) for g in fgray]
     fq = OM.pick_queries(ff, np.arange(len(ff)), rng, n=nq)
     foil = {t: dict(sc=[], s1=[]) for t in arms}
     for k, cy, cx in fq:
@@ -466,7 +595,7 @@ def gate_objmap(head_path, seq=None, nq=48, topk=3):
             foil[tag]["sc"].append(sc / max(n, 1))
             foil[tag]["s1"].append(s1)
     print(f"objmap2 semantic-key gate ({seq.split('_freiburg')[-1]}, "
-          f"k={kb} head bits -> bipolar spatter D{len(W)}, "
+          f"{key} k={kb} head bits -> bipolar spatter D{len(W)}, "
           f"{arms['2stage-1view']['n']} queries, top-{topk}; banked refs: "
           f"int combined 0.805, census 3-view err 0.165 m):")
     a0 = arms["2stage-1view"]
@@ -502,4 +631,5 @@ if __name__ == "__main__":
                        sys.argv[3] if len(sys.argv) > 3 else None)
     elif cmd == "gate":
         gate_objmap(sys.argv[2],
-                    sys.argv[3] if len(sys.argv) > 3 else None)
+                    sys.argv[3] if len(sys.argv) > 3 else None,
+                    key=sys.argv[4] if len(sys.argv) > 4 else "seg")

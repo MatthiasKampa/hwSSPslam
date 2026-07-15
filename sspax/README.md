@@ -65,9 +65,12 @@ on SO(3) decode, ~0.05 on yaw cos — the storage model survives).
   See `sspax/LEARNED_FRONTEND.md`.
 - `sspax/realbench.py` — pure-numpy REAL-DATA transfer gates (school/tum/
   verify/mv/preset), runs on the no-JAX deploy box.
-- `sspax/headio.py` — the unified-net HEAD EXPORT CONTRACT (int8 npz +
-  pure-numpy forward) + deploy-box gates: contract selftest, cross-view
-  bit stability, objmap2 semantic-key harness. Train anywhere, gate here.
+- `sspax/headio.py` — the unified-net HEAD EXPORT CONTRACT v2 (int8 npz +
+  pure-numpy forward; v2 mirrors the trained segnet/lidar_ring shapes —
+  desc stack, track cout 1|2 (cutoff retired), in_div lidar-meters,
+  seg optional until distillation) + deploy-box gates: contract selftest,
+  cross-view bit stability, objmap2 semantic/appearance-key harness, with
+  measured random-weights baselines for both. Train anywhere, gate here.
 - `sspax/ladder_extent.py` — extent×λ_max mechanism study behind the
   venue-adaptive ladder preset (`sspslam/lattice_presets.ladder_of_extent`).
 

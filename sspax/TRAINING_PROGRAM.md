@@ -89,12 +89,18 @@ res 320×240 / 160×120 before training):
 - gates: seg mIoU sanity; cross-view descriptor stability on TUM (adjacent
   vs far — the failure mode that killed raw census); semantic-map P/R on
   real instances (ScanNet when available).
-- EXPORT + deploy-box gates (pinned 2026-07-15): serialize per the
-  `sspax/headio.py` contract (int8 npz, k-bit label-latent head, pinned
-  input res enforced); gate with `python3 -m sspax.headio stability|gate
-  <head.npz>` — cross-view bits (random-weights baseline 0.892/0.828:
-  read the gap) and the objmap2 semantic-key harness vs banked int
-  0.805 combined / census 3-view 0.165 m.
+- EXPORT + deploy-box gates (pinned 2026-07-15; contract v2 2026-07-15c,
+  reshaped to the FIRST TRAINED nets): serialize per the `sspax/headio.py`
+  v2 contract (int8 npz; optional `desc` stack for the 32-bit tracking
+  descriptor — the carrying head; track cout 1|2, the thermometer-cutoff
+  channel is RETIRED per the P1 selfrot retraction; `in_div` explicit —
+  lidar rasters stay in METERS, only vision divides by 255; k-bit
+  label-latent seg head, pinned input res enforced). Gate with
+  `python3 -m sspax.headio stability|gate <head.npz> [seq] [seg|desc]`.
+  RANDOM-weights baselines (read the gap/delta, never the absolute):
+  seg bits 0.892 adj / 0.828 far; desc bits (CReLU half-res mirror)
+  0.954 / 0.906; desc-key objmap2 gate stage-2 AUC 0.52-0.55, err med
+  ~1.1-1.2 m vs banked int 0.805 combined / census 3-view 0.165 m.
 
 ## Regime C — end-to-end THROUGH the VSA, for OBJECT-FINDING quality
 

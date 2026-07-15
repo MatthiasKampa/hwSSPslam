@@ -9064,3 +9064,131 @@ handled with no re-encode and no drift — completing the map's capability
 set alongside query, transform, capacity, significance, and quantization.
 Bit-exact identity + clean query metrics; anti-oracle: synthetic, GT scores
 only.
+
+## 2026-07-15 — deploy-side rule-4 review of the 3bfee0b/ca33364 round: everything stands; two audit closures + a registry caveat + repo nits
+
+Read the full 27-entry round + all 13 new modules on the deploy box
+(pull clean, SMOKE PASS, spot acceptance untouched). The round's four
+self-retractions (P1 selfrot, capacity exponent, transform-robustness
+framing, dual-use place side) are exactly rule 4 working; nothing to
+re-open. Closures for the two positives that had NOT had a second
+opinion:
+
+- `semantic_quant` — SOUND, and deploy-AUTHORITATIVE: `core.q_polar_np`
+  is line-for-line identical to `sspslam.quantized.q_polar` (verified
+  textually here; `sspax.bench parity` covers JAX-vs-np at 16x4), so the
+  4-bits/cell recall-0.97 table runs on the real FPGA arithmetic model.
+  Map quantized once on the final bundle (= EBR storage semantics);
+  query at float is fine for the storage claim (query precision is a
+  separate, compute-side question).
+- `semantic_dynamic` — mechanism SOUND (linear additive binding makes
+  churn==rebuild trivially exact), but the deploy-honest form needs one
+  addition the entry leaves implicit: EXACT removal subtracts the
+  ORIGINAL binding, which requires a per-segment OBJECT REGISTRY
+  (class bits + stored position per object; ~13 obj x ~8 B ~ 100 B/seg
+  — bounded, derived state, not sensor history). Registry-free removal
+  by re-observation subtracts an ESTIMATED binding: fine rungs ghost
+  (phase error 2*pi*eps/lam — at lam_min 0.25 m an eps of 0.1 m is
+  ~2.5 rad on the finest ring, no cancellation). VERDICT: dynamic map =
+  D-vector + tiny registry; bank the pair as the deployable unit.
+
+Nits (none change a verdict): (a) the classroom learned-vs-fixed wall
+test — the DEFINITIVE direct result of the round — lives only in scratch
+on the training box; it deserves a committed module (and the revisit-pair
+count differs between entries: 179 in P2 vs 244 in the wall test — state
+the threshold that changed). (b) `segnet.forward_np` wraps jnp calls —
+not actually numpy-only; the deploy path is the headio v2 forward (below).
+(c) `lidar_ring.ring_raster` docstring promises range+intensity channels;
+the code builds 3 range channels only (the nets and budgets are built on
+3 — fix the docstring, not the code). (d) The semantic suite imports JAX
+unconditionally via sspax.semantic/core, so cross-box reproduction on the
+deploy box is blocked — acceptable for synthetic mechanism studies, but a
+golden-vector npz (map, roles, quant grid, expected recalls) would make
+the FPGA-relevant numbers verifiable here.
+
+## 2026-07-15 — headio contract v2: reshaped to the FIRST TRAINED nets; a silent lidar-scaling bug caught before it burned an artifact; random baselines for BOTH gates
+
+Auditing the trained nets against the v1 contract found three mismatches
+that would have failed or (worse) silently corrupted their export:
+(1) v1 asserted track cout==2 — the trained vision net has separate w/cut
+1x1 convs (mergeable exactly) and the trained LIDAR net has NO cut head;
+(2) the 32-bit tracking DESCRIPTOR — the head that actually carries
+(NYUv2 retrieval 0.950, int4-robust, translation-equivariant) — had no
+slot in v1 at all; (3) v1 forward divided ALL inputs by 255 — correct for
+Y8, WRONG for lidar ring rasters trained on raw METERS (a trained lidar
+head would have seen 60 m -> 0.235 at deploy and produced garbage with no
+error raised). `sspax/headio.py` is now contract v2 (v1 files still
+load): optional `desc` stack (prefix D, bits = act > 0), track cout 1|2
+(cutoff channel retired per the P1 retraction), explicit `in_div`
+(vision 255, lidar 1), conv1d-aware budget accounting, and fixtures that
+MIRROR the trained nets exactly. Cross-implementation check: my numpy MAC
+count on the mirrors reproduces their JAX-side budget prints exactly —
+vision-half trunk+track+desc 22.3 MMAC (their "22 MMAC"), lidar 3.47 +
+0.655 for their 40-class lab head = 4.12 ("4.12 MMAC/frame"). Selftest:
+v1 back-compat + both v2 mirrors, deterministic, roundtrip exact.
+New RANDOM-weights baselines on TUM fr3 (the calibration a trained
+artifact reads against): desc-bit stability 0.954 adj / 0.906 far
+(gap 0.048 — CReLU random convs are even smoother than the seg-bit
+0.892/0.828 baseline; the GAP is the only signal); desc-key objmap2 gate
+stage-2 AUC 0.522/0.548 (chance), err med 1.08-1.24 m (vs banked census
+0.165 m), stage-1 16/16 (head-independent shortlist, as designed).
+Fixtures: scratch/head_fixture{,_half,_lidar}.npz.
+
+## 2026-07-15 — deploy-side integration verdict of the round (ECP5 grounding): the place path is CLOSED-FORM, the semantic map is a two-band overlay, and semantic accuracy inherits the metric wall
+
+What this round settles for the target platform:
+
+1. **The @20 Hz place/matcher tier ships with NO net.** Three
+   independent results converge — the P1 selfrot retraction (blanking
+   buys no genuine place separation), the run2 saturated gate (uniform
+   0.987 == learned), and the classroom DIRECT test (label-free learned
+   saliency -0.001..-0.048 vs fixed across seeds, the +0.046 "win" being
+   a GT leak). The place layer is therefore a fixed encoder + the static
+   `ladder_of_extent` preset (P5 densified fit: constant unidentifiable,
+   only the reach constraint binds — comment updated in
+   lattice_presets.py; EXTENT_C stays 1.0). msg P6 (freeze learned
+   cutoffs to a LUT) is DEAD — there is nothing to freeze. Consequence:
+   the FPGA CNN block belongs entirely to the keyframe/feature tier; no
+   learned parameters exist anywhere in the frame-rate place path. The
+   EBR pressure from "both nets resident" (54.5/55 KB edge-exact)
+   relaxes: only the vision trunk+track runs at frame rate; the lidar
+   net's remaining roles (distilled labels; descriptor keys) are
+   keyframe-rate.
+2. **The bounded semantic map is deploy-ready as a REPRESENTATION; its
+   data source is the one blocker.** Per-segment layout, grounded in
+   their measured laws: a SECOND fine-ladder band per segment (per-role
+   ladders — the place/semantic ladder tension is fundamental; geometry
+   is shared, so the SAME rotation-permutation network and phase-multiply
+   datapath serve both bands with different W ROM constants), D=360 at
+   4 bits/cell = ~184 B/segment incl. the f32 scale (noise next to the
+   metric segment vector), capacity ~13 objects/segment (= the measured
+   per-frame object count; matches the shipped 5-keyframe segment scope),
+   + the ~100 B object registry (above) for exact dynamic edits. Bundle =
+   the existing accumulator; corrections = the existing O(D) phase ops;
+   class query = host-side decode. CAVEAT on their fine-ladder recipe:
+   the winning 0.1-1.6 m ladder starts BELOW the lidar coherence floor
+   (COH_LAM_MIN 0.25 ~ 2*pi*sig_r) — synthetic-clean only; the deploy
+   fine band is geomspace(0.25, ~2, 6) pending a 1-line re-run of their
+   ablation at lam_min 0.25 (msg round 3). The blocker: per-cell LABELS
+   at deploy budget (from-scratch seg mIoU 0.041-0.10) — the distillation
+   round. The DESCRIPTOR bits need no labels and can bind NOW as
+   appearance keys (headio gate key=desc, random baseline banked above).
+3. **Semantic queries inherit the metric map's global accuracy — the
+   wall propagates, quantified.** The query match window is ~0.8 m
+   (their audit's honest reframing: the representation adds no error;
+   the correction/pose must land within the window). In-map queries are
+   self-consistent (same frame as the metric map). GLOBAL-frame answers
+   inherit segment pose error, and the acceptance medians straddle the
+   window: spot 0.029 / stata ~0.15-0.21 / fhw 0.39 INSIDE; fr101 1.38 /
+   belg 1.86 OUTSIDE. "Highlight the chairs" is trustworthy exactly
+   where the metric map is good. And semantics does NOT cross the
+   loop-closure wall: the bits are derived from the SAME sensors with
+   the same aliasing — an appearance-derived semantic cue is not the
+   independent absolute cue FINDINGS §5-6 requires (their dual_use
+   place-side is explicitly untested). No one should re-litigate the
+   wall via the semantic layer.
+4. **The BNN-lane deploy claim is now TRAINED-net-verified end to end:**
+   int4 weights cost ~0.01 retrieval on the trained descriptor; the
+   semantic map holds 0.97 recall at 4 bits/cell on the REAL FPGA
+   arithmetic (q_polar parity verified); budgets cross-check across two
+   implementations. The envelope numbers were not paper-only.

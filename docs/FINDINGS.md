@@ -1129,3 +1129,33 @@ reference (rule 2), positives audited (rule 4 — one retraction below).
    (`sspax/ladder_rule.py`): best λ_max tracks venue extent (Spearman 0.9-0.97)
    but the effect is negligible at room scale and large only at building scale;
    ship a coarse venue-bucket, not a precise c·extent formula.
+
+## Addendum (2026-07-15b, deploy-side integration of the above) — closed-form place path, two-band segments, and where the wall re-enters
+
+Grounding the 2026-07-15 session on the target platform (ECP5/Icepi-Zero;
+full detail in RESULTS "deploy-side integration verdict"):
+
+- **The frame-rate place path ships with NO learned parameters.** The three
+  convergent negatives (P1 retraction, run2 saturation, classroom direct
+  learned-vs-fixed) close the "learned front-end for place" program: fixed
+  encoder + the static `ladder_of_extent` preset (constant unidentifiable per
+  the densified fit; only the lam_max-reaches-extent constraint binds, and it
+  only binds at building scale). CNNs live exclusively in the keyframe tier,
+  where their heads actually carry (tracking descriptor 0.95 retrieval,
+  int4-robust; labels pending distillation).
+- **The dual-use map deploys as TWO bands per segment sharing one datapath.**
+  Per-role ladders are forced (the place/semantic ladder tension is
+  fundamental), but geometry is shared — so the same rotation permutation and
+  phase-multiply hardware serves both bands with different W ROMs. Cost of the
+  semantic band: ~184 B/segment (D=360 @ 4 bits/cell on the verified FPGA
+  arithmetic) + ~100 B object registry (required for EXACT dynamic removal —
+  subtracting an estimated binding ghosts on fine rungs). Fine band starts at
+  the sensor coherence floor (0.25 m), not the synthetic 0.1 m.
+- **The wall re-enters through the query window.** Semantic queries are
+  self-consistent with the metric map; global-frame answers inherit segment
+  pose error against the ~0.8 m match window — and the acceptance venues
+  straddle it (spot/stata/fhw inside; fr101/belg outside). Semantic bits come
+  from the same sensors with the same aliasing: they are NOT the independent
+  absolute cue §5-6 requires, so the semantic layer does not offer a way
+  around the loop-closure wall — it offers the thing the wall never blocked
+  (a queryable, correctable, bounded map wherever the metric solution holds).
