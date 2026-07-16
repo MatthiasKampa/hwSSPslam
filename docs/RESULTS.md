@@ -11419,3 +11419,24 @@ So: PROMISING (large recall lift on the stated concern) but NOT yet a clean win.
 Next: (a) eval on real school_run2 scans (GT-free), (b) sub-cell output, (c)
 rule-4 audit of the home-field effect. Anti-oracle: GT walls train + score;
 correlation field is a deterministic decode of the golden segment.
+## 2026-07-16 — v8 GATED + FLASHED + LIVE: novelty folding on silicon
+(sim gates bit-exact; 40/40 real-keyframe silicon parity; robot
+autonomous on v8 with the map budget buying area)
+
+Gates (solo2_gates.py): step parity — solo_tracker2 reproduces the
+UNTOUCHED v7-lean fixtures verbatim (l1 60/60 fast + 220-kf overnight
+arm; tracking semantics unchanged by construction, `novel` output
+only). Top gates — top_solo2 vs the v8 golden over the full UART
+protocol: 60/60 pose frames + dump BIT-EXACT (7 novelty-gated segs vs
+v7's 12 on the same 60 kf), reset-map arm 45/45 + dump bit-exact.
+Bitstream top_solo_ecp5_v2 places 49.1 MHz on the 25 MHz /2 domain.
+
+SILICON: flashed to the robot Icepi (openFPGALoader, QSPI), then
+40 real capture keyframes through the chip vs the solo2 golden:
+40/40 pose frames bit-exact, dump segment count matches (1 seg for a
+near-parked start — the novelty gate visibly refusing to burn budget
+on a stationary robot; v7 folded 8 in the same window). LIVE bringup
+(SSP_SOLO=1): pose_src "CHIP solo tracker", 321 kf, 0 overruns,
+chip_segs 2 while parked (v7: map exhausted at kf 320), cam lane
+1:1. v7 bit + STREAM bit staged as fallbacks (~/flash_solo.sh,
+~/flash_stream.sh).
