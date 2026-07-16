@@ -207,7 +207,7 @@ def udp_rx(demo, port):
         pkt, _ = s.recvfrom(65535)
         if demo.data != "live":
             continue
-        if len(pkt) == scan_len:                       # legacy scan
+        if len(pkt) in (scan_len, scan_len + 12):     # legacy (+pose)
             typ, off = 0x01, 0
         else:
             typ, off = pkt[0], 1
