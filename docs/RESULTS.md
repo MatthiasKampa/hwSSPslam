@@ -10647,3 +10647,43 @@ untouched): matcher t_half 0.72, rot_half 18. CamMap.HAM_T 8 -> 11
 at MEASURED noise: boost x3 holds recall 1.000 at 0.28 flips; degrades
 to 0.76 at the p90 rotation-heavy extreme (bits carry less signal
 there — expected, banked). Deployed to the robot.
+
+## 2026-07-16 — SHIM ARCHITECTURE LIVE: no python SLAM anywhere; cbits C desc-bit kernel (1.26 ms, 100% parity); 3.9 -> 8.8 Hz keyframes on the robot
+
+Directive: the Linux box is ONLY a shim feeding the FPGA SLAM + webvis;
+"just scatter lidar points according to pos estimate"; "python bad,
+use C"; full-rate cam processing.
+
+WEBVIS v3 (hw/ecp5/host/webvis.py): python SLAM removed from the
+SERVING path entirely — points register at the pose estimate (live:
+datagram pose = robot odom now / chip tracker later; datasets: the
+offline-built est_demo.npz trajectory, computed once by `webvis.py
+estcache` with the make_slam algebra = what the chip tracker will run;
+fallback recorded ref). make_slam is now OFFLINE-ONLY (estcache +
+tracker-config home). Chip-map readout regression fixed: the halved
+cadence had left only 4 of 64 slots ever fetched — now ONE slot per
+4 kf stamped with the fetching frame's pose = a rolling 16-segment
+window (verified live: chip_segs 16). Status/panel drop the python-SLAM
+group (mem/segs/loops) for pose-source + shim-step readouts.
+
+CBITS (hw/ecp5/host/cbits.c + cbits.py): hardcoded C port of
+headio.cell_bits for the trained vision head (4-conv CReLU trunk +
+1x1 desc head, 22 MMAC). GATE on the ROBOT: 100% bit parity on 120
+real capture jpegs (1,152,000/1,152,000 bits) + random frames, and
+1.26 ms/frame (791 Hz) vs 11.7 ms numpy there (9x; dev mac: 1.25 ms,
+3x) — 120 Hz OV5640 headroom with margin. LiveCam/CamLane use it with
+numpy fallback; live cam worker computes bits at wire rate and ingests
+the VSA map once per new keyframe (re-binding the same kf only
+inflates cluster counts); display decimated to 20 fps to protect SSE
+clients.
+
+ROBOT RATES (Hunter, OS1-64 @ 10 Hz, D455 @ 60 fps feed): FTDI
+latency_timer 16 -> 1 ms; bridge keyframe_hz 5 -> 10 PLUS half-period
+gate (the 1/hz gate BEATS against the 10 Hz sensor and drops every
+3rd scan: 3.9 -> 6.6 Hz was the gate, not the pipe). MEASURED
+sustained: 8.8 Hz keyframes, cam_kf 1:1, fx 1518/1518 bit-exact,
+0 overruns, ms_py 0.7 (was 53 with python SLAM), ms_fx ~57 (now
+ENCODE-BOUND on chip ~30 ms/frame serial cis-ROM — the multi-lane
+engine (#43) is the on-chip fix; 8.8 vs 10.0 nominal = ouster publish
+jitter, revisit after multi-lane). Robot webvis live at :8790 —
+trail follows odometry, on-chip encode green, C kernel banner in log.

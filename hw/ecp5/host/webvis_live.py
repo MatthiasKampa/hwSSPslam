@@ -172,7 +172,12 @@ class LiveDemo(webvis.Demo):
                 self._load(self.data)
             if self._req_data:                 # UI switch to a dataset
                 d, self._req_data = self._req_data, None
-                self._load(d)
+                try:
+                    self._load(d)
+                except Exception as e:         # no dataset dirs on the
+                    print(f"[webvis] '{d}' unavailable ({e}); "
+                          f"back to live", flush=True)   # robot -> live
+                    self._load("live")
             if self.data != "live":            # recorded tour: one pass,
                 if not self.done:              # then back to live
                     t0 = time.time()
