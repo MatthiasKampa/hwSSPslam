@@ -10570,3 +10570,46 @@ bind time, UI = shift-click a class chip to star/boost it x3 (applies
 to future bindings). Marks now report raw z (selftest: z 4.6 marks on
 20-kf spot map). Anti-oracle: synthetic GT scores only; the harness
 imports the code under test (no reimplementation drift).
+
+## 2026-07-16 — LIVE ROBOT DEPLOYMENT GREEN: real OS1 scans encoded on-chip bit-exact, robot-hosted webvis, divergence root-caused (spurious-VEC echo starvation)
+
+SSH bring-up on the Hunter UGV (Ubuntu 22.04 / ROS 2 Humble / 32 cores;
+Ouster OS1-64 @ 1024x10 — the user's "lower frq" = 10 Hz mode, benign
+for 5 Hz keyframing; OAK camera, not D455; Icepi Zero on the robot's
+USB; full oss-cad toolchain + repo clone already on board from the
+robot-side agent's session).
+
+ROOT CAUSES from their bring-up, resolved:
+- "Worked then diverged": their unpushed RTL fix identifies it —
+  ungated pend_done streamed a spurious garbage ~1.9 KB VEC after every
+  multi-ring digest frame, STARVING ECHOES under blast traffic (13/18
+  lost, their silicon measurement). Fix (pend_done gated on nr_ok)
+  taken verbatim into HEAD; sim gates re-PASS.
+- "Wrong deploy variant?": the robot had both bitstreams built locally
+  (incl. v0 top_stream with no encoder — silent /vec if loaded) and
+  SRAM config does not survive power cycles. Deploy now rebuilds from
+  HEAD and writes QSPI FLASH (openFPGALoader -f) so the board boots the
+  right top unattended (flash write to be re-confirmed on next power
+  cycle).
+- Their silent bridge node: the correct architecture is webvis_live
+  OWNING the serial + the bridge in webvis_udp mode (their design);
+  restarted that way.
+
+INTEGRATED AT HEAD (3e955a7): their webvis_live.py (UDP keyframes ->
+the full webvis pipeline live; LAN bind via SSP_BIND) extended with the
+CAMERA lane (type-tagged datagrams: 0x02 = t_us + JPEG -> desc bits ->
+cam VSA object map at the live pose, SSP_CAM_FOV default 69 deg = OAK);
+their SSP_DATA/SSP_BIND knobs in webvis.serve.
+
+LIVE VERIFICATION (probed from the laptop over LAN,
+http://192.168.167.118:8790/status): 156/156 live scans digest-verified
+AND on-chip-encoded BIT-EXACT vs golden, 0 misses; chip map segments
+fetching; SLAM 52 ms/kf + FPGA 52 ms/kf; bounded map 73 KB stable;
+0 overruns. The full user-directed architecture — FPGA does the
+encode + on-chip compressed map from the REAL robot lidar, exchanges
+compressed representations, laptop/browser decodes — is LIVE on the
+robot. OPEN: bridge-side OAK sender (webvis_live's 0x02 lane is ready;
+needs the small rclpy image->UDP node + launching the depthai driver);
+observed keyframe arrival ~2 Hz vs the 5 Hz setting (rate-budget or
+scan-topic pacing — tune next session); QSPI persistence re-check on
+next power cycle.
