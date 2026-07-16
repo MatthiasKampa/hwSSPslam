@@ -61,8 +61,14 @@ class Sender:
         self.pkt(0x10, struct.pack("<BI", cmd, arg))
 
 
-def read_pkts(s, want, timeout=5.0):
-    buf, out, t0 = bytearray(), [], time.time()
+def read_pkts(s, want, timeout=5.0, buf=None):
+    """Parse framed packets. Pass a CALLER-OWNED bytearray as `buf` when
+    calling repeatedly on one stream — a return mid-packet keeps the
+    unparsed tail there (a fresh local buffer would drop it and desync
+    on the next call; cost us the first silicon VEC packets)."""
+    if buf is None:
+        buf = bytearray()
+    out, t0 = [], time.time()
     while len(out) < want and time.time() - t0 < timeout:
         buf += s.read(256)
         while True:
@@ -76,7 +82,7 @@ def read_pkts(s, want, timeout=5.0):
             rxc, = struct.unpack_from("<H", buf, i + 8 + ln)
             if crc16(body) == rxc:
                 out.append((typ, body[6:]))
-            buf = buf[i + 8 + ln + 2:]
+            del buf[:i + 8 + ln + 2]
     return out
 
 

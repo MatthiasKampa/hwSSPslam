@@ -86,6 +86,8 @@ Host→FPGA types:
   data[n_rows × w]`
 - `0x05 IMU_SAMPLE` (reserved — robot IMU later; mirrors the ism330
   stream frame content)
+- `0x0F MAP_READ` payload: `seg u8` — fetch a stored on-chip map
+  segment's compressed codes (reply 0x93)
 - `0x10 CTRL` payload: `cmd u8, arg u32` — 0 reset counters, 1 status
   request, 2 echo en/dis (arg), 3 src-mux select (arg: 0 DVP, 1 stream;
   v2), 4 pacer config (v2)
@@ -95,11 +97,69 @@ FPGA→host types (same framing):
   digest u16, count u32` — emitted when a frame completes (count =
   payload data bytes; digest = CRC16 over the frame's data bytes in
   arrival order, headers excluded)
+- `0x92 VEC` payload: `frame_id u32, acc i32[480]` (1924 B) — the
+  ON-CHIP-ENCODED VSA vector of a completed single-ring lidar frame:
+  240 lattice components × (re, im) int32 LE, interleaved re,im per
+  component — bit-exact to `hw/ice40/golden.encode_int` on the kept
+  points (r_mm != 0, r_mm <= 31200; w = 127). Emitted automatically
+  after the frame's ECHO when the top has the encoder (top_stream_enc);
+  ~9.7 ms at 2 Mbaud, well inside the 5 Hz keyframe budget.
+- `0x93 MAP_SEG` payload: `seg u8, codes u8[60]` — the on-chip map
+  bank's compressed segment: 240 components × 2-bit QPSK codes
+  (0..3 ≡ 1, i, −1, −i — `golden.mcode_from_vec` convention), packed 4
+  components/byte little-first (comp 4b+k in bits 2k+1..2k). The map
+  RESIDES on chip (64-segment ring, slot = frame_id % 64, written as
+  each VEC streams out); the laptop fetches + DECODES for viz/matching.
 - `0x80 STATUS` payload: `pkts_ok u32, crc_drops u16, seq_gaps u16,
   cam_frames u16, lidar_frames u16` (on CTRL request)
 - `0x81 CREDIT` payload: `grants u16` — flow control for the SDRAM-ring
   era; v0 grants max once at start (the 50 MHz parser outruns every
   transport tier, ~6 MB/s ceiling)
+
+## ROS-bridge implementer notes (robot side codes against THIS section)
+
+- Transport: the FPGA's FT231X enumerates as a standard USB CDC/serial
+  device on Linux (`/dev/ttyUSB*`, `ftdi_sio`). Open at **2,000,000
+  baud, 8N1, no flow control**. (2.4 Mbaud may work with `ftdi_sio` —
+  it silently fell back to ~2M on macOS's VCP; verify with the loopback
+  gate before enabling.) All integers little-endian. CRC16-CCITT:
+  poly 0x1021, init 0xFFFF, over `type..payload` (magic and the CRC
+  itself excluded). `seq` is one global rolling u16 across all packets
+  the sender emits.
+- Lidar (Ouster → packets): pick the ring subset (deploy = ring 33
+  alone for the matcher slice, or rings {16,33,50}); build per-frame
+  `(n_rings, n_az=1024)` u16 range-in-MM images on the fixed azimuth
+  grid `az_k = -pi + k*2pi/1024` (beam k = column k); missing/invalid
+  returns = 0; ranges CLIP to 65535. Send LIDAR_HDR then LIDAR_COL
+  column blocks (32 cols/packet is a good size). `t_us` = sensor
+  timestamp in µs (authoritative downstream — never re-stamp).
+  ON-CHIP ENCODE fires only for n_rings==1 frames (the matcher slice);
+  multi-ring frames are digest-verified transport only.
+- Camera: Y8 luma, resize/bin to 320×240 (or 120×160), rows top-down;
+  CAM_HDR + CAM_ROW blocks (8 rows/packet). RGB→Y8 on the robot is
+  format conversion, not preprocessing; declare the true resolution in
+  the header. No other processing (no rectify, no features).
+- Pacing: ~197 KB/s goodput at 2 Mbaud. Deploy-live budget: ring-33
+  slice @ 5 Hz keyframes ≈ 10.4 KB/s up + ~10 KB/s down (ECHO+VEC) —
+  1/10th of the link. 3-ring @ 20 Hz ≈ 123 KB/s also fits. Do NOT
+  exceed ~190 KB/s aggregate; watch STATUS.crc_drops/seq_gaps (poll
+  CTRL cmd=1 every few seconds) and back off if they move.
+- **Encode-frame column cap (IMPORTANT)**: for single-ring frames (the
+  on-chip-encode path) keep `n_cols <= 8` per LIDAR_COL packet at
+  2 Mbaud. The serial encoder core drains ~840 cycles/point; larger
+  packets outpace it and the feeder's one-deep commit queue drops the
+  overflow (counted on-chip, never silent — this exact mode dropped
+  half the points of 32-col packets before the queue existed; found on
+  silicon 2026-07-16). Multi-ring (digest-only) frames may use up to
+  ~32 cols/packet.
+- Recommended node behavior: subscribe lidar + camera topics; per
+  lidar keyframe (decimate to 5 Hz) send HDR+COLs, await 0x90 (digest
+  match optional robot-side — the laptop/webvis also verifies) and
+  0x92 if present; forward 0x92/0x93 upstream if a consumer wants the
+  chip vectors; expose CTRL reset + STATUS as services.
+- Reference implementation: `hw/ecp5/host/hw_stream.py` (Sender +
+  read_pkts, pure pyserial — lift verbatim) and `webvis.py`'s
+  `Fpga.verify_scan` for the echo/VEC handshake pattern.
 
 ## RTL (v0, this build)
 
@@ -129,6 +189,14 @@ on the robot's Linux box (it IS the robot-side reference implementation).
 - **G2 fast9-through-ingest** (next): the 64×64 fixture sent as CAM
   packets → SRC MUX → fast9 → centres bit-exact vs golden (end-to-end
   virtual sensor; supersedes the ad-hoc loader in top_fast9_uart).
-- **G3** (with #43): encoder-on-streamed-lidar vs numpy golden.
+- **G3 encoder-on-streamed-lidar** (`top_stream_enc` + `hw_enc.py`):
+  **PASS 2026-07-16 (sim + SILICON)** — sim: 480/480 vector words +
+  60/60 map-code bytes == golden; silicon: 25/25 REAL spot scans, VSA
+  vectors bit-exact vs `hw/ice40/golden.encode_int`, on-chip QPSK map
+  codes == `mcode_from_vec`, 85 ms/kf roundtrip (53.4 MHz timing).
+  Three bugs found en route, all banked: pl_idx skew (payload byte
+  tagged one index late), EBR 2-edge read discipline (map readback
+  shifted one component), and the commit-miss during multi-col replay
+  (half the points dropped — hence the column cap + commit queue).
 - **G4** (with #44): SDRAM-paced at-rate bursts (20 Hz / 30–120 fps),
   no-drop, pacer timing vs stream timestamps.

@@ -81,6 +81,19 @@ sim-stream:
 	  ../ice40/rtl/uart.v rtl/tb_stream.v
 	cd build && $(TOOLS)/vvp tb_stream.vvp
 
+# encoder ROMs + sim vectors (from the golden model)
+roms:
+	python3 host/gen_enc_roms.py
+
+# stream + on-chip encode + on-chip map: sim gate vs golden vectors
+# (vvp runs from THIS dir: encoder.v + tb read "build/*.hex")
+sim-enc: roms
+	@mkdir -p build
+	$(TOOLS)/iverilog -g2012 -o build/tb_enc.vvp rtl/stream_ingest.v \
+	  rtl/enc_feeder.v ../ice40/rtl/encoder.v ../ice40/rtl/uart.v \
+	  rtl/tb_enc.v
+	$(TOOLS)/vvp build/tb_enc.vvp
+
 sim-imu-stream:
 	@mkdir -p build
 	$(TOOLS)/iverilog -g2012 -o build/tb_ism330_stream.vvp \

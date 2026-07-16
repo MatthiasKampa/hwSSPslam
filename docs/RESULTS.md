@@ -10188,3 +10188,71 @@ over K=1..16), ~1/sqrt(K)-like — NOT a merge. The recall cliff is the FIXED
     problem, not a representation problem — lower the threshold or read out
     per-instance at known candidate positions; the bounded vector keeps the
     peaks. Anti-oracle: synthetic, GT positions score only.
+=======
+## 2026-07-16 — THE VSA ENCODER + COMPRESSED MAP ARE ON SILICON (ECP5): bit-exact on real scans; the map lives ON CHIP and the laptop decodes its fetched codes
+
+Task #43's core rung + the user-directed architecture ("keep the map on
+chip, exchange the compressed representation, decode on laptop"), built
+and gated in one day. `top_stream_enc` = stream ingest + the UP5K-proven
+serial cis-ROM encoder core (hw/ice40/rtl/encoder.v, REUSED unmodified —
+one datapath across both FPGA tracks) + a feeder (packet->point replay
+with commit queue) + the on-chip MAP BANK (64 segments x 240 x 2-bit
+QPSK codes, quantized as the vector streams out). New protocol types
+(STREAM.md v1.1): 0x92 VEC (full int32 vector, the golden-crosscheck
+channel, ~10 KB/s of headroom at 5 Hz) and 0x0F/0x93 MAP_READ/MAP_SEG
+(60 B compressed segments fetched on demand).
+
+GATES: sim (tb_enc) — 480/480 vector words == golden.encode_int and
+60/60 packed map bytes == golden.mcode_from_vec through the FULL packet
+path. SILICON (hw_enc.py, 25 REAL spot scans): digests 25/25, on-chip
+VSA vectors 25/25 BIT-EXACT vs golden, on-chip map codes 25/25, 85 ms/kf
+roundtrip; timing 53.4 MHz vs 50. Synthetic worlds also encode bit-exact
+through the same path (webvis classroom arm, 39/39).
+
+Three real bugs found and banked (each with its detection story):
+(1) pl_idx SKEW — payload bytes were event-tagged one index late
+(registered byte vs live-wire index); killed the HDR n_rings capture, so
+nothing encoded; found by sim probe. (2) EBR 2-EDGE READ LAW — two
+read-pipeline stages consumed one edge early (feeder point reads; map
+readback shifted exactly one component — the shift signature identified
+it). (3) COMMIT-MISS UNDER REPLAY — the serial core takes ~840
+cycles/point, so a 16-col replay (270 us) outlasts packet arrival
+(245 us) and the feeder in WBUSY missed the next commit: on real 32-col
+frames HALF THE POINTS silently vanished (silicon |d| scaled exactly as
+n/2 x 2x127^2 — the arithmetic fingerprint that localized it). Fix =
+one-deep commit queue + ping-pong banks + the sender column cap
+(n_cols <= 8 at 2 Mbaud) + an on-chip overflow counter (never silent).
+Also: hw_stream.read_pkts now takes a CALLER-OWNED buffer — the local
+buffer dropped partially-read packets between calls and silently lost
+the first silicon VEC (wire dump proved the chip was sending).
+
+## 2026-07-16 — WEBVIS v2: encode-on-chip demo with BOTH maps, chip-map readout decoded on the laptop, QBE map querying, reset + dataset selection
+
+hw/ecp5/host/webvis.py v2 (live at localhost:8790), all user-directed
+features in one loop:
+- LIDAR lane: every keyframe digest-verified AND encoded ON CHIP
+  (bit-exact counter live); the on-chip map bank's compressed segments
+  fetched every 8th kf and DECODED LAPTOP-SIDE into the purple chip-map
+  layer (matched-filter image of the 2-bit codes at estimated poses,
+  sensor-frame rotation per segment) — the previous demo's map readout,
+  now from the ECP5's own memory. Python SLAM (shipped run_cv recipe)
+  builds trails/points as before.
+- CAMERA lane + QBE: aligned D455 frames -> the exported vision head's
+  desc bits (headio, numpy, every 2nd kf in a worker thread) = the
+  appearance map anchored on the trajectory. Click a cell in the camera
+  panel -> hamming QBE against every stored grid -> match strength
+  highlights along the trail + top-k list. Honest framing in-UI: the
+  CNN's map query IS appearance QBE (labels demoted 2026-07-16).
+- Controls: reset button, dataset selector (spot real / classroom +
+  school SYNTHETIC via worlds_dyn.make — synthetic scans stream through
+  the SAME silicon encode path, 39/39 bit-exact on the classroom arm).
+SELFTEST (headless): 40 kf — digests 40/40, on-chip vectors 40/40
+bit-exact, 5 chip segments fetched+decoded, 20 cam desc grids, med err
+vs withheld ref 0.010 m. Live: ~55 ms fpga + ~50 ms slam per kf at 5 Hz
+real time. Honest status: encode + map STORE are on-chip; the on-chip
+TRACKER (localization against the chip map — the iCE40 solo design) is
+the next #43 rung, after which SLAM poses also come from silicon.
+STREAM.md v1.1 = the full interface spec incl. the ROS-bridge
+implementer section (robot side codes against it; hw_stream.py is the
+reference sender).
+>>>>>>> ea08d63 (ON-CHIP ENCODE + ON-CHIP MAP on silicon (bit-exact, real scans); webvis v2: both maps, QBE queries, chip-map decoded on laptop; STREAM.md v1.1 interface spec)

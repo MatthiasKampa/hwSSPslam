@@ -4,126 +4,175 @@
 <style>
   body { margin:0; background:#0b0e13; color:#cfd8e3; font:13px/1.45 -apple-system, Menlo, monospace; display:flex; height:100vh; }
   #cv { flex:1; display:block; }
-  #panel { width:270px; padding:14px 16px; background:#11151d; border-left:1px solid #222a36; overflow-y:auto; }
-  h1 { font-size:14px; margin:0 0 10px; color:#e8eef7; }
-  .grp { margin:12px 0 4px; color:#7f93ad; text-transform:uppercase; font-size:10px; letter-spacing:.08em; }
+  #panel { width:300px; padding:12px 14px; background:#11151d; border-left:1px solid #222a36; overflow-y:auto; }
+  h1 { font-size:14px; margin:0 0 8px; color:#e8eef7; }
+  .grp { margin:10px 0 3px; color:#7f93ad; text-transform:uppercase; font-size:10px; letter-spacing:.08em; }
   table { width:100%; border-collapse:collapse; }
-  td { padding:1.5px 0; }
+  td { padding:1px 0; }
   td:last-child { text-align:right; color:#e8eef7; font-variant-numeric:tabular-nums; }
   .ok { color:#5dd39e; } .bad { color:#ff6b6b; }
-  #bar { height:4px; background:#222a36; margin-top:8px; }
+  #bar { height:4px; background:#222a36; margin-top:6px; }
   #fill { height:100%; width:0%; background:#4c8dff; }
-  .legend span { display:inline-block; margin-right:10px; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:4px; vertical-align:-1px; margin-right:4px; }
+  button, select { background:#1a2230; color:#cfd8e3; border:1px solid #2c3850; border-radius:4px; padding:4px 10px; font:inherit; cursor:pointer; margin:2px 4px 2px 0; }
+  button:hover { background:#243046; }
+  #campanel img { width:100%; border-radius:4px; display:block; cursor:crosshair; }
+  #camwrap { position:relative; }
+  #qmark { position:absolute; border:2px solid #ffd166; pointer-events:none; display:none; }
+  .legend span { display:block; margin:1px 0; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:4px; vertical-align:-1px; margin-right:5px; }
+  #qbetop { font-size:11px; color:#9fb2c9; }
 </style>
 <canvas id="cv"></canvas>
 <div id="panel">
-  <h1>SSP-SLAM live<br><span style="color:#7f93ad;font-size:11px">Icepi Zero (ECP5) in the loop · real SPOT data</span></h1>
-  <div class="grp">FPGA (top_stream, 2 Mbaud)</div>
+  <h1>SSP-SLAM live<br><span style="color:#7f93ad;font-size:11px">Icepi Zero in the loop · encode + map ON CHIP</span></h1>
+  <div>
+    <select id="dsel">
+      <option value="spot">spot (real classroom)</option>
+      <option value="classroom">classroom (synthetic)</option>
+      <option value="school">school (synthetic)</option>
+    </select>
+    <button onclick="fetch('/reset',{method:'POST'})">reset map</button>
+    <button id="cmtoggle" onclick="showChip=!showChip;draw()">chip-map: on</button>
+  </div>
+  <div class="grp">FPGA (top_stream_enc)</div>
   <table>
-    <tr><td>scan digests verified</td><td id="fx"></td></tr>
-    <tr><td>link</td><td id="kbps"></td></tr>
+    <tr><td>scan digests</td><td id="dig"></td></tr>
+    <tr><td>on-chip VSA vectors</td><td id="vec"></td></tr>
+    <tr><td>chip map segments</td><td id="csegs"></td></tr>
     <tr><td>roundtrip</td><td id="msfx"></td></tr>
   </table>
   <div class="grp">python SLAM (shipped recipe)</div>
   <table>
     <tr><td>keyframe</td><td id="k"></td></tr>
     <tr><td>step</td><td id="mspy"></td></tr>
-    <tr><td>segments</td><td id="segs"></td></tr>
-    <tr><td>loop closures</td><td id="loops"></td></tr>
+    <tr><td>segments / loops</td><td id="segs"></td></tr>
     <tr><td>map memory (bounded)</td><td id="mem"></td></tr>
     <tr><td>err vs withheld ref</td><td id="err"></td></tr>
-    <tr><td>rt overruns</td><td id="ovr"></td></tr>
   </table>
   <div id="bar"><div id="fill"></div></div>
+  <div class="grp" id="camhdr">camera · click a cell to QUERY the map</div>
+  <div id="campanel"><div id="camwrap"><img id="camimg"><div id="qmark"></div></div>
+    <div id="qbetop"></div></div>
   <div class="grp">legend</div>
   <div class="legend">
-    <span><span class="dot" style="background:#39445a"></span>map points</span><br>
-    <span><span class="dot" style="background:#4c8dff"></span>estimate</span><br>
+    <span><span class="dot" style="background:#39445a"></span>lidar map points</span>
+    <span><span class="dot" style="background:#4c8dff"></span>estimate trail</span>
     <span><span class="dot" style="background:#5dd39e"></span>withheld ref (display only)</span>
+    <span><span class="dot" style="background:#c77dff"></span>chip-map readout (decoded from on-chip codes)</span>
+    <span><span class="dot" style="background:#ffd166"></span>QBE match strength</span>
   </div>
-  <div style="margin-top:14px;color:#7f93ad;font-size:11px">
-    Every scan streams through the FPGA and is digest-verified on
-    silicon before the pipeline consumes it. The reference trail never
-    enters any estimate (anti-oracle).
+  <div style="margin-top:10px;color:#7f93ad;font-size:11px">
+    Every scan is encoded ON the FPGA (bit-exact vs golden, live) and its
+    compressed 2-bit codes live in the on-chip map bank; the laptop
+    fetches + decodes them (purple layer). Camera cells are the exported
+    CNN's descriptor bits — query-by-example, no class labels
+    (appearance is what the encode honestly allows).
   </div>
 </div>
 <script>
 const cv = document.getElementById("cv"), cx = cv.getContext("2d");
-let pts = [], tp = [], tg = [], st = {};
-let bb = null;
-function fit() {
-  cv.width = cv.clientWidth * devicePixelRatio;
-  cv.height = cv.clientHeight * devicePixelRatio;
-}
+let pts = [], tp = [], tg = [], st = {}, bb = null;
+let chip = null, showChip = true, qbe = null, camKf = null;
+function fit() { cv.width = cv.clientWidth * devicePixelRatio; cv.height = cv.clientHeight * devicePixelRatio; }
 addEventListener("resize", () => { fit(); draw(); });
 fit();
 function grow(p) {
   if (!bb) bb = [p[0], p[1], p[0], p[1]];
-  else {
-    bb[0] = Math.min(bb[0], p[0]); bb[1] = Math.min(bb[1], p[1]);
-    bb[2] = Math.max(bb[2], p[0]); bb[3] = Math.max(bb[3], p[1]);
-  }
+  else { bb[0]=Math.min(bb[0],p[0]); bb[1]=Math.min(bb[1],p[1]); bb[2]=Math.max(bb[2],p[0]); bb[3]=Math.max(bb[3],p[1]); }
 }
 function xf() {
   if (!bb) return null;
   const w = cv.width, h = cv.height, m = 40 * devicePixelRatio;
-  const sx = (w - 2 * m) / Math.max(bb[2] - bb[0], 1e-3);
-  const sy = (h - 2 * m) / Math.max(bb[3] - bb[1], 1e-3);
-  const s = Math.min(sx, sy);
-  return p => [m + (p[0] - bb[0]) * s, h - m - (p[1] - bb[1]) * s];
+  const s = Math.min((w-2*m)/Math.max(bb[2]-bb[0],1e-3), (h-2*m)/Math.max(bb[3]-bb[1],1e-3));
+  return p => [m + (p[0]-bb[0])*s, h - m - (p[1]-bb[1])*s];
+}
+let chipCanvas = null;
+function bakeChip() {
+  if (!chip) return;
+  const n = chip.n, raw = atob(chip.png);
+  chipCanvas = new OffscreenCanvas(n, n);
+  const c2 = chipCanvas.getContext("2d"), im = c2.createImageData(n, n);
+  for (let i = 0; i < n*n; i++) {
+    const v = raw.charCodeAt(i);
+    im.data[4*i] = 120 + v*0.5; im.data[4*i+1] = 60 + v*0.3; im.data[4*i+2] = 200;
+    im.data[4*i+3] = v * 0.55;
+  }
+  c2.putImageData(im, 0, 0);
 }
 function draw() {
   cx.fillStyle = "#0b0e13"; cx.fillRect(0, 0, cv.width, cv.height);
   const T = xf(); if (!T) return;
+  if (showChip && chip && chipCanvas) {
+    const a = T([chip.x0, chip.y1]), b = T([chip.x1, chip.y0]);
+    cx.imageSmoothingEnabled = true;
+    cx.drawImage(chipCanvas, a[0], a[1], b[0]-a[0], b[1]-a[1]);
+  }
   cx.fillStyle = "#39445a";
   for (const p of pts) { const q = T(p); cx.fillRect(q[0], q[1], 1.6, 1.6); }
-  cx.strokeStyle = "#5dd39e"; cx.setLineDash([4, 4]); cx.lineWidth = 1.2;
-  cx.beginPath();
-  let pen = false;
-  for (const g of tg) {
-    const q = T(g);
-    if (!g[2]) { pen = false; continue; }
-    pen ? cx.lineTo(q[0], q[1]) : cx.moveTo(q[0], q[1]); pen = true;
-  }
+  cx.strokeStyle = "#5dd39e"; cx.setLineDash([4,4]); cx.lineWidth = 1.2;
+  cx.beginPath(); let pen = false;
+  for (const g of tg) { const q = T(g); if (!g[2]) { pen = false; continue; }
+    pen ? cx.lineTo(q[0],q[1]) : cx.moveTo(q[0],q[1]); pen = true; }
   cx.stroke(); cx.setLineDash([]);
-  cx.strokeStyle = "#4c8dff"; cx.lineWidth = 1.8;
-  cx.beginPath();
-  tp.forEach((p, i) => { const q = T(p); i ? cx.lineTo(q[0], q[1]) : cx.moveTo(q[0], q[1]); });
+  cx.strokeStyle = "#4c8dff"; cx.lineWidth = 1.8; cx.beginPath();
+  tp.forEach((p,i) => { const q = T(p); i ? cx.lineTo(q[0],q[1]) : cx.moveTo(q[0],q[1]); });
   cx.stroke();
+  if (qbe) for (const [kf, s] of Object.entries(qbe)) {
+    if (s < 0.75 || !tp[kf]) continue;
+    const q = T(tp[kf]);
+    cx.fillStyle = `rgba(255,209,102,${(s-0.72)*3})`;
+    cx.beginPath(); cx.arc(q[0], q[1], (s-0.6)*16*devicePixelRatio, 0, 7); cx.fill();
+  }
   if (st.est) {
-    const q = T(st.est), a = st.est[2], r = 7 * devicePixelRatio;
-    cx.fillStyle = "#4c8dff";
-    cx.beginPath();
-    cx.moveTo(q[0] + r * Math.cos(a), q[1] - r * Math.sin(a));
-    cx.lineTo(q[0] + r * .5 * Math.cos(a + 2.5), q[1] - r * .5 * Math.sin(a + 2.5));
-    cx.lineTo(q[0] + r * .5 * Math.cos(a - 2.5), q[1] - r * .5 * Math.sin(a - 2.5));
+    const q = T(st.est), a = st.est[2], r = 7*devicePixelRatio;
+    cx.fillStyle = "#4c8dff"; cx.beginPath();
+    cx.moveTo(q[0]+r*Math.cos(a), q[1]-r*Math.sin(a));
+    cx.lineTo(q[0]+r*.5*Math.cos(a+2.5), q[1]-r*.5*Math.sin(a+2.5));
+    cx.lineTo(q[0]+r*.5*Math.cos(a-2.5), q[1]-r*.5*Math.sin(a-2.5));
     cx.fill();
   }
 }
 const $ = id => document.getElementById(id);
 function panel() {
-  $("fx").innerHTML = `<span class="${st.fx_ok === st.fx_tot ? "ok" : "bad"}">${st.fx_ok}/${st.fx_tot}</span>`;
-  $("kbps").textContent = `${st.kbps} KB/s`;
+  $("dig").innerHTML = `<span class="${st.fx_dig===st.fx_tot?"ok":"bad"}">${st.fx_dig}/${st.fx_tot}</span>`;
+  $("vec").innerHTML = `<span class="${st.fx_vec===st.fx_tot?"ok":"bad"}">${st.fx_vec}/${st.fx_tot} bit-exact</span>`;
+  $("csegs").textContent = st.chip_segs;
   $("msfx").textContent = `${st.ms_fx} ms`;
-  $("k").textContent = `${st.k + 1}/${st.n}${st.done ? " done" : ""}`;
+  $("k").textContent = `${st.k+1}/${st.n}${st.done?" done":""} · ${st.data}`;
   $("mspy").textContent = `${st.ms_py} ms`;
-  $("segs").textContent = st.segs;
-  $("loops").textContent = st.loops;
+  $("segs").textContent = `${st.segs} / ${st.loops}`;
   $("mem").textContent = `${st.mem_kb} KB`;
-  $("err").textContent = st.err == null ? "—" : `${(st.err * 100).toFixed(1)} cm`;
-  $("ovr").textContent = st.overruns;
-  $("fill").style.width = `${100 * (st.k + 1) / st.n}%`;
+  $("err").textContent = st.err == null ? "—" : `${(st.err*100).toFixed(1)} cm`;
+  $("fill").style.width = `${100*(st.k+1)/st.n}%`;
+  $("cmtoggle").textContent = `chip-map: ${showChip?"on":"off"}`;
 }
+$("dsel").onchange = e => fetch(`/select?data=${e.target.value}`, {method:"POST"});
+$("camimg").onclick = e => {
+  if (camKf == null) return;
+  const r = e.target.getBoundingClientRect();
+  const cxl = Math.floor((e.clientX - r.left) / r.width * 20);
+  const cyl = Math.floor((e.clientY - r.top) / r.height * 15);
+  const m = $("qmark");
+  m.style.left = `${cxl/20*100}%`; m.style.top = `${cyl/15*100}%`;
+  m.style.width = `${100/20}%`; m.style.height = `${100/15}%`;
+  m.style.display = "block";
+  fetch("/query", {method:"POST", body: JSON.stringify({k:camKf, cy:cyl, cx:cxl})});
+};
 const es = new EventSource("/events");
 es.onmessage = ev => {
   const d = JSON.parse(ev.data);
-  if (d.reset) { pts = []; tp = []; tg = []; bb = null; draw(); return; }
-  if (d.init) {
-    pts = d.pts; tp = d.trail_py; tg = d.trail_gt;
-    pts.forEach(grow); tp.forEach(grow);
-    draw(); return;
-  }
+  if (d.reset) { pts=[]; tp=[]; tg=[]; bb=null; chip=null; chipCanvas=null; qbe=null; camKf=null;
+    $("camimg").src=""; $("qmark").style.display="none"; $("qbetop").textContent="";
+    if (d.data) $("dsel").value = d.data; draw(); return; }
+  if (d.init) { pts=d.pts; tp=d.trail_py; tg=d.trail_gt; if (d.data) $("dsel").value=d.data;
+    pts.forEach(grow); tp.forEach(grow); draw(); return; }
+  if (d.chipmap) { chip = d.chipmap; bakeChip(); draw(); return; }
+  if (d.cam_kf !== undefined) { camKf = d.cam_kf;
+    if (d.jpg) $("camimg").src = "data:image/jpeg;base64," + d.jpg; return; }
+  if (d.qbe) { qbe = d.qbe;
+    $("qbetop").textContent = "top matches (kf/score): " +
+      d.qbe_top.map(([k,s]) => `${k}:${s.toFixed(2)}`).join("  ");
+    draw(); return; }
   if (d.wpts) { for (const p of d.wpts) { pts.push(p); grow(p); } }
   if (pts.length > 60000) pts = pts.slice(-60000);
   tp.push([d.est[0], d.est[1]]); grow(d.est);
