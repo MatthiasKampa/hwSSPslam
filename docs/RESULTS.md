@@ -10891,3 +10891,40 @@ showing raw odometry registration vs websim's full on-device SLAM.
 PLAN PIVOT: port the silicon-proven ice40 SOLO tracker to the ECP5
 stream top (SPRAM->EBR is the main friction) instead of finishing a
 from-scratch matcher; golden_track's laws + validation harness carry.
+
+## 2026-07-16 — SOLO on REAL data (demo-eve bench, scratch_solo_bench):
+first real-data measurement of the chip recipe; DESIGN ENVELOPE is the
+verdict — bounded revisit-rich = OK, long one-way tours = corrupt-or-
+odometry; demo scoped accordingly
+
+The chip semantics (solo.py golden, = flashed top_solo_ecp5 bit-for-
+bit) replayed on four real venues. LONG ONE-WAY TOURS BREAK THE
+ENVELOPE: hunter 2810 kf odom-arm ATE 17.8 m (pair-cos 0.920 < raw
+odom 0.950), lidar-arm 40 m; school_run2 15.5 m. Mechanism: the 64x5
+= 320-kf map fills in ~45 s, the route never revisits it, the
+RELATIVE EMA commit gate adapts down and keeps committing matches
+against far anchors (whose REL transforms also exceed the +-32 m
+saturation contract) — bad commits + odom-coast = random-walk offsets.
+Bounded slice (hunter500) improves to ATE 2.0 / pair-cos 0.939.
+SEG_KF=10 REFUTED (smeared segments -> 79% holds AND worse p90 69 m).
+K_TRY=3 offline arms filed (RTL is K_TRY=1 — informs a future build
+only). Spot bundle has no separate platform odom (odom arm ==
+lidar arm there, 1.85 m with 29% holds — holds FREEZE pose without
+odom; the hold path assumes odom coast by design).
+HONEST CONTEXT: solo's banked wins were synthetic-classroom
+(selfmap 0.112 m, "beats odometry 3.9x on REVISIT-RICH worlds,
+odometry-grade on long tours" — the caveat was always there); this is
+its first real-data run and the caveat dominates. The single-anchor
+CONTROL (0.957 pair-cos, banked above) shows the algebra has the
+headroom; the gap is solo's POLICIES on real score statistics
+(commit gate, nearest-anchor, K_TRY=1) — the post-demo tuning list.
+
+DEMO PLAN (tomorrow): default = the PROVEN stream demo (10 Hz odom
+registration, bit-exact on-chip encode+map, C-kernel cam, queries,
+replay/live toggle). Stretch = SOLO AUTONOMY in a bounded revisit-
+rich loop area (its design point), gated on: silicon parity (30-kf
+chip-vs-golden bit-exact on real frames) + a 5-min live loop drive.
+STAGED (robot offline at wrap): both bitstreams built + served,
+flash_solo.sh / flash_stream.sh one-command flip, solo_host +
+SSP_SOLO=1 webvis mode pushed; 220-kf sim regate still grinding
+(8-kf smoke bit-exact banked).
