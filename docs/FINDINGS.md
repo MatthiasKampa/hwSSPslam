@@ -1277,8 +1277,12 @@ decomposed where the semantic pipeline is/ isn't limited. All in
    map/quantization is a FAITHFUL, ~free container, NOT the deploy bottleneck**.
    But the encoder's fine-class discrimination is weak (object AUC 0.63; top-1
    class-route recall ~chance 0.157). So a fuzzy 150-CLASS-PROTOTYPE query is not
-   reliable, while DISTINCT-object query-by-example is (deploy-side 0.94->1.00,
-   25%-bit-flip robust). **The encoder is QBE-ready, not fine-class-ready.**
+   reliable. QBE-by-EXAMPLE (the deployable Hamming path) carries a GENUINE
+   cross-image signal — ~2.1x above class-prior chance (precision@k, robust) and
+   better than the prototype query — but its ABSOLUTE precision scales with target
+   DISTINCTNESS: high for few well-separated targets (deploy-side 0.94->1.00,
+   25%-bit-flip robust), only ~0.15 (2x chance) for general 150-class retrieval.
+   **The encoder is QBE-ready for salient/distinct targets, not fine-class-ready.**
    Capacity law re-confirmed on the real code: bind OBJECTS/regions, not cells
    (dense cell binding is 13x over ~sqrt(D) -> chance).
 
