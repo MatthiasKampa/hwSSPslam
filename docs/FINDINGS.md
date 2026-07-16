@@ -1112,7 +1112,17 @@ reference (rule 2), positives audited (rule 4 — one retraction below).
    LATER = deploy depth via projected lidar (lidar-camera EXTRINSICS — the single
    highest-value hardware step, now blocking THREE threads). Tracking is the head
    that carries today; the label head is a hard but budget-LEGAL sub-problem whose
-   fix is a regime experiment.
+   fix is a regime experiment. DEPLOY DECISION (2026-07-16, platform-pinned):
+   two negatives DEMOTE the label head on the real platform — (a) the from-scratch
+   regime (long schedule + heavy aug) caps 0.642 pixel / 0.50 object even on DENSE
+   depth (overfitting the 1449-image labeled set; self-sup untested with a valid
+   pretext, but data-limited); (b) DECISIVELY, the platform has NO RGB-D — deploy
+   depth is the 64-ring lidar PROJECTED into the Y8 FOV (sparse, aperture-clipped,
+   occlusion-dropped), on which the depth lever HALVES from +0.119 (dense) to
+   +0.059 (below the +0.07 gate). So the deploy ENDGAME is the SURFACES tier
+   (coarse-class 0.858 pixacc) + label-free QUERY-BY-EXAMPLE on the tracking
+   descriptor bits (0.95, compositional) — the object-label map waits on a real
+   RGB-D sensor or a denser lidar + extrinsics, not from-scratch training.
 
 4. **The queryable map WORKS on real data — governed by a SUBLINEAR capacity
    trend.** Bounded-map capacity grows SUBLINEARLY with D

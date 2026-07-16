@@ -9735,3 +9735,31 @@ CHANNEL axis (1D-azimuth conv), headio expects rings on the HEIGHT axis.
 Needs reconciliation (either the ring net re-shapes to (3,1024,C) or headio
 admits (1,1024,3)); the vision head — the carrying one — is unaffected and
 lands now.
+
+## 2026-07-16 — REQUIRED lidar-like-depth arm (msg efc5f0e, decision-gating): the depth lever HALVES on sparse projected-lidar depth (+0.059 < +0.07) -> label head DEMOTES
+
+Platform reality (user-pinned): no RGB-D sensor; deploy depth = the 64-ring
+lidar PROJECTED into the Y8 camera FOV -> sparse (~0.7 deg/ring), FOV-clipped,
+occlusion-dropped. My banked "depth is the lever +0.12" used DENSE Kinect
+depth (optimistic). Degraded NYUv2 depth to lidar-like geometry (vertical
+ring-subsample ~0.7 deg, aperture crop top/bottom 15% -> 0, occlusion dropout
+at depth discontinuities, nearest-fill inside the aperture; 68% pixel
+coverage) and re-measured at the deploy trunk (pixacc, `scratch/
+scratch_lidarlike_depth.py`):
+  luma only         : 0.480
+  luma + DENSE depth: 0.599   lever +0.119  (reproduces the +0.12 reference)
+  luma + LIDAR-LIKE : 0.539   lever +0.059
+The depth lever HALVES (+0.119 -> +0.059) on realistic sparse lidar depth,
+landing just BELOW the +0.07 decision gate. DECISION (per msg efc5f0e): the
+fine-object LABEL HEAD DEMOTES; the deploy endgame is the SURFACES tier
+(coarse-class 0.858 pixacc) + label-free QUERY-BY-EXAMPLE on the
+tracking-descriptor bits (0.95 retrieval, compositional grading applies to
+desc bits + coarse-class bits). Honest nuance: the lever did not fully
+COLLAPSE to luma-only (it halved, still +0.059), so a DENSER lidar or a
+better projector (more rings-in-FOV, tighter extrinsics) could recover it —
+but at the current 64-ring projection it is below the gate. Combined with the
+P1 regime negative (from-scratch caps 0.64/0.50 even on DENSE depth), the
+fine-object queryable-map LABEL is not viable at deploy on this platform;
+surfaces+QBE ships alone, and the object-label map waits on a real RGB-D
+sensor OR denser lidar+extrinsics. This RESOLVES the label-head deploy
+question. Anti-oracle: GT scores only; depth degraded geometrically, no GT.
