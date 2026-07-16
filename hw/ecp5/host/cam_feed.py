@@ -97,8 +97,11 @@ def ros_mode(dst, topic, fps):
                 img = a.reshape(m.height, m.width)
             else:
                 return
+            if img.shape[1] > 320:          # transport thrift at high fps
+                h2 = int(img.shape[0] * 320 / img.shape[1])
+                img = cv2.resize(img, (320, h2))
             ok, jb = cv2.imencode(".jpg", img,
-                                  [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                  [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ok:
                 send(self.sock, dst, jb.tobytes(), t)
                 self.n += 1
@@ -112,7 +115,7 @@ if __name__ == "__main__":
     ap.add_argument("--dst", default="127.0.0.1:8791")
     ap.add_argument("--topic",
                     default="/camera/camera/color/image_raw")
-    ap.add_argument("--fps", type=float, default=2.0)
+    ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--test", action="store_true")
     a = ap.parse_args()
     host, _, port = a.dst.partition(":")

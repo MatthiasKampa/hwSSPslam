@@ -124,8 +124,30 @@ class LiveDemo(webvis.Demo):
                             cam=bool(self.cam)))
 
     def _cam_worker(self):
-        while True:                      # live cam runs in _drain_cam
-            time.sleep(3600)
+        """FULL-RATE split (retune 2): frames DISPLAY at wire rate
+        (broadcast from udp_rx); desc bits + map ingest run HERE at
+        sustained compute rate, always on the NEWEST pending frame."""
+        while True:
+            if self.data != "live" or not getattr(self, "_camq_live",
+                                                  None) or not self.k:
+                time.sleep(0.02)
+                continue
+            t_us, jb = self._camq_live.pop()      # newest
+            self._camq_live.clear()               # drop stale
+            k = self.k - 1
+            try:
+                b = self.cam.compute(k, jb)
+            except Exception:
+                continue
+            self._cam_track(k, b)
+            self.cammap.ingest(k, b, np.asarray(self.keys[k][0], float),
+                               self.est[k])
+            cls = self.cammap.classes()
+            if cls:
+                self.broadcast(dict(classes=[
+                    dict(id=c["id"], n=c["n"], thumb=None,
+                         boost=c["id"] in self.cammap.boost)
+                    for c in cls]))
 
     def _drain_cam(self):
         """Bind pending camera frames at the current pose + latest scan
@@ -172,7 +194,6 @@ class LiveDemo(webvis.Demo):
                 self.n = len(self.keys)
                 self.step()
                 self.done = False              # never latch in live mode
-                self._drain_cam()
             else:
                 time.sleep(0.02)
 
@@ -199,8 +220,14 @@ def udp_rx(demo, port):
             demo.keys.append((r, np.zeros(3), t_us / 1e6))
         elif typ == 0x02 and len(pkt) > off + 12:      # cam jpeg
             t_us, = struct.unpack_from("<Q", pkt, off)
-            if len(getattr(demo, "_camq_live", [])) < 4:
-                demo._camq_live.append((t_us, pkt[off + 8:]))
+            jb = pkt[off + 8:]
+            demo.broadcast(dict(cam_kf=max(demo.k - 1, 0),
+                                jpg=__import__("base64")
+                                .b64encode(jb).decode()))
+            if getattr(demo, "_camq_live", None) is not None:
+                demo._camq_live.append((t_us, jb))
+                if len(demo._camq_live) > 3:
+                    demo._camq_live.pop(0)
 
 
 def serve(http_port=8790, udp_port=8791):
