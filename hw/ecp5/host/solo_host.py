@@ -61,6 +61,16 @@ class SoloChip:
 
     def ping(self):
         self.s.write(bytes([0x20]))
+        if self._rd(1) == b"\xa5":
+            return True
+        # PARSER-STUCK RECOVERY: a host killed mid-keyframe leaves the
+        # chip's UART parser consuming bytes as point data (no timeout
+        # by design). Feed it a full frame's worth of zeros to complete
+        # whatever it thinks it is parsing, drain, retry.
+        self.s.write(bytes(8192))
+        time.sleep(0.5)
+        self.s.reset_input_buffer()
+        self.s.write(bytes([0x20]))
         return self._rd(1) == b"\xa5"
 
     def set_pose(self, x_m=0.0, y_m=0.0, yaw=0.0):
