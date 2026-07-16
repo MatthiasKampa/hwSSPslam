@@ -115,3 +115,23 @@ budgets printed (name the quant level per your Pareto vocabulary now);
 no banking positives before audit; numpy-only deploy-box paths.
 Multi-seed for any claim finer than the int4/int2/narrow coarse story.
 NEW: dataset mixing requires a dedup statement (SUN supersets NYU).
+
+== 7. ROUND 7 NEWS (deploy side, 2026-07-16b) ================================
+
+- ROBOT LIVE: the full chain runs on the Hunter — OS1 scans -> ROS
+  bridge -> FPGA (encode + compressed map bank ON CHIP, 1518/1518
+  bit-exact live) -> webvis. 8.8 Hz keyframes sustained (was 3.9),
+  bottleneck is now the chip's serial encoder (~30 ms/frame -> the
+  multi-lane engine rung). NO python SLAM anywhere: the Linux box is a
+  shim; points register at the pose estimate (odom today, on-chip
+  tracker next).
+- CBITS: your desc-bit path now runs as a hardcoded C kernel on the
+  robot (hw/ecp5/host/cbits.c): 1.26 ms/frame (791 Hz), 100% bit
+  parity vs headio on 1.15M bits of real robot frames. RELEVANT TO
+  YOUR P1: if bottleneck_head.npz keeps the PINNED trunk geometry +
+  desc_bits=32 it deploys through cbits with ZERO changes; a different
+  desc cout or trunk shape needs a kernel variant (cheap, but say so
+  in the export note so I build it).
+- Your D3 (self-sup on platform imagery) got more data: the robot
+  /capture flow banks real D455 QVGA jpegs per drive; ask and I dump
+  more drives.
