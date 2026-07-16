@@ -53,13 +53,23 @@ def live_bundle():
 
 
 class LiveCam:
-    """OAK jpegs -> exported head desc bits (the CamLane analog with no
-    dataset alignment: frames pair with the CURRENT pose/scan)."""
+    """cam jpegs -> exported head desc bits: the cbits C KERNEL when it
+    builds (1.25 ms/frame, 100% parity gate — full-frame-rate capable),
+    headio numpy fallback otherwise. Frames pair with the CURRENT
+    pose/scan (no dataset alignment)."""
 
     def __init__(self):
         from sspax import headio as HIO
         self.HIO = HIO
         self.head = HIO.load_head(str(webvis.HEAD_NPZ))
+        self.cb = None
+        try:
+            from cbits import CBits
+            self.cb = CBits(str(webvis.HEAD_NPZ))
+            print("[webvis] cam desc bits: cbits C kernel", flush=True)
+        except Exception as e:
+            print(f"[webvis] cbits unavailable ({e}); numpy fallback",
+                  flush=True)
         self.bits = {}
         self.jpeg = {}
         self.lock = threading.Lock()
@@ -68,7 +78,8 @@ class LiveCam:
         from PIL import Image
         im = Image.open(io.BytesIO(jb)).convert("L").resize((320, 240))
         g = np.asarray(im, np.uint8)
-        b = self.HIO.cell_bits(self.head, g, source="desc")
+        b = self.cb.bits(g) if self.cb else \
+            self.HIO.cell_bits(self.head, g, source="desc")
         with self.lock:
             self.bits[k] = b
             self.jpeg[k] = jb
@@ -95,13 +106,12 @@ class LiveDemo(webvis.Demo):
         if data != "live":
             return super()._load(data)
         print("[webvis] live mode: waiting for UDP scans...", flush=True)
-        self.no_slam = True    # pose from datagram, no python SLAM
         self.data = data
         self.b = live_bundle()
         self.keys, self.beam = self.b["keys"], self.b["beam"]
         self.n = 0
         self.gt_ok = self.b["gt_ok"]
-        self.slam = webvis.make_slam()
+        self.pose_src = "odom (datagram)"    # chip tracker when it lands
         self.cam = LiveCam() if self.want_cam else None
         self.cammap = webvis.CamMap() if self.want_cam else None
         self.cammap_fov = CAM_FOV
@@ -125,13 +135,15 @@ class LiveDemo(webvis.Demo):
                             cam=bool(self.cam)))
 
     def _cam_worker(self):
-        """FULL-RATE split (retune 2): frames DISPLAY at wire rate
-        (broadcast from udp_rx); desc bits + map ingest run HERE at
-        sustained compute rate, always on the NEWEST pending frame."""
+        """FULL-RATE bits (cbits C kernel, ~1-3 ms/frame): every pending
+        frame's desc bits run at wire rate, newest-first. The VSA map
+        INGESTS once per new keyframe — re-binding the same kf every
+        frame would only inflate cluster counts, not add information."""
+        last_ingest = -1
         while True:
             if self.data != "live" or not getattr(self, "_camq_live",
                                                   None) or not self.k:
-                time.sleep(0.02)
+                time.sleep(0.005)
                 continue
             t_us, jb = self._camq_live.pop()      # newest
             self._camq_live.clear()               # drop stale
@@ -141,30 +153,11 @@ class LiveDemo(webvis.Demo):
             except Exception:
                 continue
             self._cam_track(k, b)
-            self.cammap.ingest(k, b, np.asarray(self.keys[k][0], float),
-                               self.est[k])
-            cls = self.cammap.classes()
-            if cls:
-                self.broadcast(dict(classes=[
-                    dict(id=c["id"], n=c["n"], thumb=None,
-                         boost=c["id"] in self.cammap.boost)
-                    for c in cls]))
-
-    def _drain_cam(self):
-        """Bind pending camera frames at the current pose + latest scan
-        (live analog of the dataset cam worker)."""
-        while self._camq_live and self.cam and self.k:
-            t_us, jb = self._camq_live.pop(0)
-            k = self.k - 1
-            try:
-                b = self.cam.compute(k, jb)
-            except Exception:
+            if k == last_ingest:
                 continue
-            self._cam_track(k, b)
+            last_ingest = k
             self.cammap.ingest(k, b, np.asarray(self.keys[k][0], float),
                                self.est[k])
-            self.broadcast(dict(cam_kf=int(k), jpg=__import__(
-                "base64").b64encode(jb).decode()))
             cls = self.cammap.classes()
             if cls:
                 self.broadcast(dict(classes=[
@@ -203,6 +196,7 @@ def udp_rx(demo, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", port))
     scan_len = 8 + 2 * N_BEAM
+    last_jpg = [0.0]
     while True:
         pkt, _ = s.recvfrom(65535)
         if demo.data != "live":
@@ -227,9 +221,14 @@ def udp_rx(demo, port):
         elif typ == 0x02 and len(pkt) > off + 12:      # cam jpeg
             t_us, = struct.unpack_from("<Q", pkt, off)
             jb = pkt[off + 8:]
-            demo.broadcast(dict(cam_kf=max(demo.k - 1, 0),
-                                jpg=__import__("base64")
-                                .b64encode(jb).decode()))
+            # display decimated to ~20 fps (full wire rate would flood
+            # slow SSE clients out of the queue); COMPUTE stays full rate
+            now = time.time()
+            if now - last_jpg[0] >= 0.05:
+                last_jpg[0] = now
+                demo.broadcast(dict(cam_kf=max(demo.k - 1, 0),
+                                    jpg=__import__("base64")
+                                    .b64encode(jb).decode()))
             if getattr(demo, "_camq_live", None) is not None:
                 demo._camq_live.append((t_us, jb))
                 if len(demo._camq_live) > 3:

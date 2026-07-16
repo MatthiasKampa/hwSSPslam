@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-"""ECP5 FPGA-in-the-loop WEB VISUALIZATION v2 (STREAM.md v1.1).
+"""ECP5 FPGA-in-the-loop WEB VISUALIZATION v3 (STREAM.md v1.1).
 
-The plugged Icepi Zero runs top_stream_enc: every keyframe's scan streams
-through the board, is digest-verified, and is ENCODED ON CHIP — the VSA
-vector returns (0x92) and is golden-crosschecked bit-exact on the laptop;
-its 2-bit QPSK codes land in the ON-CHIP MAP BANK, whose compressed
-segments the laptop fetches (0x0F -> 0x93) and DECODES into the chip-map
-image. SLAM (shipped run_cv recipe) + all decode run laptop-side.
+ARCHITECTURE (2026-07-16 directive): the host is a SHIM. NO python SLAM
+runs anywhere in the serving path — SLAM lives on the FPGA system.
+Every scan streams through the board (digest-verified), is ENCODED ON
+CHIP (0x92 vector golden-crosschecked bit-exact), and its 2-bit QPSK
+codes land in the ON-CHIP MAP BANK; the laptop fetches the compressed
+segments (0x0F -> 0x93) and DECODES them into the chip-map image.
+Lidar points are added to the display map at the POSE ESTIMATE:
+  live      the pose in the scan datagram (robot odometry today, the
+            on-chip tracker when that rung lands)
+  datasets  data/spot_telluride/est_demo.npz — trajectories computed
+            ONCE OFFLINE by `webvis.py estcache` with the same algebra
+            the chip tracker will run (make_slam); webvis only replays
+            them. Fallback: the bundle's recorded reference.
 
-Lanes:
-  LIDAR : real scans -> FPGA (digest + on-chip encode + on-chip map) ->
-          shipped BandSLAM (python) -> map/trails; chip-map image decoded
-          from the FETCHED compressed codes at estimated poses.
-  CAMERA: aligned D455 frames (spot dataset) -> exported vision head's
-          DESC BITS (headio, numpy, laptop) -> per-keyframe appearance
-          grids anchored on the trajectory. QUERY-BY-EXAMPLE: click a
-          cell in the camera panel; hamming-match against every stored
-          grid; matches highlight along the trail. (Post-demotion the
-          CNN's honest map query IS appearance QBE — no class labels.)
-
-UI: reset button, dataset selection (spot real / classroom+school
-synthetic), lidar map (points + chip-map layer), camera panel + QBE.
-GT/withheld reference is a display-only ghost (anti-oracle).
+CAMERA lane: frames -> the exported vision head's DESC BITS (cbits C
+kernel when built, headio numpy fallback) -> per-keyframe appearance
+grids + the cam VSA object map. Query-by-example, class-chip, patch and
+reverse queries; no class labels (appearance is what the encode
+honestly allows). GT/withheld reference is a display-only ghost.
 
   python3 hw/ecp5/host/webvis.py selftest        # headless, numbers only
   python3 hw/ecp5/host/webvis.py serve [port]    # default 8790
+  python3 hw/ecp5/host/webvis.py estcache [name] # build est_demo.npz
 """
 import base64
 import json
@@ -133,6 +132,21 @@ class Fpga:
 DATASETS = ("spot", "school_run1", "school_run2")   # REAL data only
 
 
+EST_DEMO = ROOT / "data" / "spot_telluride" / "est_demo.npz"
+
+
+def _attach_est(b):
+    """Attach the offline-built pose-estimate trajectory (est_demo.npz,
+    keyed by dataset name). With no python SLAM in the serving path this
+    is where dataset points register; without it the recorded reference
+    is the fallback (run1 has none -> broken until estcache runs)."""
+    if EST_DEMO.exists():
+        z = np.load(EST_DEMO)
+        if b["name"] in z.files and len(z[b["name"]]) >= len(b["keys"]):
+            b["est"] = np.asarray(z[b["name"]], float)
+    return b
+
+
 def load_bundle(name):
     """'spot' = the real classroom tour; 'school_run1'/'school_run2' =
     the real school sessions (ring-33 1024-beam slices, stride-4
@@ -140,7 +154,9 @@ def load_bundle(name):
     hidden); run2 carries the gated-LIO window (342/836 kf, display/eval
     only there)."""
     if name == "spot":
-        return SP.make_bundle()
+        b = SP.make_bundle()
+        b["name"] = "spot"
+        return _attach_est(b)
     d = ROOT / "data" / "spot_telluride" / name
     z = np.load(d / "scans.npz")
     ts = z["ts"]                                # materialize ONCE — npz
@@ -156,10 +172,11 @@ def load_bundle(name):
     keys = [(ranges[i], gt[k][:3] if gt.shape[1] >= 3 else
              np.append(gt[k], 0.0), ts[i] / 1e9)
             for k, i in enumerate(idx)]
-    return dict(name=name, kind="spot", keys=keys,
-                beam=-np.pi + np.arange(1024) * (2 * np.pi / 1024),
-                gt_ok=ok, kts=ts[idx] / 1e9,
-                rmin=SP.R_MIN, rmax=SP.R_MAX)
+    return _attach_est(dict(
+        name=name, kind="spot", keys=keys,
+        beam=-np.pi + np.arange(1024) * (2 * np.pi / 1024),
+        gt_ok=ok, kts=ts[idx] / 1e9,
+        rmin=SP.R_MIN, rmax=SP.R_MAX))
 
 
 def convex_hull(pts):
@@ -458,6 +475,13 @@ class CamLane:
         import golden_cam as GC
         self.HIO, self.GC = HIO, GC
         self.head = HIO.load_head(str(HEAD_NPZ))
+        self.cb = None
+        try:
+            from cbits import CBits
+            self.cb = CBits(str(HEAD_NPZ))
+        except Exception as e:
+            print(f"[webvis] cbits unavailable ({e}); numpy bits",
+                  flush=True)
         self.shards, self.cts, self.where = SC._index(run)
         kns = (np.asarray(kts_s) * 1e9).astype(np.int64)
         j = np.clip(np.searchsorted(self.cts, kns), 1, len(self.cts) - 1)
@@ -485,7 +509,12 @@ class CamLane:
             g, jb = self._gray(k)
         except Exception:
             return None
-        b = self.HIO.cell_bits(self.head, g, source="desc")
+        try:
+            b = self.cb.bits(g) if self.cb else None
+        except Exception:
+            b = None                       # e.g. non-QVGA gray shape
+        if b is None:
+            b = self.HIO.cell_bits(self.head, g, source="desc")
         with self.lock:
             self.bits[k] = b
             self.jpeg[k] = jb
@@ -507,7 +536,16 @@ class CamLane:
         return out
 
 
-# ------------------------------------------------------------ SLAM + server
+# ----------------------------------------------- offline tracker + estcache
+# make_slam is OFFLINE-ONLY since the 2026-07-16 shim directive: the
+# serving path runs NO python SLAM. It is (a) the estcache builder's
+# engine and (b) the configuration home for the future ON-CHIP tracker —
+# the chip runs this same algebra.
+CV_CAP = 0.60          # cv-guess translation cap per kf (m). 0.30 CLIPPED
+                       # real Hunter motion (1.0 m/s med / 1.6 p90 at
+                       # 4 Hz kf = 0.25-0.40 m/kf) — see hunter retune.
+
+
 def make_slam():
     slam = F.BandSLAM(robust=True, attempt_every=4, relax_every=25,
                       gap_kf=300, recent_aids=12, spec=None, nph=0)
@@ -520,6 +558,72 @@ def make_slam():
     slam.matcher = S.Matcher(L.ENC_MAIN, t_half=0.72, rot_half_deg=18.0,
                              rot_step_deg=1.5, perm=(4, L.N_ANG))
     return slam
+
+
+def cv_guess(est, k, cap=CV_CAP):
+    """Constant-velocity pose guess from est[:k] (the replay/tracker
+    prior — lived in the old webvis step loop, now offline-only)."""
+    if k == 0:
+        return None
+    if k == 1:
+        return est[0].copy()
+    v = est[k - 1] - est[k - 2]
+    vn = np.hypot(v[0], v[1])
+    if vn > cap:
+        v[:2] *= cap / vn
+    return np.array([est[k - 1][0] + v[0], est[k - 1][1] + v[1],
+                     est[k - 1][2] + S.wrap(v[2])])
+
+
+def build_est_cache(names=None):
+    """Compute each dataset's pose-estimate trajectory ONCE with the
+    offline tracker (make_slam — the chip-tracker algebra) and store it
+    in est_demo.npz for webvis to REPLAY. Rerun after any tracker
+    retune. Prints per-run smoothness + err vs the recorded reference
+    where one exists (display-honesty numbers, not acceptance)."""
+    out = {}
+    if EST_DEMO.exists():
+        z = np.load(EST_DEMO)
+        out = {k: np.asarray(z[k]) for k in z.files}
+    for name in names or DATASETS:
+        b = load_bundle(name)
+        b.pop("est", None)                     # never seed from a cache
+        keys, beam = b["keys"], b["beam"]
+        n = len(keys)
+        slam = make_slam()
+        est = np.zeros((n, 3))
+        t0 = time.time()
+        for k in range(n):
+            rr = DS.clean(b, np.asarray(keys[k][0], float))
+            pts, w = F.points_from_scan(rr, beam)
+            g = cv_guess(est, k)
+            if g is None:
+                g = np.asarray(keys[k][1], float).copy()   # start anchor
+            e = slam.add_keyframe(pts, w, g)
+            if slam.dirty:
+                slam.relax()
+                e = slam.pose_of(k)
+            est[k] = e
+        dy = np.abs(np.diff(est[:, 2]))
+        dy = np.rad2deg(np.minimum(dy, 2 * np.pi - dy))
+        gt_ok = np.asarray(b.get("gt_ok", np.zeros(n, bool)))[:n]
+        line = (f"  {name}: {n} kf in {time.time()-t0:.0f}s | "
+                f"|dyaw|/kf med {np.median(dy):.2f} p90 "
+                f"{np.percentile(dy, 90):.1f} deg")
+        if gt_ok.any():
+            err = [np.linalg.norm(est[k][:2]
+                                  - np.asarray(keys[k][1])[:2])
+                   for k in range(n) if gt_ok[k]]
+            line += (f" | err vs ref med {np.median(err):.3f} "
+                     f"p90 {np.percentile(err, 90):.3f} m "
+                     f"({len(err)} kf)")
+        print(line, flush=True)
+        out[name] = est
+    np.savez_compressed(EST_DEMO, **out)
+    print(f"wrote {EST_DEMO} ({', '.join(sorted(out))})")
+
+
+# ------------------------------------------------------------------- server
 
 
 class Demo:
@@ -552,7 +656,8 @@ class Demo:
         self.keys, self.beam = self.b["keys"], self.b["beam"]
         self.n = len(self.keys)
         self.gt_ok = np.asarray(self.b.get("gt_ok", np.ones(self.n, bool)))
-        self.slam = make_slam()
+        self.pose_src = "est-cache" if self.b.get("est") is not None \
+            else "ref"
         self.cam = None
         self.cammap = None
         if self.want_cam:
@@ -709,47 +814,25 @@ class Demo:
         if self.fpga:
             dig, vec, self.ms_fpga = self.fpga.verify_encode(
                 k, np.asarray(r, float), int(ts * 1e6))
-            if k % 16 == 0:            # readout cadence halved:
-                codes = self.fpga.map_seg(k % 64)   # CPU freed for cam
-                if codes is not None:
-                    self.chip_segs[k % 64] = (None, codes)  # pose after est
         t0 = time.time()
         rr = DS.clean(self.b, np.asarray(r, float))
         pts, w = F.points_from_scan(rr, self.beam)
-        if getattr(self, "no_slam", False):
-            # live directive: NO python SLAM — points register at the
-            # received pose estimate (robot odom now, chip tracker later)
-            e = np.asarray(gtp, float).copy()
-            self.est[k] = e
-            self.ms_slam = 0.0
-        elif k == 0:
-            guess = np.asarray(gtp, float).copy()
-        elif k == 1:
-            guess = self.est[0].copy()
-        else:
-            v = self.est[k - 1] - self.est[k - 2]
-            vn = np.hypot(v[0], v[1])
-            if vn > 0.30:
-                v[:2] *= 0.30 / vn
-            guess = np.array([self.est[k - 1][0] + v[0],
-                              self.est[k - 1][1] + v[1],
-                              self.est[k - 1][2] + S.wrap(v[2])])
-        if not getattr(self, "no_slam", False):
-            e = self.slam.add_keyframe(pts, w, guess)
-            dt_ = float(np.hypot(*(e[:2] - guess[:2])))
-            dr_ = abs(float(S.wrap(e[2] - guess[2])))
-            a = 0.15
-            self.trk_lid = (a * dt_ + (1 - a) * self.trk_lid[0],
-                            a * dr_ + (1 - a) * self.trk_lid[1]) \
-                if hasattr(self, "trk_lid") else (dt_, dr_)
-            if self.slam.dirty:
-                self.slam.relax()
-                e = self.slam.pose_of(k)
-            self.est[k] = e
-            self.ms_slam = (time.time() - t0) * 1e3
-        if self.fpga and k % 8 == 0 and (k % 64) in self.chip_segs:
-            self.chip_segs[k % 64] = (e.copy(),
-                                      self.chip_segs[k % 64][1])
+        # NO python SLAM (shim directive): points register at the POSE
+        # ESTIMATE — live: the datagram pose (odom now, chip tracker
+        # later); datasets: the offline est_demo trajectory, else the
+        # recorded reference.
+        est_ref = self.b.get("est")
+        e = np.asarray(est_ref[k] if est_ref is not None else gtp,
+                       float).copy()
+        self.est[k] = e
+        # chip-map readout: ONE slot every 4 kf, stamped with THIS
+        # frame's pose (the chip wrote frame k to slot k%64 during
+        # streaming, so the fetch pairs codes+pose exactly; over 64
+        # frames 16 slots stay live = the rolling chip-map window)
+        if self.fpga and k % 4 == 0:
+            codes = self.fpga.map_seg(k % 64)
+            if codes is not None:
+                self.chip_segs[k % 64] = (e.copy(), codes)
         if self.cam and k % 2 == 0:
             try:
                 self.camq.put_nowait(k)
@@ -773,6 +856,7 @@ class Demo:
                                   round(float(gtp[1]), 3), gt_ok])
         err = (float(np.linalg.norm(e[:2] - np.asarray(gtp)[:2]))
                if gt_ok else None)
+        self.ms_slam = (time.time() - t0) * 1e3      # shim python cost
         st = dict(k=k, n=self.n, data=self.data,
                   dig=bool(dig), vec=bool(vec),
                   fx_dig=self.fpga.dig_ok if self.fpga else 0,
@@ -781,17 +865,12 @@ class Demo:
                   kbps=round(self.fpga.kbps(), 1) if self.fpga else 0,
                   ms_fx=round(self.ms_fpga, 1),
                   ms_py=round(self.ms_slam, 1),
+                  pose_src=getattr(self, "pose_src", "ref"),
                   est=[round(float(x), 3) for x in e],
                   gt=[round(float(x), 3) for x in gtp[:3]], gt_ok=gt_ok,
                   err=None if err is None else round(err, 3),
-                  mem_kb=round(self.slam.memory_kb(), 1),
-                  segs=len(self.slam.segvec),
-                  loops=sum(1 for ed in self.slam.edges
-                            if ed[5] == "loop"),
                   chip_segs=len(self.chip_segs),
                   overruns=self.overruns,
-                  trk_lid=[round(v, 3) for v in
-                           getattr(self, "trk_lid", (0, 0))],
                   trk_cam=[round(v, 3) for v in
                            getattr(self, "trk_cam", (0, 0, 0, 0))],
                   wpts=np.round(wpts, 3).tolist())
@@ -998,8 +1077,7 @@ def make_handler(demo):
                     fx_tot=demo.fpga.total if demo.fpga else 0,
                     chip_segs=len(demo.chip_segs),
                     cam_kf=len(demo.cam.bits) if demo.cam else 0,
-                    mem_kb=round(demo.slam.memory_kb(), 1),
-                    segs=len(demo.slam.segvec),
+                    pose_src=getattr(demo, "pose_src", "ref"),
                     ms_py=round(demo.ms_slam, 1),
                     ms_fx=round(demo.ms_fpga, 1),
                     overruns=demo.overruns))
@@ -1062,8 +1140,9 @@ def selftest(n=40, use_fpga=True):
                  f"{len(demo.chip_segs)} segs | ")
     else:
         line += "FPGA lane off | "
-    line += (f"cam grids {ncam} | med err {np.median(errs):.3f} m | "
-             f"mem {demo.slam.memory_kb():.1f} KB")
+    line += (f"cam grids {ncam} | pose {demo.pose_src}"
+             + (f" | med err vs ref {np.median(errs):.3f} m"
+                if errs else ""))
     print(line)
     if demo.cammap:
         cls = demo.cammap.classes()
@@ -1088,6 +1167,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "serve"
     if cmd == "selftest":
         selftest(int(sys.argv[2]) if len(sys.argv) > 2 else 40)
+    elif cmd == "estcache":
+        build_est_cache([sys.argv[2]] if len(sys.argv) > 2 else None)
     elif cmd == "serve":
         serve(int(sys.argv[2]) if len(sys.argv) > 2 else 8790,
               use_fpga=not (len(sys.argv) > 3 and sys.argv[3] == "nofpga"))

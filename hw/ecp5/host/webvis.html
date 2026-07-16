@@ -41,19 +41,17 @@
     <tr><td>chip map segments</td><td id="csegs"></td></tr>
     <tr><td>roundtrip</td><td id="msfx"></td></tr>
   </table>
-  <div class="grp">python SLAM (shipped recipe)</div>
+  <div class="grp">pose + shim (no python SLAM)</div>
   <table>
     <tr><td>keyframe</td><td id="k"></td></tr>
-    <tr><td>step</td><td id="mspy"></td></tr>
-    <tr><td>segments / loops</td><td id="segs"></td></tr>
-    <tr><td>map memory (bounded)</td><td id="mem"></td></tr>
+    <tr><td>pose source</td><td id="psrc"></td></tr>
+    <tr><td>shim step</td><td id="mspy"></td></tr>
     <tr><td>err vs withheld ref</td><td id="err"></td></tr>
   </table>
-  <div class="grp">tracking (lidar vs camera)</div>
+  <div class="grp">tracking (camera vs pose)</div>
   <table>
-    <tr><td>lidar match corr</td><td id="tlid"></td></tr>
     <tr><td>cam shift agree</td><td id="tcam"></td></tr>
-    <tr><td>yaw cam / lidar</td><td id="tyaw"></td></tr>
+    <tr><td>yaw cam / pose</td><td id="tyaw"></td></tr>
     <tr><td>track divergence</td><td id="tdiv"></td></tr>
   </table>
   <div id="bar"><div id="fill"></div></div>
@@ -71,11 +69,13 @@
     <span><span class="dot" style="background:#ffd166"></span>QBE match strength</span>
   </div>
   <div style="margin-top:10px;color:#7f93ad;font-size:11px">
-    Every scan is encoded ON the FPGA (bit-exact vs golden, live) and its
-    compressed 2-bit codes live in the on-chip map bank; the laptop
-    fetches + decodes them (purple layer). Camera cells are the exported
-    CNN's descriptor bits — query-by-example, no class labels
-    (appearance is what the encode honestly allows).
+    SLAM lives on the FPGA system — the host is a shim. Every scan is
+    encoded ON the FPGA (bit-exact vs golden, live); its compressed
+    2-bit codes live in the on-chip map bank, fetched + decoded here
+    (purple layer). Lidar points scatter at the pose estimate (odometry
+    live / offline est-cache on datasets; the on-chip tracker replaces
+    both). Camera cells are the exported CNN's descriptor bits (C
+    kernel) — query-by-example, no class labels.
   </div>
 </div>
 <script>
@@ -173,11 +173,9 @@ function panel() {
   $("csegs").textContent = st.chip_segs;
   $("msfx").textContent = `${st.ms_fx} ms`;
   $("k").textContent = `${st.k+1}/${st.n}${st.done?" done":""} · ${st.data}`;
+  $("psrc").textContent = st.pose_src || "—";
   $("mspy").textContent = `${st.ms_py} ms`;
-  $("segs").textContent = `${st.segs} / ${st.loops}`;
-  $("mem").textContent = `${st.mem_kb} KB`;
   $("err").textContent = st.err == null ? "—" : `${(st.err*100).toFixed(1)} cm`;
-  if (st.trk_lid) $("tlid").textContent = `${(st.trk_lid[0]*100).toFixed(1)} cm / ${(st.trk_lid[1]*57.3).toFixed(1)}°`;
   if (st.trk_cam) {
     $("tcam").innerHTML = `<span class="${st.trk_cam[0]>0.6?"ok":"bad"}">${(st.trk_cam[0]*100).toFixed(0)}%</span>`;
     $("tyaw").textContent = `${(st.trk_cam[1]*57.3).toFixed(1)} / ${(st.trk_cam[2]*57.3).toFixed(1)} °/s`;

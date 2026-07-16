@@ -29,3 +29,4 @@ hw/ecp5/build/
 # headio deploy artifacts (small int8 head exports — the repo IS the transfer channel, msg round 3)
 !sspax/artifacts/
 !sspax/artifacts/*.npz
+hw/ecp5/host/libcbits.so
