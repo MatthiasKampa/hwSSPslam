@@ -5,12 +5,18 @@ THE CONTRACT (one .npz per trained unified net):
   meta        json string:
     version   1 | 2 (v2 = 2026-07-15c, shaped to the FIRST TRAINED nets
               sspax/vision/segnet.py + sspax/lidar_ring.py; v1 files
-              still load — in_div defaults to 255, desc to absent)
+              still load — in_div defaults to 255, desc to absent.
+              v2.2 EXTENSION 2026-07-16: vision RGB geometries
+              (240x320x3 / 120x160x3) are pinned deploy inputs — the
+              ADE-150 bottleneck encoder measured colour as a real
+              lever (gray -40% rel pixacc) — and the TRACK head is
+              OPTIONAL (the bottleneck exports trunk+desc only);
+              same version tag, absent keys default)
     modality  "vision" | "lidar"
     in_h/in_w input resolution — MUST be a pinned deploy geometry
-              (vision 240x320 or 120x160 Y8; lidar 3x1024 or 3x512
-              ring raster, rings-as-channels)
-    in_ch     1 (vision Y8) | 3 (lidar rings)
+              (vision 240x320 or 120x160, Y8 or RGB; lidar 3x1024 or
+              3x512 ring raster, rings-as-channels)
+    in_ch     1 (vision Y8) | 3 (vision RGB / lidar rings)
     in_div    input scale divisor (v2): vision 255.0 (Y8 -> [0,1]),
               lidar 1.0 (ring ranges stay in METERS — the nets train
               on raw meters; /255 here was a v1 vision-ism)
@@ -20,7 +26,8 @@ THE CONTRACT (one .npz per trained unified net):
     act       "relu" | "crelu" (hidden layers; last layer of every
               stack is linear; CReLU doubles the NEXT layer's cin)
     trunk     [{kind: conv|dw|conv1d, k, s, cin, cout}, ...]
-    track     layer list -> (h, w, 1) or (h, w, 2): [:, :, 0] = per-cell
+    track     (OPTIONAL since v2.2) layer list -> (h, w, 1) or
+              (h, w, 2): [:, :, 0] = per-cell
               saliency weight (use max(0, .)); [:, :, 1] (optional) =
               thermometer cutoff — RETIRED per the 2026-07-15 P1
               retraction (kept loadable; two same-input 1x1 convs merge
@@ -100,6 +107,7 @@ def load_head(path):
     meta.setdefault("in_div", 255.0)          # v1 semantics
     meta.setdefault("desc", [])               # v1: no descriptor slot
     meta.setdefault("seg", [])                # v2: desc-only heads allowed
+    meta.setdefault("track", [])              # v2.2: track optional
     meta.setdefault("k_bits", 0)              # (the k-bit latent arrives
     meta.setdefault("thresh", [])             #  with the distillation round)
     stacks = {}
@@ -121,10 +129,11 @@ def load_head(path):
 
 def _validate(meta):
     res = (meta["in_h"], meta["in_w"], meta["in_ch"])
-    ok_res = {("vision"): [(240, 320, 1), (120, 160, 1)],
+    ok_res = {("vision"): [(240, 320, 1), (120, 160, 1),
+                           (240, 320, 3), (120, 160, 3)],   # v2.2 RGB
               ("lidar"): [(3, 1024, 3), (3, 512, 3)]}
     assert res in ok_res[meta["modality"]], \
-        f"input {res} is not a pinned deploy geometry (2026-07-15b)"
+        f"input {res} is not a pinned deploy geometry (2026-07-15b/16)"
     assert float(meta["in_div"]) > 0
     crelu = meta["act"] == "crelu"
     for name in ("trunk", "track", "seg", "desc"):
@@ -146,7 +155,8 @@ def _validate(meta):
     if meta["seg"]:
         assert len(meta["thresh"]) == meta["k_bits"]
         assert meta["seg"][-1]["cout"] == meta["k_bits"]
-    assert meta["track"][-1]["cout"] in (1, 2)   # 1 = weight-only (cutoff
+    if meta["track"]:                            # v2.2 optional; 1 =
+        assert meta["track"][-1]["cout"] in (1, 2)   # weight-only (cutoff
     if meta["desc"]:                             # retired, P1 retraction)
         assert meta["desc"][-1]["cout"] == meta["desc_bits"]
 
@@ -195,13 +205,18 @@ def forward(head, raw):
     m = head["meta"]
     x = np.asarray(raw, np.float32) / float(m["in_div"])
     if m["modality"] == "vision":
-        assert x.shape == (m["in_h"], m["in_w"]), x.shape
-        x = x[:, :, None]
+        if m["in_ch"] == 1:                    # Y8: (H, W) -> (H, W, 1)
+            assert x.shape == (m["in_h"], m["in_w"]), x.shape
+            x = x[:, :, None]
+        else:                                  # v2.2 RGB: (H, W, 3)
+            assert x.shape == (m["in_h"], m["in_w"], m["in_ch"]), x.shape
     else:
         assert x.shape == (m["in_h"], m["in_w"]), x.shape
         x = np.ascontiguousarray(x.T)          # (beams, rings-as-ch)
     trunk = _run_stack(x, head["trunk"], m["act"], last_linear=False)
-    out = dict(track=_run_stack(trunk, head["track"], m["act"]))
+    out = {}
+    if head["track"]:                          # v2.2: optional
+        out["track"] = _run_stack(trunk, head["track"], m["act"])
     if head["seg"]:
         logits = _run_stack(trunk, head["seg"], m["act"])
         out["logits"] = logits
@@ -223,7 +238,7 @@ def cell_bits(head, gray, pool=2, source="seg"):
     m = head["meta"]
     gray = np.asarray(gray)
     if (m["modality"] == "vision"
-            and gray.shape == (2 * m["in_h"], 2 * m["in_w"])):
+            and gray.shape[:2] == (2 * m["in_h"], 2 * m["in_w"])):
         gray = gray[::2, ::2]
     out = forward(head, gray)
     a = out["logits"] if source == "seg" else out["desc_act"]
@@ -263,6 +278,20 @@ def make_fixture(path, res="full", k_bits=16, seed=0):
                     in_ch=1, cell=8, act="relu", trunk=T, track=A, seg=G,
                     k_bits=k_bits, thresh=[0.0] * k_bits)
         D = []
+    elif res == "rgb":
+        # v2.2 MIRROR of the ADE-150 bottleneck encoder export shape
+        # (sspax/vision/bottleneck_seg.py): full QVGA RGB, stride-8
+        # relu trunk -> 30x40, desc-only (track/seg absent).
+        T = [dict(kind="conv", k=3, s=2, cin=3, cout=16),
+             dict(kind="conv", k=3, s=2, cin=16, cout=32),
+             dict(kind="conv", k=3, s=2, cin=32, cout=64)]
+        A = []
+        D = [dict(kind="conv", k=1, s=1, cin=64, cout=32)]
+        G = []
+        meta = dict(version=2, modality="vision", in_h=240, in_w=320,
+                    in_ch=3, in_div=255.0, cell=8, act="relu", trunk=T,
+                    track=A, desc=D, desc_bits=32, seg=G, k_bits=0,
+                    thresh=[])
     elif res == "half":
         T = [dict(kind="conv", k=3, s=2, cin=1, cout=16),
              dict(kind="conv", k=3, s=2, cin=32, cout=16),
@@ -374,6 +403,26 @@ def selftest():
         print(f"  {res}: forward {hw} cells (track {tc}"
               f"{', desc 32' if has_d else ''}), deterministic, roundtrip "
               f"exact; @frame {fr/1e6:.1f} MMAC, seg {mm['seg']/1e6:.1f}")
+    # v2.2: RGB desc-only head (the ADE bottleneck export shape) —
+    # track absent, colour input, half-res auto-subsample
+    import tempfile as _tf
+    import os as _os
+    p = _os.path.join(_tf.gettempdir(), "headio_rgb.npz")
+    make_fixture(p, "rgb", seed=4)
+    head = load_head(p)
+    rng = np.random.default_rng(1)
+    rgb = rng.integers(0, 256, (240, 320, 3)).astype(np.uint8)
+    o1 = forward(head, rgb)
+    o2 = forward(load_head(p), rgb)
+    assert "track" not in o1 and "logits" not in o1
+    assert o1["desc"].shape == (30, 40, 32)
+    assert np.array_equal(o1["desc"], o2["desc"])
+    cb = cell_bits(head, rgb, source="desc")
+    assert cb.shape == (15, 20, 32)
+    big = rng.integers(0, 256, (480, 640, 3)).astype(np.uint8)
+    assert cell_bits(head, big, source="desc").shape == (15, 20, 32)
+    print("  rgb: v2.2 desc-only QVGA RGB head — forward/cell_bits/"
+          "half-res subsample ok, no track stack")
     # desc-only head (seg deferred to the distillation round) must load
     p = os.path.join(tempfile.gettempdir(), "headio_lidar.npz")
     z = np.load(p)
