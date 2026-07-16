@@ -10613,3 +10613,16 @@ needs the small rclpy image->UDP node + launching the depthai driver);
 observed keyframe arrival ~2 Hz vs the 5 Hz setting (rate-budget or
 scan-topic pacing — tune next session); QSPI persistence re-check on
 next power cycle.
+
+## 2026-07-16 — CAM VIEW STREAMING on the robot: cam_feed.py (any ROS image topic OR test mode) -> UDP 0x02 -> live cam panel + cam VSA map
+
+hw/ecp5/host/cam_feed.py deployed on the robot: subscribes any
+sensor_msgs Image/CompressedImage topic (compressed forwards as-is),
+decimates to --fps, sends 0x02 t_us+JPEG datagrams to webvis_live.
+No camera hardware is on the robot yet (no USB OAK, no /dev/video*,
+depthai python absent — OAK presumably PoE and not mounted), so the
+lane is PROVEN with --test mode (synthetic moving pattern @1 fps):
+cam_kf 61 and climbing on the live robot webvis, desc bits + cam map
+ingesting at the live pose. When the OAK lands: launch the depthai
+driver + `python3 cam_feed.py --topic /oak/rgb/image_raw --fps 2`
+(budget: 2 fps JPEG ~ tens of KB/s on loopback UDP — free).
