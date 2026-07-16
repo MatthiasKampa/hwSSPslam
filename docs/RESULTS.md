@@ -11176,3 +11176,27 @@ map-recall push), so imperfect codes still recover objects at the MAP level.
 Remaining pixacc levers (if wanted): DESIGN (finer grid) or coarser class sets
 (the surfaces FLOOR), not capacity. Caveats: single-seed; 8000/20k; 6000 steps.
 Anti-oracle: ADE GT scores seg only.
+
+## 2026-07-16 — IN-MAP validation of the real ADE20K encoder: OBJECT binding is map-ready (0.706 ~= clean 0.733); CELL binding collapses (0.524) — the capacity law on the trained code
+
+Closes the rule-4 audit caveat "clean-code AUC UPPER-BOUNDS in-map retrieval" with
+the REAL ADE20K-trained +-1 code through the FULL SSP bind+query pipeline (4-bit
+polar quant + superposition crosstalk), top-20 classes, 120 val images:
+  clean-code cosine AUC (upper bound)                 : 0.733
+  CELL binding  (256 dense cells, 13x over ~sqrt(D))  : 0.524  (chance)
+  OBJECT binding (1 entity/class at centroid, <= cap) : 0.706
+VERDICT: the encoder IS MAP-READY. When bound at the capacity the map supports —
+OBJECTS, not cells — in-map class-query recall (0.706) essentially MATCHES the
+clean-code bound (0.733): the 4-bit quant + superposition cost only ~0.03. The
+0.52 "collapse" (and the earlier scratch_ade_inmap 25%-flip 0.497) was PURELY
+binding granularity: 256 dense cells is 13x over D=360's ~sqrt(D) capacity, so
+crosstalk buries the query (the capacity law + same-class-multiplicity findings,
+now re-confirmed on the real trained code). DEPLOY PRESCRIPTION (re-derived, not
+new): aggregate per-cell codes to per-object/region entities BEFORE binding — this
+is exactly why the deploy-side object map hits 0.94-1.00 while naive cell binding
+cannot. So the modest 150-class pixacc (~0.31) and code-AUC (~0.73) are NOT the
+deploy limiter: object-bound, the map recovers classes at 0.71. Caveats:
+single-seed; per-class-centroid aggregation (real deploy clusters spatially too);
+pixel (u,v) positions stand in for lidar-lifted 3D; 25%-flip untested for object
+binding (cell-binding flip was already at chance). Anti-oracle: ADE GT builds the
+prototypes/scores only; no GT in the code or binding.
