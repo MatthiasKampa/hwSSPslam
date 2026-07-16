@@ -11312,3 +11312,20 @@ accuracy (walled). Data now on disk: school_run2 rgb_d455 (real in-domain RGB) +
 depth_d455 — unblocks D3 self-sup domain adaptation. Single-seed; stability may be
 mildly inflated by smoother real frames vs cluttered ADE. Anti-oracle: no GT used
 (label-free metrics).
+
+## 2026-07-16 — P1 export de-risked: RGB trains stably with /255-only (no per-channel norm) — clean headio in_div=255, zero contract change
+
+The per-channel input standardization (the RGB-NaN fix) does NOT fit headio's
+scalar in_div, and folding it into conv-0 breaks at the zero-padding boundary
+(flagged earlier). Test: does RGB train stably with JUST /255 (in_div=255, no
+per-channel mean/std)? ADE ch16, 6000 steps:
+  div255  : pixacc 0.288  code-AUC 0.655   (STABLE, no NaN)
+  perchan : pixacc 0.308  code-AUC 0.646
+Equivalent (div255 marginally BETTER code-AUC; pixacc -0.02, within noise). So
+the earlier RGB->NaN was the [0,255] UNNORMALIZED input, not the lack of
+per-channel stats — [0,1] via /255 is enough for CReLU stability. CONSEQUENCE:
+the bottleneck_head export is CLEAN — in_div=255, in_ch=3, in_h=240, in_w=320,
+desc=code head (32 bits), seg=[] k_bits=0 — standard headio v2, no per-channel
+norm, no contract change. P1 unblocked. (Remaining coordination: the RGB 3-ch
+320x240 TRUNK SHAPE needs a cbits kernel variant per round-7 — cheap, note it in
+the export.) Anti-oracle: ADE GT scores seg only.
