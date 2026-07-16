@@ -10188,7 +10188,6 @@ over K=1..16), ~1/sqrt(K)-like — NOT a merge. The recall cliff is the FIXED
     problem, not a representation problem — lower the threshold or read out
     per-instance at known candidate positions; the bounded vector keeps the
     peaks. Anti-oracle: synthetic, GT positions score only.
-=======
 ## 2026-07-16 — THE VSA ENCODER + COMPRESSED MAP ARE ON SILICON (ECP5): bit-exact on real scans; the map lives ON CHIP and the laptop decodes its fetched codes
 
 Task #43's core rung + the user-directed architecture ("keep the map on
@@ -10255,4 +10254,3 @@ the next #43 rung, after which SLAM poses also come from silicon.
 STREAM.md v1.1 = the full interface spec incl. the ROS-bridge
 implementer section (robot side codes against it; hw_stream.py is the
 reference sender).
->>>>>>> ea08d63 (ON-CHIP ENCODE + ON-CHIP MAP on silicon (bit-exact, real scans); webvis v2: both maps, QBE queries, chip-map decoded on laptop; STREAM.md v1.1 interface spec)
