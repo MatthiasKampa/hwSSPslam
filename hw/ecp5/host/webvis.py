@@ -133,10 +133,23 @@ class Fpga:
 DATASETS = ("spot", "school_run1", "school_run2")   # REAL data only
 # live /capture dumps double as replay datasets ("inspect without
 # driving"): capture_<ts>.npz in SSP_CAPTURE_DIR (default ~) appear in
-# the selector as drive_<ts>. Discovered at process start.
+# the selector as drive_<ts>. Discovered at process start. Only the
+# LATEST capture WITH cam bits is offered (user directive — cam-less
+# drives, e.g. pre-fix drive 1, replay with a dead camera panel).
 CAPTURE_DIR = Path(os.environ.get("SSP_CAPTURE_DIR", str(Path.home())))
+
+
+def _has_cam(p):
+    try:
+        z = np.load(p, allow_pickle=True)      # lazy: reads cam_kf only
+        return "cam_kf" in z.files and len(z["cam_kf"]) > 0
+    except Exception:
+        return False
+
+
 CAPTURES = {f"drive_{p.stem.split('_', 1)[1]}": p
-            for p in sorted(CAPTURE_DIR.glob("capture_*.npz"))}
+            for p in [q for q in sorted(CAPTURE_DIR.glob("capture_*.npz"))
+                      if _has_cam(q)][-1:]}
 
 
 def avail_datasets():
