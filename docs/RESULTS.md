@@ -9621,3 +9621,117 @@ occlusion dropout on NYUv2 depth), with a decision rule: lever survives
 >= ~+0.07 -> streaming-lane U-Net plan stands; collapses toward
 luma-only -> the label head demotes and surfaces+QBE is the deploy
 endgame.
+
+## 2026-07-16 — P4 (msg round 3): the DEPLOY semantic fine-band (lam_min = 0.25 m lidar coherence floor) HOLDS — pins geomspace(0.25, 2, 6)
+
+The other agent flagged that the winning semantic fine ladder (0.1-1.6 m,
+recall 0.98) starts BELOW the 0.25 m lidar coherence floor — synthetic-clean
+only, since lidar cannot provide sub-0.25 m wavelength content. Re-run
+respecting the floor (chair query, D=360, 24 seeds):
+  fine  .1-1.6 (BELOW floor)  : recall 0.98  precision 0.93
+  floor .25-2  (DEPLOY band)  : recall 1.00  precision 0.86
+  oct6  .25-8                 : recall 0.91  precision 0.82
+The floor-respecting band geomspace(0.25, 2, 6) HOLDS (recall 1.00,
+precision 0.86) — actually higher recall than the below-floor ladder, only
+slightly lower precision. So the deploy SEMANTIC fine-band is CONFIRMED at
+lam_min = the lidar coherence floor (0.25 m); it does NOT need vision-depth
+sub-floor precision. Pins the design: the semantic second-band per segment =
+geomspace(0.25, ~2, 6), sharing the place band's datapath. Corrects the
+earlier fine-ladder result's synthetic-clean caveat (the 0.1-1.6 win was
+real but un-deployable; 0.25-2 is the deployable equivalent). Anti-oracle:
+synthetic, GT scores only.
+
+## 2026-07-16 — P5 (msg round 3): dual_use retraction CLOSED — single-vector place survives fully re-encoded semantics (but the aliased case stays two-band)
+
+Closes the dual_use place-side retraction (the audit caught the revisit
+reusing sem_vec VERBATIM = identical-vector match). Now the revisit is FULLY
+re-encoded: same place (jittered cloud) AND same objects at JITTERED
+positions (re-encoded semantics, not verbatim). combined = alpha*place +
+(1-alpha)*sem, place-AUC (16 scenes, revisit vs different):
+  alpha 1.0/0.9/0.7/0.5/0.3 : place-AUC 1.000 at every alpha
+Single-vector place SURVIVES the added (independently re-encoded) semantic
+term — place-AUC holds 1.0 down to alpha=0.3 (mostly-semantic). So single-
+vector dual-use is SAFE in the realistic revisit (same place + same objects:
+both cues match and REINFORCE). HONEST CAVEATS (unchanged from the audit):
+(i) the place task is easy — 16 DISTINCT scenes are trivially separable, so
+this shows no interference COST; (ii) the semantics MATCH on the revisit
+(help, not interfere) — the aliased-place + interfering-semantics stress case
+is still untested and not realistic (a revisit sees the same objects). So
+"single-vector place is safe" is supported for the realistic case; the
+TWO-BAND design (semantic as a separate fine band per segment, no alpha —
+the msg-round-3 deploy default) remains the conservative choice for aliased
+venues. Retraction closed: the verbatim flaw is fixed, the direction tested,
+the result honest (works realistically; two-band is the safe default).
+Anti-oracle: synthetic, GT scores only.
+
+## 2026-07-16 — compose module absorbs its controls (nits a/b) + composition SPENDS capacity (nit c)
+
+Addressing the msg-round-3b compose nits: `sspax/semantic_compose.py` now
+CONTAINS (not just cites from scratch) its decisive controls —
+- (a) the RANDOM-query control runs in-module: REAL 28.7/18.3/6.8 (2/1/0
+  match) vs RANDOM 3.6/3.9/4.4 (flat) — grading is bit-OVERLAP, not object
+  count; plus the product-of-queries operator (recall 1.00 vs union-bits
+  0.94, precision ~0.55).
+- (b) the retrieval metric is now LABELLED: candidate set = GT object
+  CENTROIDS (readout separability at known positions), NOT the grid-detect
+  pass — so the ~0.55 precision is not comparable to segnoise precision.
+- (c) NEW `load_sweep`: composition SPENDS capacity. A 2-attribute object
+  commits 2k=24 bits, so by the significance-capacity law it loads the
+  bounded map like a double-significance one. Chair recall (union-bits) vs
+  #objects, 1-attr (k bits) vs 2-attr (2k bits), D=360:
+    #obj    1-attr    2-attr
+      6      0.88      0.71
+     10      0.72      0.45
+     16      0.26      0.16
+     24      0.04      0.02
+  2-attr objects exhaust capacity ~2x faster (n_obj=10: 0.72 vs 0.45) —
+  composition is not free; each extra attribute is committed bits that
+  count against the sqrt-ish capacity budget. So the deploy semantic map
+  trades attribute richness against object count at fixed D — the compose
+  price, now measured. Anti-oracle: synthetic, GT (class,colour) score only.
+
+## 2026-07-16 — P1 regime increment (long schedule + heavy aug): does NOT close 0.638->0.70 — overfitting-limited; self-sup pretraining is the last lever
+
+P1 (msg 3b): the label head is budget-legal @keyframe, so the gap should be
+the TRAINING REGIME. Increment 1+2 = long schedule (5x = 20k steps) + HEAVY
+aug (flip + photometric + depth-noise), ch48 RGB-D U-Net (2.2M params, on the
+keyframe lane), warmup-cosine LR (`scratch/scratch_unet_regime.py`):
+  quick baseline (4000 steps, light noise): pixacc 0.638  mIoU 0.213
+  regime (20k steps + heavy aug)          : pixacc 0.642  mIoU 0.205  object-acc 0.502
+FLAT — schedule + aug do NOT close the gap. Train loss fell to 0.090 while
+eval stayed 0.642 => the net OVERFITS the small 1449-image NYUv2-labeled set
+despite heavy aug; the regime's first two components are NOT the lever
+(counters the "gap is the missing training regime" hypothesis for these two).
+POSITIVE nuance: the U-Net decoder lifts OBJECT-level acc 0.23 (deploy trunk)
+-> 0.50 (U-Net) — a MARGINAL map (~0.43 query recall by the segnoise curve),
+below the ~0.70 useful bar but well above the trunk's ~0.15. PROVISIONAL
+NEGATIVE (2/3 of the regime): fine-object labels from-scratch on 1449 images
+cap ~0.64 pixel / 0.50 object with schedule+aug. UNTESTED last lever: SELF-SUP
+ENCODER PRETRAINING (the reviewer's biggest-yield bet) on the UNLABELED NYUv2
+raw distribution — the fix for the overfitting/small-labeled-set limit. If
+self-sup also caps <0.70, the from-scratch object-label negative is FULL and
+the surfaces+QBE fork ships alone (labels wait on external pretraining or a
+bigger labeled corpus). Budgets: 2.2M params ~2.2 MB int8 < 8 MB lane;
+~keyframe-legal. Anti-oracle: TIME-independent (NYUv2 frames independent),
+GT scores only.
+
+## 2026-07-16 — P0 (msg 3b): VISION net exported via headio v2 + validated; LIDAR export blocked on a geometry discrepancy
+
+`sspax/artifacts/vision_head.npz` — the trained vision net (segnet_nyu.pkl)
+exported through headio v2 (int8 per-channel quant): trunk = Conv_0-3
+(crelu, cell 4), track = [w] (Conv_4 cout 1; the cut Conv_5 DROPPED per the
+P1 thermometer retraction), desc = Conv_6 (32-bit), seg OMITTED (the 40-class
+head is not the k-bit label latent — that arrives with distillation). in_div
+255, in (120,160,1). load_head passes _validate; headio `stability` gate on
+held-out TUM (cross-dataset): descriptor bit-agreement 0.750 adj / 0.520 far
+-> GAP 0.23, vs the random-weights baseline gap 0.06 (0.892/0.828) — the
+trained descriptor discriminates same- vs different-place 3.6x better than
+random and TRANSFERS across datasets. Artifact ~KB int8, committable.
+LIDAR export BLOCKED (flag for deploy side): lidar_ring.ring_raster produces
+(1, 1024, 3) [in_h=1, rings-as-CHANNELS in_ch=3], but headio v2's pinned
+lidar geometry is (3, 1024, 3) [in_h=3, in_ch=3]. The "3x1024 rings-as-
+channels" spec is realised two different ways — my net binds rings to the
+CHANNEL axis (1D-azimuth conv), headio expects rings on the HEIGHT axis.
+Needs reconciliation (either the ring net re-shapes to (3,1024,C) or headio
+admits (1,1024,3)); the vision head — the carrying one — is unaffected and
+lands now.

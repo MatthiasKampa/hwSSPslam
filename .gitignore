@@ -25,3 +25,7 @@ hw/ice40/build/
 # ecp5 build artifacts (bitstreams/configs regenerate from rtl/)
 hw/ecp5/build/
 .venv_data/
+
+# headio deploy artifacts (small int8 head exports — the repo IS the transfer channel, msg round 3)
+!sspax/artifacts/
+!sspax/artifacts/*.npz

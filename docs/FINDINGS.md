@@ -1092,19 +1092,27 @@ reference (rule 2), positives audited (rule 4 — one retraction below).
    0.599≈0.597) and resolution (full: 0.57) don't help; a proper U-Net decoder
    +skips DOES help (0.597→0.638, architecture is a genuine lever) but the best
    combo (U-Net RGB-D) still caps 0.638 < 0.70. So the deploy label head caps
-   ~0.60-0.64 regardless; crossing ~0.70 needs the FULL SOTA seg stack together
-   (RGB-D + decoder + full-res + pretraining/heavy aug — mIoU 0.21 vs SOTA ~0.5
-   is largely the missing training regime), beyond both deploy budget and
-   from-scratch training. The LABEL-QUALITY LIMITER is demonstrated (no
-   deploy-budget lever — input/arch/capacity/res/coarsening — moves object mIoU
-   off ~0.21-0.23; even the over-budget 980k U-Net caps there, and coarsening's
-   0.858 pixacc structurally EXCLUDES ~51% of object cells from the metric). The
-   FIX is inference, not result: a useful object-query map PLAUSIBLY needs a
-   heavy off-line RGB-D U-Net (full SOTA training regime) then distillation —
-   but that was NOT shown reachable on this half-res data; coarser super-classes
-   or a marginal (~0.5-recall) map are the other options. Tracking is the head
-   that carries at deploy budget today; the label head is a demonstrated hard
-   sub-problem whose fix remains an untested inference.
+   ~0.60-0.64 regardless. CORRECTION (deploy-side review, 2026-07-16): the U-Net
+   label head is NOT beyond deploy budget — the seg head runs @KEYFRAME rate and
+   the pinned KEYFRAME LANE (540 MMAC @5 Hz, <=8 MB int8 SDRAM-streamed;
+   EBR-residency binds only the @frame-rate TRUNK) admits a ~1 MB U-Net with ~8x
+   margin. So the demonstrated 0.638-vs-0.70 gap is the TRAINING REGIME, not
+   architecture-at-budget. The LABEL-QUALITY LIMITER is still demonstrated (no
+   lever tested so far — input/capacity/res/coarsening, and a QUICK 4000-step
+   from-scratch U-Net — crosses the bar; object mIoU stuck ~0.21-0.23; coarsening's
+   0.858 pixacc structurally EXCLUDES ~51% of object cells from the metric). But
+   the FIX is now a testable EXPERIMENT, not an off-budget inference: train the
+   streaming-lane U-Net AS the keyframe label head (RGB-D, long schedule + heavy
+   aug + self-sup encoder pretraining on unlabeled NYUv2 — no external weights) to
+   close 0.638->~0.70; bank the increment attribution, and bank the NEGATIVE if
+   the full regime still caps <0.70. The deployable semantic stack forks: NOW =
+   surfaces tier (5-class 0.858 pixacc) + label-free query-by-example on the
+   tracking-descriptor bits (0.95 retrieval, compositional grading applies to any
+   bit source); NEXT = the streaming-lane U-Net label head (this experiment);
+   LATER = deploy depth via projected lidar (lidar-camera EXTRINSICS — the single
+   highest-value hardware step, now blocking THREE threads). Tracking is the head
+   that carries today; the label head is a hard but budget-LEGAL sub-problem whose
+   fix is a regime experiment.
 
 4. **The queryable map WORKS on real data — governed by a SUBLINEAR capacity
    trend.** Bounded-map capacity grows SUBLINEARLY with D
