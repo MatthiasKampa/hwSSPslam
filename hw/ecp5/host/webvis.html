@@ -175,6 +175,7 @@ function panel() {
 }
 $("dsel").onchange = e => fetch(`/select?data=${e.target.value}`, {method:"POST"});
 window.qc = id => fetch("/query_class", {method:"POST", body: JSON.stringify({id})});
+window.bst = id => fetch("/boost", {method:"POST", body: JSON.stringify({id})});
 // camera panel: click = single-cell QBE; DRAG = structured region query
 let dragS = null;
 const cellOf = e => {
@@ -220,9 +221,9 @@ es.onmessage = ev => {
     if (d.data) $("dsel").value = d.data; draw(); return; }
   if (d.classes) {
     $("chips").innerHTML = d.classes.map(c =>
-      `<div onclick="qc(${c.id})" style="cursor:pointer;text-align:center;border:1px solid ${selCls===c.id?'#ffd166':'#2c3850'};border-radius:4px;padding:2px">` +
+      `<div onclick="event.shiftKey?bst(${c.id}):qc(${c.id})" title="click: query · shift-click: boost recall x3 (future bindings)" style="cursor:pointer;text-align:center;border:1px solid ${c.boost?'#ff9f43':selCls===c.id?'#ffd166':'#2c3850'};border-radius:4px;padding:2px">` +
       (c.thumb ? `<img src="data:image/jpeg;base64,${c.thumb}" width="36" style="display:block;border-radius:3px">` : `<div style="width:36px;height:36px;background:#1a2230"></div>`) +
-      `<span style="font-size:10px;color:#9fb2c9">C${c.id}·${c.n}</span></div>`).join("");
+      `<span style="font-size:10px;color:${c.boost?'#ff9f43':'#9fb2c9'}">${c.boost?'★':''}C${c.id}·${c.n}</span></div>`).join("");
     return; }
   if (d.objmap) { obj = d.objmap; selCls = d.objmap.cls; bakeObj(); draw();
     $("qbetop").textContent = `query '${d.objmap.cls}': z_max ${d.objmap.zmax}` +

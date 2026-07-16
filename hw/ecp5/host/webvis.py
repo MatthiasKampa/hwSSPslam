@@ -187,6 +187,7 @@ class CamMap:
         self.example = []            # (kf, cy, cx) per cluster
         self.vecs = {}               # kf -> (anchor_pose, D complex)
         self.cellpos = {}            # kf -> {(cy,cx): (wx,wy)}
+        self.boost = {}              # class id -> bind-weight (targets>1)
         self.lock = threading.Lock()
 
     def _amp(self, bits):
@@ -243,10 +244,25 @@ class CamMap:
                 if self.example[cid] is None:
                     self.example[cid] = (int(k), cy, cx)
             for cid, ps in byc.items():
-                p = np.mean(ps, axis=0)
                 code = (self.cents[cid] > 0.5)
-                v += self._amp(code) * np.exp(
-                    1j * ((p - pose[:2]) @ W_MAIN.T))
+                w = self.boost.get(cid, 1.0)
+                # INSTANCE SPLIT (tuned, tune_recall.py): same-class
+                # observations >1.2 m apart bind SEPARATELY — a blind
+                # centroid averages two instances into a phantom between
+                # them (the same-class-multiplicity law, live).
+                groups = []
+                for p in ps:
+                    for g in groups:
+                        if (p[0] - g[0][0]) ** 2 + (p[1] - g[0][1]) ** 2 \
+                                < 1.44:
+                            g.append(p)
+                            break
+                    else:
+                        groups.append([p])
+                for g in groups:
+                    p = np.mean(g, axis=0)
+                    v += w * self._amp(code) * np.exp(
+                        1j * ((p - pose[:2]) @ W_MAIN.T))
             self.vecs[int(k)] = (pose.copy(), v)
 
     def classes(self):
@@ -256,16 +272,28 @@ class CamMap:
                     for i in range(len(self.cents)) if self.counts[i] >= 8]
 
     # ---- calibrated matched-filter sweep (shared by all query forms) --
+    # Defaults TUNED on synthetic recall (tune_recall.py, banked
+    # 2026-07-16): MAX-fusion wins (sum integrates cross-talk and halves
+    # recall — my sum prior was refuted by the sweep); instance-split +
+    # target boost x2-3 give recall 1.0 on observed objects and boost
+    # also buys precision. Support image kept for display only.
+    FUSE = "max"
+
     def _sweep(self, qa, grid_lo, grid_hi, ngrid=96):
-        """qa: conj query amplitude (D,) -> raw density image over the
-        world grid (max over kf vectors)."""
+        """qa: conj query amplitude (D,) -> (density image, support
+        image = #kf vectors responding at each cell) over the world
+        grid. Fusion across kf vectors per FUSE ("sum" integrates
+        re-observations — persistence; "max" = single best view)."""
         with self.lock:
             vecs = list(self.vecs.items())
         gx = np.linspace(grid_lo[0], grid_hi[0], ngrid)
         gy = np.linspace(grid_lo[1], grid_hi[1], ngrid)
         XX, YY = np.meshgrid(gx, gy)
         P = np.stack([XX.ravel(), YY.ravel()], 1)
-        img = np.full(ngrid * ngrid, -1e9, np.float64)
+        img = np.zeros(ngrid * ngrid, np.float64) if self.FUSE == "sum" \
+            else np.full(ngrid * ngrid, -1e9, np.float64)
+        sup = np.zeros(ngrid * ngrid, np.int32)
+        touched = np.zeros(ngrid * ngrid, bool)
         for k, (pose, v) in vecs:
             d = P - pose[:2]
             m = (np.abs(d) < 8.0).all(1)
@@ -273,22 +301,37 @@ class CamMap:
                 continue
             unb = qa * v
             sc = (np.exp(-1j * (d[m] @ W_MAIN.T)) @ unb).real / len(W_MAIN)
-            np.maximum.at(img, np.flatnonzero(m), sc)
-        return img.reshape(ngrid, ngrid), gx, gy
+            mi = np.flatnonzero(m)
+            touched[mi] = True
+            sup[mi] += sc > 0.5 * np.abs(sc).max()
+            if self.FUSE == "sum":
+                img[mi] += sc
+            else:
+                np.maximum.at(img, mi, sc)
+        if self.FUSE == "sum":
+            img[~touched] = -1e9
+        return img.reshape(ngrid, ngrid), sup.reshape(ngrid, ngrid), gx, gy
+
+    Z_TH = 4.0                       # 4-sigma discipline
+    SUP_MIN = 1                      # support gating OFF by default —
+                                     # the sweep showed it buys nothing
+                                     # once fusion is max (tune_recall)
 
     def _zquery(self, qa, qa_ctrl, grid_lo, grid_hi, tag, ngrid=96):
         """CALIBRATED query: z-score the density against a seeded
         RANDOM-CODE control sweep (the honest 'no match' answer — a
-        garbage query yields no marks instead of a normalized peak)."""
-        img, gx, gy = self._sweep(qa, grid_lo, grid_hi, ngrid)
-        ctl, _, _ = self._sweep(qa_ctrl, grid_lo, grid_hi, ngrid)
+        garbage query yields no marks instead of a normalized peak).
+        Marks additionally require SUP_MIN keyframes of support."""
+        img, sup, gx, gy = self._sweep(qa, grid_lo, grid_hi, ngrid)
+        ctl, _, _, _ = self._sweep(qa_ctrl, grid_lo, grid_hi, ngrid)
         val = ctl[ctl > -1e8]
         mu, sd = (float(np.median(val)), float(val.std() + 1e-9)) \
             if val.size else (0.0, 1.0)
         z = np.where(img > -1e8, (img - mu) / sd, 0.0)
         marks = []
-        cand = np.argwhere(z > 4.0)                  # 4-sigma discipline
-        order = np.argsort(-z[z > 4.0]) if cand.size else []
+        ok = (z > self.Z_TH) & (sup >= self.SUP_MIN)
+        cand = np.argwhere(ok)
+        order = np.argsort(-z[ok]) if cand.size else []
         for yy, xx in cand[order][:32]:
             wx, wy = gx[xx], gy[yy]
             if all((wx - a) ** 2 + (wy - b) ** 2 > 0.36
@@ -563,7 +606,8 @@ class Demo:
                                 buf.getvalue()).decode()
                 self.broadcast(dict(classes=[
                     dict(id=c["id"], n=c["n"],
-                         thumb=self._thumbs.get(c["id"]))
+                         thumb=self._thumbs.get(c["id"]),
+                         boost=c["id"] in self.cammap.boost)
                     for c in cls]))
             with self.cam.lock:
                 jb = self.cam.jpeg.get(k)
@@ -749,6 +793,20 @@ def make_handler(demo):
                 if res:
                     demo.broadcast(dict(whatis=res, at=[q["x"], q["y"]]))
                 self._json(res or dict(ok=False))
+            elif self.path.startswith("/boost"):
+                ln = int(self.headers.get("Content-Length", 0))
+                q = json.loads(self.rfile.read(ln) or b"{}")
+                if demo.cammap is not None:
+                    cid = int(q["id"])
+                    with demo.cammap.lock:
+                        if cid in demo.cammap.boost:
+                            del demo.cammap.boost[cid]
+                        else:
+                            demo.cammap.boost[cid] = 3.0
+                        bl = sorted(demo.cammap.boost)
+                    self._json(dict(ok=True, boosted=bl))
+                else:
+                    self._json(dict(ok=False), 400)
             elif self.path.startswith("/query_class"):
                 ln = int(self.headers.get("Content-Length", 0))
                 q = json.loads(self.rfile.read(ln) or b"{}")

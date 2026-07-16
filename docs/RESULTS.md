@@ -10532,3 +10532,41 @@ gotcha worth remembering anywhere scans.npz is consumed. Also surfaced:
 school_run1 has no rgb_d455 shards on this box -> its cam lane degrades
 gracefully to lidar-only (run2 + spot keep the full camera/QBE lanes).
 All three datasets verified switching live at rate.
+
+## 2026-07-16 — TARGET-OBJECT map recall OPTIMIZED on synthetic data (tune_recall.py): recall 0.94 -> 1.00, robust to 25% bit flips; boost knob shipped to the UI
+
+User directive: optimize map recall of certain objects with synthetic
+data. hw/ecp5/host/tune_recall.py drives the REAL CamMap code (webvis)
+with synthetic scenes — 8 classes x 3 objects, wandering 69-deg-FOV
+trajectory, per-observation BIT-FLIP noise (matching the measured head
+stability) + position noise (bearing-cell + nominal extrinsics), GT
+scores only. Metric fixed early: recall over OBSERVED objects (the
+first pass counted never-seen objects — an observability ceiling
+masquerading as map failure; recall jumped 0.33 -> 0.94 base once
+corrected).
+
+Knob ladder (8 seeds, bit-flip 0.15, sig_p 0.20 m; targets = 2 classes):
+  base (centroid, max-fuse, z4)      recall 0.940  prec 0.245
+  max + instance-split + boost x2    recall 1.000  prec 0.336
+  max + instance-split + boost x3    recall 1.000  prec 0.410
+  sum-fusion arms                    recall ~0.50  (HARMFUL)
+Winner robustness (max+split+boost x3): recall 1.000/1.000/0.976/0.952
+at (bit,pos) = (.10,.15)/(.25,.20)/(.15,.35)/(.25,.35); control with
+boost OFF: 0.929. VERDICTS:
+- SIGNIFICANCE BOOST works live: binding target classes at 2-3x
+  amplitude lifts recall to 1.0 AND precision (+0.09..+0.17) — the
+  boosted peaks clear the background-class cross-talk (the
+  significance-buys-capacity law, now in the deploy query chain).
+- INSTANCE SPLIT (same-class obs >1.2 m apart bind separately) replaces
+  the blind per-class centroid, which averaged multi-instance classes
+  into a phantom between them (multiplicity law, live).
+- SUM-FUSION REFUTED — my own prior, committed as the default an hour
+  earlier, reversed by the sweep: summing kf vectors integrates
+  cross-talk faster than signal (recall halves); MAX-fusion (best
+  single view) stands. Support-count gating buys nothing on top.
+  Default reverted same-session; the support image stays display-only.
+SHIPPED to webvis: FUSE=max, instance-split in ingest, boost dict at
+bind time, UI = shift-click a class chip to star/boost it x3 (applies
+to future bindings). Marks now report raw z (selftest: z 4.6 marks on
+20-kf spot map). Anti-oracle: synthetic GT scores only; the harness
+imports the code under test (no reimplementation drift).
