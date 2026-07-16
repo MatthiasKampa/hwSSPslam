@@ -11286,3 +11286,29 @@ for salient/distinct targets, NOT reliable fine-grained 150-class labeling — t
 encoder's fuzzy code (AUC 0.66) again, not the map. Single-seed; predicted
 (non-oracle) grouping; GT for scoring only. Consistent with the whole session:
 map faithful, front-end (fine-class code) is the wall.
+
+## 2026-07-16 — DOMAIN TRANSFER: the ADE20K-trained RGB encoder works on REAL robot RealSense RGB (school_run2) — stable + non-degenerate, with a real (modest) training gain over untrained
+
+First test on the ACTUAL deploy domain: 1632 real robot RealSense RGB frames
+(spot-telluride school_run2 rgb_d455, 640x480 -> QVGA), ADE-trained ch16 encoder,
+label-free (no seg GT for the robot run). Metrics + UNTRAINED control (rule 4):
+                          trained    untrained
+  code bit-stability (aug)  0.954      0.892
+  temporal adjacent cos     0.925      0.897
+  temporal far cos          0.323      0.449
+  temporal gap             +0.602     +0.449
+  untrained bit-imbalance      -        0.288 (skewed/partly degenerate)
+VERDICT: the encoder TRANSFERS — no domain-gap catastrophe. Codes on real robot
+RGB are STABLE (0.954) and NON-DEGENERATE (far cos 0.323 != saturated). HONEST
+NUANCE (from the control): conv codes are PARTLY trivially stable + appearance-
+tracking (untrained already 0.892 / +0.449 gap), BUT training adds real value —
++0.06 stability and better SCENE DISCRIMINATION (far cos 0.449 -> 0.323, gap
++0.449 -> +0.602 = trained codes are less generic, more scene-specific), and the
+untrained code is partly degenerate (bit-imbalance 0.288). So the deployable
+QBE/appearance path is validated on the REAL domain: the ADE encoder produces
+usable, stable, scene-discriminative codes on real RealSense frames. This is
+APPEARANCE/QBE readiness (consistent with the session), NOT semantic-class
+accuracy (walled). Data now on disk: school_run2 rgb_d455 (real in-domain RGB) +
+depth_d455 — unblocks D3 self-sup domain adaptation. Single-seed; stability may be
+mildly inflated by smoother real frames vs cluttered ADE. Anti-oracle: no GT used
+(label-free metrics).
