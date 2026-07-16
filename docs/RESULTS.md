@@ -11390,3 +11390,32 @@ is gray-limited regardless (0.171) — colour only helps on the RealSense/robot
 path. Caveats: generic luma proxy (exact golden_cam.bin2 gray distribution
 untested — flag per P3); single-seed, but the 0.12 gap >> noise. Anti-oracle:
 ADE GT scores seg only.
+
+## 2026-07-17 — P1 (round 7) LEARNED map decoder, first result: large RECALL gain at a PRECISION cost — promising for the ghost-comb tails, but home-field caveat + needs real-venue validation
+
+Round-7 P1 (user directive "opt for map readout fidelity"): a U-Net-small on the
+golden-faithful correlation FIELD (translation-equivariant decode of the fidelity
+segment, NOT raw codes) -> local occupancy patch, supervised on synthetic rooms
+with GT walls. FOUNDATION verified: the field decode is golden-faithful and peaks
+at walls (peak-cells within 0.2 m of a GT wall 0.35 vs random 0.10).
+(scratch/scratch_p1_field.py, scratch/scratch_p1_train.py.)
+Held-out synthetic (14 scenes/28 segs, per-scene, SAME GT-based metric for both):
+  decoder   recall@15  recall@30  prec-med(m)
+  CLEAN       0.273      0.366      0.229
+  LEARNED     0.674      0.823      0.463
+LEARNED recovers 2.2x more walls (recall@30 0.82 vs 0.37 — addresses the
+ghost-comb TAILS the msg flagged) but at 2x WORSE precision (0.46 vs 0.23 m: cell
+occupancy is blurrier than CLEAN's line-fitting). HONEST CAVEATS (do not over-read):
+  1. HOME-FIELD: my synthetic rooms are likely OFF-DISTRIBUTION for CLEAN (its
+     0.37 recall here << its 0.67 selftest / 0.68-0.72 real-venue numbers), while
+     the learned decoder is IN-distribution (trained on these scenes). The recall
+     gain is partly a home-field effect — a fair test needs REAL venue data
+     (school_run2 scans, GT-free score_walls) or CLEAN-tuned scenes.
+  2. PRECISION REGRESSION is real: cell-occupancy (0.1 m grid + blur) cannot match
+     line-fitting's sub-cell sharpness. A clean win needs a sub-cell/line output
+     (or a hybrid: learned recall -> line-fit precision).
+  3. single-seed; synthetic rooms constrained to <= ~6x4.5 m (fidelity band range).
+So: PROMISING (large recall lift on the stated concern) but NOT yet a clean win.
+Next: (a) eval on real school_run2 scans (GT-free), (b) sub-cell output, (c)
+rule-4 audit of the home-field effect. Anti-oracle: GT walls train + score;
+correlation field is a deterministic decode of the golden segment.
