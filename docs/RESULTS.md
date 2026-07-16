@@ -11329,3 +11329,23 @@ desc=code head (32 bits), seg=[] k_bits=0 — standard headio v2, no per-channel
 norm, no contract change. P1 unblocked. (Remaining coordination: the RGB 3-ch
 320x240 TRUNK SHAPE needs a cbits kernel variant per round-7 — cheap, note it in
 the export.) Anti-oracle: ADE GT scores seg only.
+
+## 2026-07-16 — P1 export BLOCKED by the headio contract (RGB geometry + mandatory track head), NOT by input norm — needs a deploy-agent contract extension
+
+After de-risking the input norm (/255 works), the REAL P1 blocker is the pinned
+headio v2 contract (sspax/headio.py _validate):
+  1. ok_res["vision"] = [(240,320,1),(120,160,1)] — MONO (in_ch=1) ONLY. The
+     user's RGB QVGA (240,320,3) is NOT a pinned geometry -> _validate asserts
+     "input (240,320,3) is not a pinned deploy geometry". 
+  2. `assert meta["track"][-1]["cout"] in (1,2)` runs UNCONDITIONALLY — a TRACK
+     head is mandatory. BottleneckSegNet is desc-only (code head), no track.
+So the round-6 "exports through the EXISTING contract with ZERO changes" assumed
+the PINNED MONO geometry; it predates the user's RGB-QVGA redirect. The RGB
+bottleneck cannot export as-is. RESOLUTION (deploy-agent, coordination): extend
+ok_res with (240,320,3) [+ the cbits RGB 3-ch kernel variant round-7 flagged],
+and allow a track-LESS desc-only head (relax the track assert when desc present).
+Both are small headio edits on their side. UNTIL THEN P1 is contract-blocked; the
+ENCODER itself is ready (trains stable at /255, transfers to the real robot
+domain, code separates classes at 0.66). NOT banking a broken export. Alternative
+if RGB is negotiable: a Y8-MONO (240,320,1) bottleneck fits the geometry today but
+contradicts the user's explicit RGB spec — flagged for the user's call.
