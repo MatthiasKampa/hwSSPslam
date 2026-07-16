@@ -9763,3 +9763,72 @@ fine-object queryable-map LABEL is not viable at deploy on this platform;
 surfaces+QBE ships alone, and the object-label map waits on a real RGB-D
 sensor OR denser lidar+extrinsics. This RESOLVES the label-head deploy
 question. Anti-oracle: GT scores only; depth degraded geometrically, no GT.
+
+## 2026-07-16 — deploy-side review of 491477f/af36073: demotion ACCEPTED as the platform verdict; vision head gated cross-box; lidar export unblocked (geometry misread)
+
+Their round closes the label-head question exactly as the decision rule
+demanded — accepted in full: P4 deploy fine-band geomspace(0.25, 2, 6)
+PINNED (recall 1.00/precision 0.86 at the coherence floor); P5 dual_use
+closed honestly (single-vector place survives re-encoded matching
+semantics; two-band stays the aliased-venue default); compose module now
+carries its own controls + the capacity price (2-attr objects exhaust
+~2x faster — attribute richness trades against object count at fixed D);
+P1 regime increment honestly FLAT (schedule+aug 0.642, overfitting-
+limited at 1449 labeled images; U-Net object-acc 0.23->0.50 = marginal
+map); and the REQUIRED lidar-like-depth arm fired the demote rule
+(+0.119 dense -> +0.059 lidar-like < +0.07): fine-object CLASS labels
+are OFF this platform's roadmap; surfaces tier + query-by-example desc
+bits ship alone. The self-sup increment is hereby RELEASED (moot for
+deploy — the input channel, not the regime, is the binding constraint;
+bank the provisional negative as final for this platform).
+
+Notes: (a) their stability comparison cited the seg-bit random baseline
+(gap 0.06); the matched desc-bit baseline is 0.954/0.906 (gap 0.048) —
+the trained gap 0.230 is ~5x random either way. (b) LIDAR export
+unblock: the contract was misread, not mismatched. headio's lidar meta
+(in_h=3, in_w=1024, in_ch=3) describes the RAW deploy array (rings,
+beams) = (3, 1024); forward() transposes to (1024, rings-as-channels)
+internally — the SAME layout their (1,1024,3) NHWC net consumes after
+squeezing the dummy height axis. Export recipe: squeeze H, emit each
+(1,k) conv as conv1d k (weights (cout,cin,1,k) -> (cout,cin,k)), meta
+in_h=3/in_w=1024/in_ch=3/in_div=1.0/cell=4 — the headio "lidar" fixture
+mirrors the result exactly (selftest passes on it).
+
+## 2026-07-16 — vision_head.npz gated on the deploy box: stability reproduces THEIR numbers exactly; objmap2 desc-key = real but partial cross-dataset transfer
+
+`sspax/artifacts/vision_head.npz` (their P0 export) through both deploy
+gates on this box:
+- stability (TUM fr3): 0.750 adj / 0.520 far — EXACTLY their box's
+  numbers (cross-box bit-faithful artifact transfer through the v2
+  contract, the contract's purpose demonstrated). Gap 0.230 vs the
+  desc random baseline gap 0.048: ~5x random, cross-dataset.
+- objmap2 desc-key gate (16 queries, top-3): stage-1 16/16; stage-2 AUC
+  0.592 (1-view) / 0.597 (3-view); err med 0.608 / 0.494 m, p90 1.84 /
+  2.22. Read against the brackets: random-weights 0.522/0.548 AUC and
+  ~1.1-1.2 m err; banked NATIVE-TUM references int 0.805 / census
+  0.165 m. VERDICT: the NYUv2-trained descriptor transfers real
+  map-binding signal to an unseen dataset (err halves vs random, AUC
+  +0.05-0.07) but does not reach native-simple-feature quality — the
+  cross-DOMAIN gap is the price. Deploy reading: QBE on the platform
+  will run on OV5640 imagery (also out-of-domain for the head);
+  platform-domain adaptation (finetune on OV5640 frames once hw_snap
+  produces them, self-supervised — no labels needed) is the identified
+  lever, NOT more NYUv2 training.
+
+## 2026-07-16 — FIRST SILICON (Icepi Zero live): FAST-9 HW gate PASS bit-exact; all five bitstreams configure; no-sensor baselines recorded
+
+The board arrived and is plugged in. ECP5 LFE5U-25 detected on JTAG
+(idcode 0x41111043); toolchain + UART adapter live.
+- `top_fast9_uart` (pre-built 2026-07-14, timing 65.6 MHz vs 50 MHz
+  constraint) flashed; `hw_fast9.py` streams the school_run2 golden
+  fixture at 2 Mbaud: **HW PASS — 3364 centres bit-exact on silicon**
+  (sim == golden == silicon; t=12). The ECP5 track's first hardware
+  gate, and the FAST-9 detector is now silicon-proven.
+- Sensor-less PRE-FLIGHT (scratch_preflight.py): all four sensor tops
+  configure the physical board and answer their UART protocols with
+  the documented no-sensor baselines — ism330_id/stream WHO_AM_I=0x00
+  (SPI no-hang confirmed on silicon; wired => 0x6b), ov5640_id
+  ID=0xffff ack=0x03 (both SCCB phases NACK on the floating bus;
+  wired => 0x5640 ack=0x00), ov5640_snap status all-zero (init ROM
+  parked without the sensor). Wiring day is now flash-only with
+  unambiguous flips. Board restored to top_fast9_uart; gate re-PASS.
