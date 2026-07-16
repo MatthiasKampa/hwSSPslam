@@ -447,8 +447,9 @@ class CamMap:
         im = np.clip(z / 8.0, 0, 1)                  # display scale z=8
         return dict(x0=float(grid_lo[0]), y0=float(grid_lo[1]),
                     x1=float(grid_hi[0]), y1=float(grid_hi[1]),
-                    png=base64.b64encode(
-                        (im * 255).astype(np.uint8).tobytes()).decode(),
+                    png=base64.b64encode(          # flipud: client draws
+                        np.flipud(im * 255)        # row 0 at MAX y
+                        .astype(np.uint8).tobytes()).decode(),
                     n=ngrid, marks=marks[:12], cls=tag,
                     zmax=float(round(z.max(), 1)))
 
@@ -771,11 +772,22 @@ class Demo:
                             cam=bool(self.cam)))
 
     # ---- chip-map image: decode fetched codes at estimated poses -------
+    DECODE_R = float(os.environ.get("SSP_DECODE_R", "12.0"))
+
     def _chip_image(self, batch=16):
         """Decode the CHIP map over the CONVEX HULL of all lidar points
         (not a bbox square) — outside-hull cells are never decoded. The
         per-segment decode is BATCHED (`batch` segments per call, cursor
-        cycling) so laptops spread the cost across keyframes."""
+        cycling) so laptops spread the cost across keyframes.
+
+        REGION FIXES (user report: decoded map in the wrong region):
+        the 3 m per-segment decode box hugged the trajectory and missed
+        the walls the scans actually encode (fine in the classroom,
+        wrong at the school/Hunter venue) -> DECODE_R, default 12 m;
+        and the overlay rows were VERTICALLY MIRRORED vs the point map
+        (grid row 0 = min-y but the client draws row 0 at max-y) ->
+        flipud before shipping. A corr-vs-points readout ships with the
+        image so the alignment is a NUMBER, not an impression."""
         self.hull = getattr(self, 'hull', None)
         self._chip_cursor = getattr(self, '_chip_cursor', 0)
         if not self.chip_segs or self.hull is None or len(self.hull) < 3:
@@ -795,9 +807,11 @@ class Demo:
             items = (items + items)[s:s + batch]
             self._chip_cursor += batch
         for slot, (pose, codes) in items:
+            if pose is None:
+                continue
             vec = np.exp(1j * np.pi / 2 * codes.astype(np.float32))
             d = P - pose[:2]
-            m = (np.abs(d) < 3.0).all(1)
+            m = (np.abs(d) < self.DECODE_R).all(1)
             if not m.any():
                 continue
             c, s = np.cos(-pose[2]), np.sin(-pose[2])
@@ -807,10 +821,27 @@ class Demo:
                 img.ravel()[np.flatnonzero(m)], sc)
         img = np.clip(img / max(img.max(), 1e-9), 0, 1)
         img[~mask] = 0.0                   # decode only inside the hull
+        # alignment metric: Pearson corr of decode vs point occupancy
+        corr = None
+        with self.lock:
+            pa = np.asarray(self.pts[-20000:], float) \
+                if self.pts else None
+        if pa is not None and len(pa) > 100:
+            occ, _, _ = np.histogram2d(
+                pa[:, 1], pa[:, 0], bins=ngrid,
+                range=[[lo[1], hi[1]], [lo[0], hi[0]]])
+            occ = np.minimum(occ, 5)
+            m2 = mask & (img > 0)
+            if m2.sum() > 50:
+                a_, b_ = img[m2], occ[m2]
+                corr = float(np.corrcoef(a_, b_)[0, 1])
+                self.chip_corr = round(corr, 3)
         return dict(x0=float(lo[0]), y0=float(lo[1]),
                     x1=float(hi[0]), y1=float(hi[1]),
+                    corr=corr,
                     png=base64.b64encode(
-                        (img * 255).astype(np.uint8).tobytes()).decode(),
+                        np.flipud(img * 255).astype(np.uint8)
+                        .tobytes()).decode(),
                     n=ngrid)
 
     def _cam_track(self, k, bits):
@@ -850,7 +881,7 @@ class Demo:
         from PIL import Image
         import io as _io
         if True:
-            if self.cam is None:
+            if self.cam is None or k >= len(self.keys):
                 return
             b = self.cam.compute(k)
             if b is None:
@@ -890,9 +921,19 @@ class Demo:
                     for c in cls]))
             with self.cam.lock:
                 jb = self.cam.jpeg.get(k)
+            if jb is None:
+                # replay kf outside the stored-jpeg window: render the
+                # DESC-BIT grid instead (panel stays live + clickable —
+                # cell layout matches the QBE grid exactly)
+                pc = (np.asarray(b).sum(-1)
+                      * (255 // b.shape[-1])).astype(np.uint8)
+                im = Image.fromarray(np.kron(
+                    pc, np.ones((16, 16), np.uint8)))
+                buf = _io.BytesIO()
+                im.save(buf, "JPEG", quality=70)
+                jb = buf.getvalue()
             self.broadcast(dict(cam_kf=int(k),
-                                jpg=base64.b64encode(jb).decode()
-                                if jb else None))
+                                jpg=base64.b64encode(jb).decode()))
 
     # ---- one keyframe ---------------------------------------------------
     def step(self):
@@ -1172,6 +1213,7 @@ def make_handler(demo):
                     fx_vec=demo.fpga.vec_ok if demo.fpga else 0,
                     fx_tot=demo.fpga.total if demo.fpga else 0,
                     chip_segs=len(demo.chip_segs),
+                    chip_corr=getattr(demo, "chip_corr", None),
                     cam_kf=len(demo.cam.bits) if demo.cam else 0,
                     pose_src=getattr(demo, "pose_src", "ref"),
                     ms_py=round(demo.ms_slam, 1),

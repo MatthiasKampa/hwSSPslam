@@ -84,9 +84,9 @@ class LiveCam:
         with self.lock:
             self.bits[k] = b
             self.jpeg[k] = jb
-            if len(self.jpeg) > 300:
-                self.jpeg.pop(next(iter(self.jpeg)))
-        return b
+            if len(self.jpeg) > 3000:      # ~5 min of kf — captures now
+                self.jpeg.pop(next(iter(self.jpeg)))   # replay with FULL
+        return b                                       # video (~45 MB)
 
     def query(self, k, cy, cx):
         with self.lock:
@@ -165,6 +165,8 @@ class LiveDemo(webvis.Demo):
                 except IndexError:
                     continue
                 k = self.k - 1
+                if k < 0 or k >= len(self.keys):   # reset transient
+                    continue
                 try:
                     b = self.cam.compute(k, jb)
                 except Exception:
