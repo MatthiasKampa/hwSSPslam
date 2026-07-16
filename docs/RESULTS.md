@@ -10856,3 +10856,38 @@ VERDICT: the on-chip tracker can match against the chip's own 2-bit
 map with no measurable accuracy loss at rate, and t0.72/rot9/cap0.30
 is confirmed at deploy precision. This closes the tracker-config
 input to rung #43 (multi-lane engine + on-chip matcher).
+
+## 2026-07-16 — CHIP-TRACKER GOLDEN SPEC (golden_track.py): three laws pinned the hard way; single-anchor topology + QPSK anchor are NOT the limit; ice40 SOLO is the port source
+
+Building the ECP5 tracker spec from match_int, validated on capture3
+(600 kf @ 10 Hz) + spot (413 kf vs withheld odom). Bugs found by
+ground-truth pinning (all now unit-tested in the module):
+1. FRAME-TO-FRAME REFUTED: at 10 Hz per-frame rotation (~0.5 deg med)
+   sits under the rotation grid -> heading deadband (dyaw90 = 0.0).
+   Reference-anchor tracking (re-anchor at 0.5 m / 7.5 deg) is the
+   correct topology — matches BandSLAM's segment anchoring.
+2. SIGN LAW (pin_signs, synthetic known-motion test): motion = -D,
+   heading = +rho. The -rho variant: clean local RPE, 13 m spot ATE
+   (globally curled trail).
+3. UNIT LAW: rot_grid_int rho = 3-deg steps but the heading LUT is
+   1.5-deg-stepped — the missing <<1 integrated heading at HALF rate
+   (the pin test's loose tolerance masked it). Fix: spot ATE 9.2 ->
+   0.809 m med / 1.222 p90 (frame tracker, no loop closure; full SLAM
+   0.039). Also: subgrid_rho vertex sign was flipped (unit-checked
+   now); arc-mass weights = NO effect (banked negative).
+CONTROL (scratch_anchor_control.py): python float matcher in the SAME
+single-anchor topology with the SAME QPSK anchor scores 0.957/0.896 =
+full python-tracker quality -> topology and 2-bit anchor quantization
+cost NOTHING; the remaining hunter gap (0.928 vs 0.956) is my integer
+search's 3-deg rotation candidates vs the matcher's 1.5-deg pair
+trick (fix known: half-step pre-rotated second anchor encoding).
+
+USER CLARIFICATION RESOLVED: "worse than previous" meant WEBSIM — the
+ice40 SOLO pipeline (encode + match + segment fold + reservoir ON
+DEVICE; solo_tracker.v FULL STEP LOOP 220/220 bit-exact, v7b selfmap
+beats odometry 3.9x revisit-rich, chip-self-built map p50 0.112 m).
+The ECP5 STREAM track never ported the tracker — the webvis was
+showing raw odometry registration vs websim's full on-device SLAM.
+PLAN PIVOT: port the silicon-proven ice40 SOLO tracker to the ECP5
+stream top (SPRAM->EBR is the main friction) instead of finishing a
+from-scratch matcher; golden_track's laws + validation harness carry.
