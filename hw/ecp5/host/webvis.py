@@ -939,6 +939,13 @@ class Demo:
             self.broadcast(dict(cam_kf=int(k),
                                 jpg=base64.b64encode(jb).decode()))
 
+    def pose_for(self, k, r, gtp):
+        """Pose estimate for keyframe k (the ONLY pose authority in the
+        serving path). Base: bundle est cache / recorded pose."""
+        est_ref = self.b.get("est")
+        return np.asarray(est_ref[k] if est_ref is not None else gtp,
+                          float).copy()
+
     # ---- one keyframe ---------------------------------------------------
     def step(self):
         k = self.k
@@ -952,12 +959,10 @@ class Demo:
         rr = DS.clean(self.b, np.asarray(r, float))
         pts, w = F.points_from_scan(rr, self.beam)
         # NO python SLAM (shim directive): points register at the POSE
-        # ESTIMATE — live: the datagram pose (odom now, chip tracker
-        # later); datasets: the offline est_demo trajectory, else the
-        # recorded reference.
-        est_ref = self.b.get("est")
-        e = np.asarray(est_ref[k] if est_ref is not None else gtp,
-                       float).copy()
+        # ESTIMATE via the pose_for hook — datasets: offline est_demo
+        # trajectory else recorded reference; live: datagram odom;
+        # SOLO deploy: the ON-CHIP tracker (webvis_live.SoloDemo).
+        e = self.pose_for(k, r, gtp)
         self.est[k] = e
         # chip-map readout: ONE slot every 4 kf, stamped with THIS
         # frame's pose (the chip wrote frame k to slot k%64 during

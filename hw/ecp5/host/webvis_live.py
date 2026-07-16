@@ -221,7 +221,53 @@ class LiveDemo(webvis.Demo):
                 time.sleep(0.02)
 
 
-def udp_rx(demo, port):
+class SoloDemo(LiveDemo):
+    """AUTONOMY deploy (SSP_SOLO=1, top_solo_ecp5.bit flashed): the
+    ECP5 SOLO chip IS the tracker — every scan goes down the wire as a
+    keyframe (points + body-frame odom delta from the datagram pose),
+    and the CHIP pose comes back as THE pose estimate. The datagram
+    odom remains only the prediction input + display ghost. The chip
+    also BUILDS the map (fold/freeze); frozen segments are dumped and
+    fed to the decode layer. Host = vis + data transport, nothing else."""
+
+    def __init__(self, *a, **kw):
+        kw["use_fpga"] = False              # no STREAM board — SOLO owns
+        self._chip = None                   # the serial
+        super().__init__(*a, **kw)
+        import solo_host
+        self._chip = solo_host.SoloChip(
+            os.environ.get("SSP_PORT", solo_host.PORT))
+        assert self._chip.ping(), "SOLO chip not replying (flashed?)"
+        self._chip.set_pose(0, 0, 0)
+        self._chip.set_mode(mapping=True, stream=True)
+        self.pose_src = "CHIP solo tracker"
+        self.chip_state = 3
+        print("[webvis] SOLO autonomy: on-chip tracker is the pose "
+              "source", flush=True)
+
+    def _load(self, data):
+        super()._load(data)
+        if data == "live" and self._chip is not None:
+            self._chip.reset_map()
+            self._chip.set_pose(0, 0, 0)
+            self.pose_src = "CHIP solo tracker"
+
+    def pose_for(self, k, r, gtp):
+        if self.data != "live" or self._chip is None:
+            return super().pose_for(k, r, gtp)
+        res = self._chip.keyframe(np.asarray(r, float),
+                                  np.asarray(gtp, float))
+        if res is None:                     # lost frame: odom fallback
+            self.chip_state = 4
+            return super().pose_for(k, r, gtp)
+        x, y, yaw, st, frozen, n_seg = res
+        self.chip_state = st
+        if frozen:                          # new frozen segment: refresh
+            segs = self._chip.dump()        # the decode layer (~n*114 B)
+            if segs:
+                self.chip_segs = {i: (s[0], s[1])
+                                  for i, s in enumerate(segs)}
+        return np.array([x, y, yaw])
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", port))
     scan_len = 8 + 2 * N_BEAM
@@ -266,9 +312,12 @@ def udp_rx(demo, port):
 
 def serve(http_port=8790, udp_port=8791):
     bind = os.environ.get("SSP_BIND", "127.0.0.1")
-    demo = LiveDemo(data="live", use_fpga=True, cam=True,
-                    port=os.environ.get("SSP_PORT",
-                                        webvis.PORT_SER))
+    if os.environ.get("SSP_SOLO", "") == "1":
+        demo = SoloDemo(data="live", cam=True)
+    else:
+        demo = LiveDemo(data="live", use_fpga=True, cam=True,
+                        port=os.environ.get("SSP_PORT",
+                                            webvis.PORT_SER))
     threading.Thread(target=udp_rx, args=(demo, udp_port),
                      daemon=True).start()
     threading.Thread(target=demo.run, daemon=True).start()
