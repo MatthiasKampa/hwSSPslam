@@ -10386,3 +10386,26 @@ ACTIONABLE FPGA RULES (coarse, robust):
 PARETO: tiny = narrow-ch8-int4 (0.299 @ 4.2 KB); balanced = int4 / stagger-8-4-4-2
 (~0.31 @ ~11 KB); max = deep-int4 (0.341 @ 20 KB). Anti-oracle: NYUv2 GT trains/
 scores the seg task only; no GT touches the code binarization or binding.
+
+## 2026-07-16 — multi-seed (3) firming of the arch x quant Pareto corners (+ correction to a single-seed over-read)
+
+Firming the single-seed sweep above. NYUv2 40-class, 2500 steps, seeds {0,1,2}
+(seed varies BOTH init and batch order), pixacc mean +- std:
+  config             pixacc          W-KB
+  deep int4          0.345 +- 0.012  20.1
+  uniform int8       0.337 +- 0.009  18.9
+  uniform int4       0.328 +- 0.014  11.1
+  narrow ch8 int4    0.307 +- 0.012   4.2
+  uniform int2       0.234 +- 0.052   7.2
+ROBUST (non-overlapping by >1 std):
+  - int4 is NEAR-FREE: 0.328 overlaps int8 0.337 — confirmed at ~60% the bytes.
+  - int2 is a genuine CLIFF: 0.234, robustly below every other corner AND
+    unstable (+-0.052 — a seed dipped to 0.160). Do not deploy int2 uniform.
+  - narrow ch8 int4 is a robust efficient corner: 0.307 @ 4.2 KB (~0.03 below
+    int8 for 4.5x fewer bytes / 6.5K params).
+CORRECTION to the single-seed sweep: "deep int4 0.341 is the BEST, beats
+int8-base" was PARTLY NOISE — over 3 seeds deep (0.345 +- 0.012) OVERLAPS int8
+(0.337 +- 0.009), so DEPTH is NOT a robust lever at this scale; deep ~= int8 ~=
+int4 (all ~0.33-0.34, the luma-40 ceiling). The robust levers are only:
+int4-is-free, int2-is-a-cliff, and narrow-is-Pareto-efficient. Single-seed
+fine orderings (~+-0.02) were noise, as flagged; the coarse story holds.
