@@ -10520,3 +10520,15 @@ three upgrades, one shared calibrated sweep:
 Single-cell QBE click retained. All laptop-side on the same per-kf
 bounded vectors (the chip-band decode path unchanged). Anti-oracle:
 est poses + lidar only; nominal yaw extrinsics stated.
+
+## 2026-07-16 — webvis fix: school datasets hung on load — npz members decompress the WHOLE array on every access
+
+"Doesn't seem to work" diagnosis: selecting a school run froze the demo.
+load_bundle indexed `z["ranges"][i]` inside the keyframe loop — a lazy
+npz member decompresses the FULL (8298, 1024) array on EVERY access, so
+~2000 keyframes took minutes while the run loop (and every SSE client)
+blocked. Materialize once -> school_run1 loads 2075 kf in 0.1 s. Repo
+gotcha worth remembering anywhere scans.npz is consumed. Also surfaced:
+school_run1 has no rgb_d455 shards on this box -> its cam lane degrades
+gracefully to lidar-only (run2 + spot keep the full camera/QBE lanes).
+All three datasets verified switching live at rate.

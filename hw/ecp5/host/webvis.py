@@ -143,7 +143,9 @@ def load_bundle(name):
         return SP.make_bundle()
     d = ROOT / "data" / "spot_telluride" / name
     z = np.load(d / "scans.npz")
-    idx = np.arange(0, len(z["ts"]), SP.STRIDE)
+    ts = z["ts"]                                # materialize ONCE — npz
+    ranges = z["ranges"]                        # members decompress fully
+    idx = np.arange(0, len(ts), SP.STRIDE)      # on EVERY access
     ref = np.load(d / "ref_lio.npz")
     gt = np.asarray(ref["gt"], float)[:len(idx)]
     ok = np.asarray(ref["ok"], bool)[:len(idx)]
@@ -151,12 +153,12 @@ def load_bundle(name):
         pad = len(idx) - len(gt)
         gt = np.vstack([gt, np.zeros((pad, gt.shape[1]))])
         ok = np.concatenate([ok, np.zeros(pad, bool)])
-    keys = [(z["ranges"][i], gt[k][:3] if gt.shape[1] >= 3 else
-             np.append(gt[k], 0.0), z["ts"][i] / 1e9)
+    keys = [(ranges[i], gt[k][:3] if gt.shape[1] >= 3 else
+             np.append(gt[k], 0.0), ts[i] / 1e9)
             for k, i in enumerate(idx)]
     return dict(name=name, kind="spot", keys=keys,
                 beam=-np.pi + np.arange(1024) * (2 * np.pi / 1024),
-                gt_ok=ok, kts=z["ts"][idx] / 1e9,
+                gt_ok=ok, kts=ts[idx] / 1e9,
                 rmin=SP.R_MIN, rmax=SP.R_MAX)
 
 
