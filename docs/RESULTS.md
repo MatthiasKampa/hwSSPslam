@@ -11368,3 +11368,25 @@ discrimination is intrinsic (input/task), not a domain mismatch. Caveats:
 single-seed; a stronger DENSE/pixel-contrastive or longer pretrain untested (could
 extract more, but the transfer-already-works prior makes big gains unlikely).
 Anti-oracle: self-sup uses no labels; ADE GT scores seg only.
+
+## 2026-07-17 — GRAY (OV5640/pinned) vs RGB (RealSense): color IS a lever on ADE-150 — the mono-vs-RGB export is a real quality/deployability tradeoff, not a free win
+
+Round-7 P3: the OV5640/FPGA camera is QVGA GRAY (golden_cam.bin2) which FITS the
+pinned headio geometry (240,320,1) — hoped to unblock P1 for free. Tested (ADE
+ch16, /255, QVGA, luma-gray proxy):
+  input             geometry        pixacc  codeAUC
+  gray (OV5640)     (240,320,1)*     0.171    0.604
+  rgb (RealSense)   (240,320,3)      0.288    0.655
+Gray LOSES ~40% relative pixacc (0.171 vs 0.288) + 0.05 codeAUC. So unlike the
+old NYU-10 "colour ~= luma" (2026-07-15), on ADE-150's DIVERSE scenes (sky/grass/
+water/etc. are colour-distinguished) COLOUR is a genuine lever. CONSEQUENCE for
+the RGB-vs-mono P1 decision: it is a real TRADEOFF, not a free win —
+  - OV5640 GRAY: fits the pinned (240,320,1) geometry -> P1 exportable TODAY (no
+    headio contract change), but sacrifices ~40% rel. semantic pixacc.
+  - RealSense RGB: keeps the colour lever (0.288/0.655), but needs the deploy
+    agent's headio extension (add (240,320,3) + track-less desc-only head).
+USER CALL. Note: if the FPGA camera is fixed to OV5640-gray, the deploy encoder
+is gray-limited regardless (0.171) — colour only helps on the RealSense/robot
+path. Caveats: generic luma proxy (exact golden_cam.bin2 gray distribution
+untested — flag per P3); single-seed, but the 0.12 gap >> noise. Anti-oracle:
+ADE GT scores seg only.
