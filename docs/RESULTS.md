@@ -9832,3 +9832,46 @@ The board arrived and is plugged in. ECP5 LFE5U-25 detected on JTAG
   wired => 0x5640 ack=0x00), ov5640_snap status all-zero (init ROM
   parked without the sensor). Wiring day is now flash-only with
   unambiguous flips. Board restored to top_fast9_uart; gate re-PASS.
+## 2026-07-16 — P2 (msg round 3): the classroom wall test committed as a module (sspax/place_wall.py) with the GT-leak control INSIDE
+
+Promoted the scratch classroom learned-vs-fixed place test to a committed
+module — "the single most citable negative of the project" — with the
+GT-LEAK CONTROL built in (both training-negative definitions run + printed).
+Honest classroom venue (withheld odometry, 130 frames, 244 revisit pairs),
+learned lidar saliency vs uniform, revisit-vs-far AUC:
+  train-negatives          uniform  learned  delta
+  temporal (clean)          0.930    0.908   -0.022
+  pose-derived (GT-LEAK)    0.930    0.976   +0.046
+CLEAN (label-free temporal negatives): learned <= uniform -> NO learned place
+gain; the front-end cannot manufacture place separability on the honest
+venue = the loop-closure wall, DIRECT (what run2's no-revisits and P1's
+selfrot artifact could only approach indirectly). The +0.046 "gain" appears
+ONLY with pose-derived training negatives, which leak the same withheld
+odometry the gate scores on (rule-2 violation) — the trap is now
+self-documented in the module. Pair-count reconciliation (folds the two
+banked classroom entries): 110 keyframes -> 179 pairs (recipe gate),
+130 keyframes -> 244 (this module's cache) — same venue, more frames = more
+pairs. P2 complete; FINDINGS pt3's/pt5's classroom citation now has a
+committed recipe. Anti-oracle: temporal negatives are label-free; withheld
+odometry scores only.
+
+## 2026-07-16 — P3 (msg round 3): golden vectors + numpy-ONLY checker for the semantic map (deploy-box acceptance, no JAX)
+
+`sspax/semantic_golden.py` + `sspax/artifacts/semantic_golden.npz` (2.7 KB):
+freezes a fixed scene's map inputs (W, roles seed, class codes) and the
+FPGA-relevant QUANTIZATION-recall sweep (chair recall under the real
+polar-quant model, q_polar_np bit-identical to sspslam.quantized.q_polar):
+  float      : 0.947
+  6-bit/cell : 0.877   (nph16 nmag4)
+  4-bit/cell : 0.873   (nph8  nmag2)
+  3-bit/cell : 0.773   (nph4  nmag2)
+The `check` path re-implements binding/query/polar-quant in PURE NUMPY (the
+module imports only numpy; sspax/__init__ guards jax via HAS_JAX, so the
+no-JAX deploy box runs it) and recomputes the recalls — GOLDEN CHECK PASS,
+all |d| = 0.000 (deterministic). So the deploy box can VERIFY the
+FPGA-relevant semantic numbers without JAX, as a map acceptance gate. The
+4-bit/cell recall (0.873, vs float 0.947) reconfirms the map survives
+low-precision (this fixture's scene is harder than the semantic_quant entry's
+0.97 — the golden is self-contained; the deploy check verifies CONSISTENCY
+against the frozen expected, not cross-entry absolutes). Anti-oracle:
+synthetic, GT scores only. P3 complete.
