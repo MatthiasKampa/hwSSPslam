@@ -9993,3 +9993,19 @@ Harness READY; on the camera day point at build/snap.npz and pick the arm that
 improves the deploy-side objmap2 gate (pre-finetune ref: stability 0.750/0.520,
 objmap2 ~0.59). Round-4 P1 prep DONE (fires when OV5640 lands). Anti-oracle:
 label-free InfoNCE, no GT.
+
+## 2026-07-16 — seg_levers consolidation (msg round 3b nit d, the LAST carried item): FINDINGS-pt3 verdicts now have a committed recipe
+
+`sspax/seg_levers.py` — folds the ~9 scratch seg-lever scripts into ONE
+parameterized harness. `train_seg(channels, arch, ch, hw, n_class)` reproduces
+any banked lever (channels luma|rgb|rgbd|rgbd_ll incl. the lidar-like
+degradation; arch trunk|unet; capacity ch; resolution hw; class count), and
+`LEDGER`/`table` records the verdicts inline (luma 0.480 / RGB 0.464 / RGB-D
+dense 0.597 / RGB-D lidar-like 0.539 / full-res 0.566 / ch96 0.599 / U-Net
+0.638 / regime 0.642 / 5-class 0.858). Verified: table prints; train_seg runs
+(luma 200-step smoke 0.388 en route to the banked 0.480). So every FINDINGS-pt3
+seg-lever verdict now has a committed, reproducible recipe (no more
+scratch-only load-bearing citations). ALL msg round 3/3b/4 items are now
+CLOSED: P0 both heads exported, P1 label head demoted + finetune harness ready,
+P2 place_wall + golden(+compose), P3 golden + surfaces-tier, P4 deploy band,
+P5 dual_use, compose nits, seg_levers. Anti-oracle: as per each lever's entry.
