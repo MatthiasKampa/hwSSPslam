@@ -716,7 +716,13 @@ class Demo:
         t0 = time.time()
         rr = DS.clean(self.b, np.asarray(r, float))
         pts, w = F.points_from_scan(rr, self.beam)
-        if k == 0:
+        if getattr(self, "no_slam", False):
+            # live directive: NO python SLAM — points register at the
+            # received pose estimate (robot odom now, chip tracker later)
+            e = np.asarray(gtp, float).copy()
+            self.est[k] = e
+            self.ms_slam = 0.0
+        elif k == 0:
             guess = np.asarray(gtp, float).copy()
         elif k == 1:
             guess = self.est[0].copy()
@@ -728,18 +734,19 @@ class Demo:
             guess = np.array([self.est[k - 1][0] + v[0],
                               self.est[k - 1][1] + v[1],
                               self.est[k - 1][2] + S.wrap(v[2])])
-        e = self.slam.add_keyframe(pts, w, guess)
+        if not getattr(self, "no_slam", False):
+            e = self.slam.add_keyframe(pts, w, guess)
         dt_ = float(np.hypot(*(e[:2] - guess[:2])))
         dr_ = abs(float(S.wrap(e[2] - guess[2])))
         a = 0.15
         self.trk_lid = (a * dt_ + (1 - a) * self.trk_lid[0],
                         a * dr_ + (1 - a) * self.trk_lid[1]) \
             if hasattr(self, "trk_lid") else (dt_, dr_)
-        if self.slam.dirty:
-            self.slam.relax()
-            e = self.slam.pose_of(k)
-        self.est[k] = e
-        self.ms_slam = (time.time() - t0) * 1e3
+            if self.slam.dirty:
+                self.slam.relax()
+                e = self.slam.pose_of(k)
+            self.est[k] = e
+            self.ms_slam = (time.time() - t0) * 1e3
         if self.fpga and k % 8 == 0 and (k % 64) in self.chip_segs:
             self.chip_segs[k % 64] = (e.copy(),
                                       self.chip_segs[k % 64][1])

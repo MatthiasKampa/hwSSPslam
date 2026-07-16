@@ -95,6 +95,7 @@ class LiveDemo(webvis.Demo):
         if data != "live":
             return super()._load(data)
         print("[webvis] live mode: waiting for UDP scans...", flush=True)
+        self.no_slam = True    # pose from datagram, no python SLAM
         self.data = data
         self.b = live_bundle()
         self.keys, self.beam = self.b["keys"], self.b["beam"]
@@ -210,14 +211,19 @@ def udp_rx(demo, port):
             typ, off = 0x01, 0
         else:
             typ, off = pkt[0], 1
-        if typ == 0x01 and len(pkt) - off == scan_len:
+        if typ == 0x01 and len(pkt) - off in (scan_len, scan_len + 12):
             if len(demo.keys) - demo.k > MAX_LAG:
                 demo.overruns += 1
                 continue
             t_us, = struct.unpack_from("<Q", pkt, off)
             mm = np.frombuffer(pkt, "<u2", N_BEAM, off + 8)
             r = np.where(mm > 0, mm / 1000.0, np.inf)
-            demo.keys.append((r, np.zeros(3), t_us / 1e6))
+            pose = np.array(struct.unpack_from("<fff", pkt,
+                            off + 8 + 2 * N_BEAM), float) \
+                if len(pkt) - off == scan_len + 12 else \
+                (np.asarray(demo.keys[-1][1]) if demo.keys
+                 else np.zeros(3))
+            demo.keys.append((r, pose, t_us / 1e6))
         elif typ == 0x02 and len(pkt) > off + 12:      # cam jpeg
             t_us, = struct.unpack_from("<Q", pkt, off)
             jb = pkt[off + 8:]
