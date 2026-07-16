@@ -24,6 +24,7 @@ Browser: http://<robot-ip>:8790
 """
 import io
 import os
+import queue
 import socket
 import struct
 import sys
@@ -102,6 +103,8 @@ class LiveDemo(webvis.Demo):
     binds OAK desc bits at the live pose (nominal yaw extrinsics,
     SSP_CAM_FOV)."""
 
+    live_capable = True         # "live" appears in the selector
+
     def _load(self, data):
         if data != "live":
             return super()._load(data)
@@ -148,6 +151,12 @@ class LiveDemo(webvis.Demo):
                 # this thread for good (cam_kf froze at 0 live).
                 q = getattr(self, "_camq_live", None)
                 if self.data != "live" or not q or not self.k:
+                    try:                     # replay mode: drain the
+                        k = self.camq.get_nowait()   # DATASET cam queue
+                        self._cam_step(k)    # (parent worker path)
+                        continue
+                    except queue.Empty:
+                        pass
                     time.sleep(0.005)
                     continue
                 try:

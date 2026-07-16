@@ -27,6 +27,7 @@ honestly allows). GT/withheld reference is a display-only ghost.
 """
 import base64
 import json
+import os
 import queue
 import struct
 import sys
@@ -130,6 +131,44 @@ class Fpga:
 
 # --------------------------------------------------------------- data feeds
 DATASETS = ("spot", "school_run1", "school_run2")   # REAL data only
+# live /capture dumps double as replay datasets ("inspect without
+# driving"): capture_<ts>.npz in SSP_CAPTURE_DIR (default ~) appear in
+# the selector as drive_<ts>. Discovered at process start.
+CAPTURE_DIR = Path(os.environ.get("SSP_CAPTURE_DIR", str(Path.home())))
+CAPTURES = {f"drive_{p.stem.split('_', 1)[1]}": p
+            for p in sorted(CAPTURE_DIR.glob("capture_*.npz"))}
+
+
+def avail_datasets():
+    d = ROOT / "data" / "spot_telluride"
+    out = []
+    for n in DATASETS:
+        if (d / "scans.npz" if n == "spot" else d / n).exists():
+            out.append(n)
+    return out + sorted(CAPTURES)
+
+
+def capture_bundle(name):
+    """Replay a live /capture dump: scans register at the RECORDED
+    odom pose (exactly what live showed); the cam lane replays the
+    stored desc-bit grids (C-kernel output) — queries work offline."""
+    z = np.load(CAPTURES[name], allow_pickle=True)
+    mm = z["mm"]
+    ts = np.asarray(z["ts"], float)
+    est = np.asarray(z["est"], float)
+    keys = [(np.where(mm[i] > 0, mm[i] / 1000.0, np.inf),
+             est[i], ts[i]) for i in range(len(mm))]
+    b = dict(name=name, kind="capture", keys=keys,
+             beam=-np.pi + np.arange(1024) * (2 * np.pi / 1024),
+             gt_ok=np.zeros(len(keys), bool), kts=ts,
+             rmin=0.3, rmax=60.0, est=est,
+             kdt=float(np.median(np.diff(ts))) if len(ts) > 1 else KF_DT)
+    if "cam_kf" in z.files and len(z["cam_kf"]):
+        b["cam_bits"] = dict(zip([int(x) for x in z["cam_kf"]],
+                                 np.asarray(z["cam_bits"], bool)))
+        b["cam_jpeg"] = dict(zip([int(x) for x in z["jpeg_kf"]],
+                                 [bytes(j) for j in z["jpegs"]]))
+    return b
 
 
 EST_DEMO = ROOT / "data" / "spot_telluride" / "est_demo.npz"
@@ -153,6 +192,8 @@ def load_bundle(name):
     keyframes). run1 has NO reference (est-only: gt_ok all-False, ghost
     hidden); run2 carries the gated-LIO window (342/836 kf, display/eval
     only there)."""
+    if name in CAPTURES:
+        return capture_bundle(name)
     if name == "spot":
         b = SP.make_bundle()
         b["name"] = "spot"
@@ -464,6 +505,29 @@ class CamMap:
 
 
 # --------------------------------------------------------------- camera/QBE
+class CaptureCam:
+    """Replay cam lane: serves the desc-bit grids the LIVE cam worker
+    computed (cbits C kernel) and the jpegs its bounded cache kept
+    (last ~300 kf). Same .bits/.jpeg/.lock/.compute/.query surface as
+    CamLane, so the worker and the query endpoints don't care."""
+
+    def __init__(self, b):
+        self.bits = b["cam_bits"]
+        self.jpeg = b.get("cam_jpeg", {})
+        self.lock = threading.Lock()
+
+    def compute(self, k):
+        return self.bits.get(int(k))
+
+    def query(self, k, cy, cx):
+        with self.lock:
+            if int(k) not in self.bits:
+                return {}
+            q = self.bits[int(k)][cy, cx]
+            return {int(kk): 1.0 - float((bb != q).sum(-1).min()) / 32.0
+                    for kk, bb in self.bits.items()}
+
+
 class CamLane:
     """Aligned D455 frames -> exported vision head desc bits (laptop).
     The appearance map: per-keyframe (15, 20, 32) bit grids anchored at
@@ -663,13 +727,15 @@ class Demo:
         self.keys, self.beam = self.b["keys"], self.b["beam"]
         self.n = len(self.keys)
         self.gt_ok = np.asarray(self.b.get("gt_ok", np.ones(self.n, bool)))
-        self.pose_src = "est-cache" if self.b.get("est") is not None \
-            else "ref"
+        self.pose_src = ("odom (replay)" if self.b.get("kind") == "capture"
+                         else "est-cache" if self.b.get("est") is not None
+                         else "ref")
         self.cam = None
         self.cammap = None
         if self.want_cam:
             try:
-                self.cam = CamLane(data, np.asarray(self.b["kts"]))
+                self.cam = CaptureCam(self.b) if self.b.get("cam_bits") \
+                    else CamLane(data, np.asarray(self.b["kts"]))
                 self.cammap = CamMap()
             except Exception as e:
                 print(f"[webvis] cam lane off: {e}", flush=True)
@@ -764,15 +830,18 @@ class Demo:
 
     # ---- camera worker (desc bits + VSA obj-map bind, off the hot loop)
     def _cam_worker(self):
+        while True:
+            self._cam_step(self.camq.get())
+
+    def _cam_step(self, k):
         from PIL import Image
         import io as _io
-        while True:
-            k = self.camq.get()
+        if True:
             if self.cam is None:
-                continue
+                return
             b = self.cam.compute(k)
             if b is None:
-                continue
+                return
             self._cam_track(k, b)
             if self.cammap is not None:
                 self.cammap.ingest(k, b,
@@ -902,10 +971,14 @@ class Demo:
         for q_ in dead:
             self.clients.remove(q_)
 
+    live_capable = False        # LiveDemo overrides: "live" selectable
+
     def snapshot(self):
         with self.lock:
             return dict(init=True, n=self.n, k=self.k, data=self.data,
                         cam=bool(self.cam), pts=self.pts,
+                        datasets=(["live"] if self.live_capable else [])
+                        + avail_datasets(),
                         trail_py=self.trail_py, trail_gt=self.trail_gt)
 
     def run(self, realtime=True, stop_after=None, loop=False):
@@ -922,11 +995,12 @@ class Demo:
                 if stop_after and self.k >= stop_after:
                     break
                 if realtime:
-                    dt = time.time() - t0
-                    if dt > KF_DT:
+                    kdt = self.b.get("kdt", KF_DT)   # capture replays
+                    dt = time.time() - t0            # at recorded rate
+                    if dt > kdt:
                         self.overruns += 1
                     else:
-                        time.sleep(KF_DT - dt)
+                        time.sleep(kdt - dt)
             print(f"[webvis] '{self.data}' "
                   f"{'complete' if self.done else 'stopped'} at kf {self.k}",
                   flush=True)
@@ -957,7 +1031,9 @@ def make_handler(demo):
                 self._json(dict(ok=True))
             elif self.path.startswith("/select"):
                 d = self.path.split("=")[-1]
-                if d in DATASETS:
+                if d in DATASETS or d in CAPTURES or (
+                        d == "live"
+                        and getattr(demo, "live_capable", False)):
                     demo._req_data = d
                     demo.done = False
                 self._json(dict(ok=True, data=d))

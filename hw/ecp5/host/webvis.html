@@ -31,6 +31,7 @@
       <option value="school_run1">school run 1 (real)</option>
       <option value="school_run2">school run 2 (real)</option>
     </select>
+    <button id="lrbtn" onclick="toggleLR()" style="display:none;background:#274427">&#9654; recorded</button>
     <button onclick="fetch('/reset',{method:'POST'})">reset map</button>
     <button id="cmtoggle" onclick="showChip=!showChip;draw()">chip-map: on</button>
   </div>
@@ -183,8 +184,21 @@ function panel() {
   }
   $("fill").style.width = `${100*(st.k+1)/st.n}%`;
   $("cmtoggle").textContent = `chip-map: ${showChip?"on":"off"}`;
+  $("lrbtn").innerHTML = st.data === "live" ?
+    "&#9654; recorded" : "&#9654; back to LIVE";
+  if ($("dsel").value !== st.data && dsets.includes(st.data))
+    $("dsel").value = st.data;
 }
 $("dsel").onchange = e => fetch(`/select?data=${e.target.value}`, {method:"POST"});
+let dsets = [];
+const dlabel = d => d === "live" ? "LIVE (robot)" :
+  d.startsWith("drive_") ? `recorded drive ${d.slice(6)}` : d;
+window.toggleLR = () => {
+  const drives = dsets.filter(d => d.startsWith("drive_"));
+  const tgt = st.data === "live" ? (drives[drives.length-1] || dsets[0])
+                                 : "live";
+  if (tgt) fetch(`/select?data=${tgt}`, {method:"POST"});
+};
 window.qc = id => fetch("/query_class", {method:"POST", body: JSON.stringify({id})});
 window.bst = id => fetch("/boost", {method:"POST", body: JSON.stringify({id})});
 // camera panel: click = single-cell QBE; DRAG = structured region query
@@ -243,7 +257,12 @@ es.onmessage = ev => {
   if (d.whatis) {
     $("qbetop").textContent = `map readout: class C${d.whatis.cls} (hamming ${d.whatis.ham}/32, ${d.whatis.nk} kf, conf ${d.whatis.conf})`;
     qc(d.whatis.cls); return; }
-  if (d.init) { pts=d.pts; tp=d.trail_py; tg=d.trail_gt; if (d.data) $("dsel").value=d.data;
+  if (d.init) { pts=d.pts; tp=d.trail_py; tg=d.trail_gt;
+    if (d.datasets) { dsets = d.datasets;
+      $("dsel").innerHTML = dsets.map(x =>
+        `<option value="${x}">${dlabel(x)}</option>`).join("");
+      $("lrbtn").style.display = dsets.includes("live") ? "" : "none"; }
+    if (d.data) $("dsel").value=d.data;
     pts.forEach(grow); tp.forEach(grow); draw(); return; }
   if (d.chipmap) { chip = d.chipmap; bakeChip(); draw(); return; }
   if (d.cam_kf !== undefined) { camKf = d.cam_kf;
