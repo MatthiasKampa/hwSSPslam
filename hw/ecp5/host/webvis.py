@@ -709,8 +709,8 @@ class Demo:
         if self.fpga:
             dig, vec, self.ms_fpga = self.fpga.verify_encode(
                 k, np.asarray(r, float), int(ts * 1e6))
-            if k % 8 == 0:
-                codes = self.fpga.map_seg(k % 64)
+            if k % 16 == 0:            # readout cadence halved:
+                codes = self.fpga.map_seg(k % 64)   # CPU freed for cam
                 if codes is not None:
                     self.chip_segs[k % 64] = (None, codes)  # pose after est
         t0 = time.time()
@@ -736,12 +736,12 @@ class Demo:
                               self.est[k - 1][2] + S.wrap(v[2])])
         if not getattr(self, "no_slam", False):
             e = self.slam.add_keyframe(pts, w, guess)
-        dt_ = float(np.hypot(*(e[:2] - guess[:2])))
-        dr_ = abs(float(S.wrap(e[2] - guess[2])))
-        a = 0.15
-        self.trk_lid = (a * dt_ + (1 - a) * self.trk_lid[0],
-                        a * dr_ + (1 - a) * self.trk_lid[1]) \
-            if hasattr(self, "trk_lid") else (dt_, dr_)
+            dt_ = float(np.hypot(*(e[:2] - guess[:2])))
+            dr_ = abs(float(S.wrap(e[2] - guess[2])))
+            a = 0.15
+            self.trk_lid = (a * dt_ + (1 - a) * self.trk_lid[0],
+                            a * dr_ + (1 - a) * self.trk_lid[1]) \
+                if hasattr(self, "trk_lid") else (dt_, dr_)
             if self.slam.dirty:
                 self.slam.relax()
                 e = self.slam.pose_of(k)
@@ -800,7 +800,7 @@ class Demo:
             self.done = True
             st["done"] = True
         self.broadcast(st)
-        if self.fpga and k and k % 8 == 0:
+        if self.fpga and k and k % 40 == 0:
             img = self._chip_image()
             if img:
                 self.broadcast(dict(chipmap=img))
