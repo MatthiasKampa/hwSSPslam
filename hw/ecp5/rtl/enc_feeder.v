@@ -82,7 +82,15 @@ module enc_feeder (
         enc_start <= 1'b0;
         enc_clear <= 1'b0;
         if (vec_ack) vec_req <= 1'b0;
-        if (lid_done) begin pend_done <= 1'b1; done_fid <= lid_fid; end
+        // VEC readback fires ONLY for encoded (single-ring) frames:
+        // multi-ring frames are digest-only transport (STREAM.md), and an
+        // ungated pend_done here streamed a spurious ~1.9 KB VEC per
+        // multi-ring frame, starving the echo path under blast traffic
+        // (robot bring-up: 13/18 echoes lost; found on silicon by the
+        // robot-side agent 2026-07-16 — fix taken verbatim).
+        if (lid_done && nr_ok) begin
+            pend_done <= 1'b1; done_fid <= lid_fid;
+        end
 
         // commits are latched HERE (any fst state — the serial encoder
         // core takes ~840 cyc/point, so a multi-col replay can outlast

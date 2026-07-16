@@ -886,11 +886,15 @@ def make_handler(demo):
 
 
 def serve(port=8790, use_fpga=True):
-    demo = Demo(use_fpga=use_fpga)
+    import os
+    # SSP_DATA: spot | school_run1 | school_run2 (needs the dataset dirs)
+    demo = Demo(data=os.environ.get("SSP_DATA", "spot"),
+                use_fpga=use_fpga)
     threading.Thread(target=demo.run, kwargs=dict(loop=True),
                      daemon=True).start()
-    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(demo))
-    print(f"[webvis] http://localhost:{port}  (FPGA "
+    bind = os.environ.get("SSP_BIND", "127.0.0.1")  # 0.0.0.0 = LAN-visible
+    srv = ThreadingHTTPServer((bind, port), make_handler(demo))
+    print(f"[webvis] http://{bind}:{port}  (FPGA "
           f"{'IN THE LOOP' if use_fpga else 'OFF'})", flush=True)
     srv.serve_forever()
 
