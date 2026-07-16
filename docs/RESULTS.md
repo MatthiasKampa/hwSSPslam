@@ -10284,3 +10284,32 @@ because more classes are strictly richer at ~zero extra map cost and degrade
 gracefully. The only real limiter is CNN per-class accuracy (a soft weighting),
 not the representation. LIDAR stays tracking-only (no seg head; seg=[], k_bits=0)
 — confirmed in the export contract. Anti-oracle: synthetic, GT scores only.
+
+## 2026-07-16 — the VSA object encoder as a PRETRAIN-then-TRUNCATE bottleneck seg net (user architecture): VSA-agnostic seg training yields a bind-ready code
+
+User architecture: the CNN is trained on ORDINARY dense segmentation, fully
+VSA-agnostic, with ONE structural constraint — a narrow PER-OUTPUT-PIXEL
+bottleneck code followed by a SINGLE FC (a 1x1 conv = per-pixel linear
+classifier, NO further convs) that translates each cell's code vector into its
+class. At deploy the FC head is CUT and the binarized per-cell code is bound into
+the SSP vector at each cell's position; the map's fixed bit-width IS the
+bottleneck. Nothing is trained against the binding/query objective (the SSP
+encode is a fixed algebraic consumer). New module sspax/vision/bottleneck_seg.py
+(BottleneckSegNet; STE binarization: fwd sign, bwd tanh grad).
+
+Trained on NYUv2 (40-class luma, per-pixel bottleneck bits=32, single-FC head,
+4000 steps, ~47 s):
+  seg pixacc (binarized-code path, non-void)      : 0.338
+  cut-code class separability (cosine of +-1 code): same-class 0.381 vs
+    diff-class 0.144  ->  AUC 0.723
+  UNTRAINED-net CONTROL (rule-4, rules out class imbalance): AUC 0.496 (chance),
+    same 0.555 ~= diff 0.553 — the trained separability is genuine class
+    structure, not frequent-class (wall/floor) pair inflation.
+VERDICT: the architecture WORKS end-to-end. A single LINEAR FC head forces the
+per-cell +-1 bottleneck code to be COSINE-separable by class — and cosine IS the
+VSA query operation — so a seg-only, VSA-agnostic pretrain produces a bind-ready
+descriptor once the head is cut. The code QUALITY (AUC 0.723) is bounded by the
+seg ACCURACY (pixacc 0.338 = the known luma-40-class ceiling; RESULTS 2026-07-15
+"seg bottleneck is NOT capacity"), NOT by the encoder architecture — more classes
+/ a stronger input (RGB-D, at fewer classes) lift both together. Anti-oracle:
+NYUv2 GT labels train + score the seg task only; no GT touches the binding.
