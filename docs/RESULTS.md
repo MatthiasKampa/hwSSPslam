@@ -9977,3 +9977,19 @@ The registry (cell positions+class) dominates the map bytes and scales with
 bound-cell count -> aggregating cells to per-surface regions/objects (per the
 capacity+compose laws) shrinks it. Anti-oracle: synthetic, GT surface class +
 cluster id score only.
+
+## 2026-07-16 — P1 round 4 (PREP, harness ready): platform-domain desc-head finetune, dataless-runnable
+
+`sspax/platform_finetune.py` — the QBE quality lever for the camera day (the
+gated vision head transfers real-but-PARTIAL cross-dataset; the lever is
+PLATFORM-DOMAIN adaptation, not more NYUv2). Label-free luma-jitter InfoNCE on
+the DESC head, two arms (trunk FROZEN / desc-only vs trunk LOW-LR 0.1x, both
+printed), re-export via headio v2. DATALESS-RUNNABLE: uses build/snap.npz
+(hw_snap.py 'S', key "img", 320x240 Y8) if present, else synthetic luma smoke.
+Smoke dry-run (200 synthetic frames, NOT representative): both arms run,
+retrieval ~0.10 (synthetic = large uniform regions, non-discriminative; NOT a
+real yield), stability ~0.85-0.89, re-export VALIDATES through headio load_head.
+Harness READY; on the camera day point at build/snap.npz and pick the arm that
+improves the deploy-side objmap2 gate (pre-finetune ref: stability 0.750/0.520,
+objmap2 ~0.59). Round-4 P1 prep DONE (fires when OV5640 lands). Anti-oracle:
+label-free InfoNCE, no GT.
