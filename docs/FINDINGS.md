@@ -1294,3 +1294,52 @@ on a stronger front-end (or a better in-domain RGB set), not on the map or quant
 Method note: three banked positives this session were audited and TWO
 walked back (P1-style over-reads: "map-ready 0.706" oracle-grouped; role-quant
 "emergent"); rule 4 remains load-bearing.
+
+## Addendum (2026-07-16c, deploy-side) — reconstruction has a lattice-arithmetic law, and the fix is a second band, not a better decoder
+
+Three findings from the walls + rotation session (RESULTS 2026-07-16
+entries; code hw/ecp5/host/mapdec.py, solo2.py):
+
+**A. The ghost-comb law.** A frozen segment decodes a wall as a comb of
+parallel rows spaced by the ladder's COMMON PERIOD. The matcher octave
+ladder (0.25/0.5/1/2 m — ring scale = bit shift, the FPGA-cheap trick)
+has period 2 m, so parallel structure separated by exact multiples of
+2 m is *mathematically* indistinguishable from its ghosts per segment
+(proven in the mapdec selftest's worst-case room), and corridors keep
+strong partial combs in real data. This is an arithmetic property of
+the STORE, not a decoder weakness: no read-side cleverness can undo it
+(cross-segment consensus can't either — ghosts are content-anchored,
+consistent across segments). The 2026-07-12 "fidelity space" intuition
+now has its precise mechanism: reconstruction needs an INCOMMENSURATE
+ladder (pairwise non-integer ring ratios -> no common period at venue
+scale). One extra fold at ring-specific angle LUTs (same datapath,
+same 60 B/seg store, same permutation algebra) takes hunter recall@30
+from 0.19 (matcher band) to 0.72 (joint), at 1.3-2.4 cm p50 precision
+across three real venues; the 64-segment chip envelope reconstructs
+the spot classroom at 1.2 cm / 0.84 from 3.8 KB. Division of labor:
+commensurate band for MATCHING (bit-shift cheap, combs harmless inside
+a +-12 u window), incommensurate band for READOUT.
+
+**B. The map-budget law (novelty folding).** The v7 chip spent its 64
+segments on the first 32 s of driving (5-kf cadence at 10 Hz);
+everything after ran beyond-map, and beyond-map commits made heading
+WORSE than raw odometry. Gating segment OPENING on the tracker's own
+nearest-anchor distance (> 0.8 m = one output bit from the existing
+nearest scan) is the entire fix: hunter map crispness 9.29 -> 10.73
+pts/cell (odom 7.27), spot untouched. Every *search-side* fix bundled
+with it — wider rho window, rho retry, staged/global re-search,
+heading clamps, absolute commit floor — was refuted by the same
+decomposition (the EMA gate punishes candidate-set inflation; the
+matcher's small heading corrections IMPROVE the map and must not be
+clamped; unbounded heading search re-opens the aliasing door that
+section 5 closed). Bounded local search on chip; unbounded fidelity
+readout off chip.
+
+**C. The metric trap (for the notebook).** A scan-xcorr yaw integral
+is NOT an absolute heading reference — it drifts (med 46 deg over a
+5-min tour, worse than the platform's fused odom yaw). Two arms were
+nearly mis-ranked by it. The GT-free arbiter that survived: MAP
+CRISPNESS (points per occupied cell of the scatter at the arm's own
+poses) — it is the display-truth the operator sees and it correctly
+ordered odom < stock < novelty arms. Banked as the standard score for
+tracker changes on reference-free captures.
