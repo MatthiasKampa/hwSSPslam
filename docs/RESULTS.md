@@ -10009,3 +10009,47 @@ scratch-only load-bearing citations). ALL msg round 3/3b/4 items are now
 CLOSED: P0 both heads exported, P1 label head demoted + finetune harness ready,
 P2 place_wall + golden(+compose), P3 golden + surfaces-tier, P4 deploy band,
 P5 dual_use, compose nits, seg_levers. Anti-oracle: as per each lever's entry.
+
+## 2026-07-16 — surfaces-tier SHIPPING optimization: SPARSE cell binding is both smaller AND sharper (the capacity law optimizes the recipe)
+
+The surfaces-tier registry (P3) dominated the segment bytes; the fix follows
+directly from the sqrt(D) capacity law. Binding every Nth cell into the D=360
+band (4-bit quant), surface + QBE readout AUC vs cells/segment:
+  cell-frac  floor  wall   QBE   cells  bytes/seg
+    1.00     0.878  0.955  0.986   64     628 B
+    0.50     0.975  0.974  0.991   32     404 B
+    0.25     0.996  0.987  1.000   16     292 B
+FEWER cells -> HIGHER recall AND fewer bytes. At 64 cells the map is far over
+its ~sqrt(D) capacity (cross-talk blurs queries); a SPARSE ~16-cell
+representative set stays within capacity -> floor 0.996 / wall 0.987 / QBE
+1.000 at 292 B (2.2x smaller than the naive 628 B). SHIPPING RECOMMENDATION:
+the surfaces-tier binds a SPARSE representative cell set per segment (not every
+cell), which the capacity law makes free — cheaper AND more accurate. So the
+deployable per-segment semantic band is ~0.3 KB (180 B map + ~112 B registry
+for ~16 entities), surfaces + label-free QBE, at 4 bits/cell. The capacity law
+(banked earlier) is not just a limit — it prescribes the sparse binding that
+optimizes the actual ship recipe. Anti-oracle: synthetic, GT scores only.
+
+## 2026-07-16 — CORRECTION/RETRACTION: the surfaces-tier "sparse cell binding is smaller AND sharper" claim above is WRONG (rule-4 self-audit)
+
+The entry immediately above banked a false win. It measured surface/QBE AUC
+ONLY over the cells that remained after subsampling — so dropping cells shrank
+the map AND the eval set together, and the "recall goes UP as cells drop" was
+an artifact of scoring on a smaller, easier held set (the hard-to-separate
+cells were removed from the negatives too, not just from the map).
+
+The honest test — bind a SPARSE subset but EVALUATE on the FULL cell set,
+splitting separability (of bound content) from coverage (fraction of ALL
+surface cells retrievable):
+  bind-frac  sep-floor  cov-floor  sep-wall  cov-wall  bytes
+    1.00       0.878      0.542      0.955     0.784    628 B
+    0.50       0.721      0.481      0.791     0.503    404 B
+    0.25       0.596      0.288      0.695     0.365    292 B
+Sparse binding HURTS both separability AND coverage — surface classes are
+shared codes bundled across many cell positions; removing positions just
+removes retrievable content, it does not relieve a capacity ceiling (D=360 is
+not saturated by ~64 shared-code cells the way M distinct objects would be).
+The naive full-density surfaces-tier (64 cells, ~628 B, floor 0.878 / wall
+0.955 / QBE 0.986) STANDS as the ship recipe; there is no free byte win here.
+Lesson (again): never score a subsampled map on the subsampled set — evaluate
+on a fixed full probe. Banked pre-push, caught pre-push; nothing shipped.
