@@ -10687,3 +10687,46 @@ ENCODE-BOUND on chip ~30 ms/frame serial cis-ROM — the multi-lane
 engine (#43) is the on-chip fix; 8.8 vs 10.0 nominal = ouster publish
 jitter, revisit after multi-lane). Robot webvis live at :8790 —
 trail follows odometry, on-chip encode green, C kernel banner in log.
+
+## 2026-07-16 — HUNTER RETUNE 2 (pair-cos evaluator): t0.72/rot9/cap0.30; the 2 Hz collapse explains the live divergence; smoothness-only tuning refuted
+
+The capture's stored est is the DIVERGED pre-retune run (med |dyaw|
+130 deg/kf) — no reference exists. New CONFIG-INDEPENDENT evaluator:
+re-encode scan k's points at the estimated relative pose and take the
+cosine against scan k-1's encoding (ENC_MAIN D=240). Reference arms:
+identity (zero motion) floor cos med 0.860 / p10 0.346; the diverged
+capture est scores 0.049 (metric points the right way).
+
+SWEEP (t_half x rot_half x cv-cap, 18 configs, 929 kf @ 4 Hz,
+scratch_hunter_retune.py): a robust PLATEAU at cap 0.30 — cos med
+0.937-0.941, p10 0.42-0.77 across t 0.48-1.0 / rot 9-18. WINNER
+(plateau center): t 0.72 / rot 9 / cap 0.30 (med 0.940 p10 0.766,
+dyaw90 5.6 deg, smallest leader gap 19.6 m). The cap-0.60 arms are
+KNIFE-EDGED: t0.72/rot9/cap0.60 diverges outright (0.053) while its
+t1.00 neighbor is the single best p10 (0.804) — classic instability,
+not adopted. REFUTED PRIORS: (a) my cap-0.60 "0.30 clips real Hunter
+motion" comment — the matcher window covers the residual and capped
+guesses are uniformly stabler; (b) last session's smoothness-tuned
+t.72/rot18/cap.60 ranks 15/18 on p10 (0.173) — smoothness alone was
+the wrong objective (a tracker that ignores scans is maximally
+smooth).
+
+STRESS ARM: at stride 2 (2 Hz keyframes = doubled motion/kf) EVERY
+window collapses (cos med 0.08-0.19). This is the live-divergence
+root cause: python-SLAM lag + serial stalls dropped the effective
+rate toward 2 Hz, where NO window survives — consistent with the
+shim-architecture fix being the real cure. Deployment floor banked:
+keep keyframes >= 4 Hz at Hunter speeds (now 8.8 Hz).
+
+APPLIED to make_slam (offline/chip-tracker config; acceptance recipes
+untouched): t_half 0.72, rot_half 9, CV_CAP 0.30. est_demo.npz
+rebuilt with it — MULTI-LOG GATE: spot err vs withheld ref med must
+hold ~0.039 (first build with the old config: 0.038 med / 0.071 p90;
+school runs smooth: run1 p90 5.4, run2 3.3 deg/kf, run2 vs gated LIO
+2.19 m med global). Numbers below from the rebuild log.
+
+GATE RESULT (rebuild with t0.72/rot9/cap0.30): spot 0.038 med /
+0.071 p90 (IDENTICAL to old config; acceptance-band 0.039); run1 p90
+5.5 vs 5.4 deg/kf; run2 identical 2.185/2.504. Holds across all three
+logs — ADOPTED for the offline/chip-tracker config; est_demo.npz
+shipped from it.

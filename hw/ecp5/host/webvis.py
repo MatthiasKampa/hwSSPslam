@@ -541,21 +541,28 @@ class CamLane:
 # serving path runs NO python SLAM. It is (a) the estcache builder's
 # engine and (b) the configuration home for the future ON-CHIP tracker —
 # the chip runs this same algebra.
-CV_CAP = 0.60          # cv-guess translation cap per kf (m). 0.30 CLIPPED
-                       # real Hunter motion (1.0 m/s med / 1.6 p90 at
-                       # 4 Hz kf = 0.25-0.40 m/kf) — see hunter retune.
+CV_CAP = 0.30          # cv-guess translation cap per kf (m). The
+                       # hunter pair-cos sweep REFUTED the uncapped
+                       # prior: cap 0.60 arms are knife-edged (one
+                       # diverges outright); cap 0.30 + the matcher
+                       # window covering the residual is uniformly
+                       # stable. scratch_hunter_retune 2026-07-16.
 
 
 def make_slam():
     slam = F.BandSLAM(robust=True, attempt_every=4, relax_every=25,
                       gap_kf=300, recent_aids=12, spec=None, nph=0)
     slam.store_dtype = np.complex64
-    # LIVE-VENUE RETUNE (capture_1784219440, 929 kf @ 4 Hz, ~1.2 m/s):
-    # the dataset window (t 0.48 / rot 9) flips heading at speed (p90
-    # |dyaw| 36 deg/kf); t 0.72 / rot 18 is 5x smoother (p90 7.6, med
-    # 0.51 deg) and halves step zigzag. Acceptance recipes in runners/
-    # are UNTOUCHED — this is the demo/live config.
-    slam.matcher = S.Matcher(L.ENC_MAIN, t_half=0.72, rot_half_deg=18.0,
+    # HUNTER RETUNE 2 (capture_1784219440 929 kf @ 4 Hz, pair-cos
+    # evaluator — re-encode scan k at the estimated delta vs scan k-1):
+    # t 0.72 / rot 9 / cap 0.30 sits centered on the robust plateau
+    # (cos med 0.940 p10 0.766 vs the smoothness-tuned t.72/rot18/
+    # cap.60's p10 0.173 — smoothness alone was the wrong objective).
+    # Stress arm: at 2 Hz keyframes EVERY window collapses -> keep
+    # live keyframes >= 4 Hz; the earlier live divergence was rate
+    # stalls, not the window. Acceptance recipes in runners/ are
+    # UNTOUCHED — this is the offline/chip-tracker config.
+    slam.matcher = S.Matcher(L.ENC_MAIN, t_half=0.72, rot_half_deg=9.0,
                              rot_step_deg=1.5, perm=(4, L.N_ANG))
     return slam
 
