@@ -97,12 +97,9 @@ def ros_mode(dst, topic, fps):
                 img = a.reshape(m.height, m.width)
             else:
                 return
-            # exact QVGA: center-crop to 4:3, then 320x240 (the pinned
-            # deploy geometry; 120 Hz later = the OV5640's DVP job)
-            H, W = img.shape[:2]
-            cw = min(W, H * 4 // 3)
-            x0 = (W - cw) // 2
-            img = img[:, x0:x0 + cw]
+            # QVGA by FULL-FRAME downsample (no crop — keep the whole
+            # FOV; the aspect squeeze is fine, and the bearing->cell
+            # mapping then spans the true HFOV)
             img = cv2.resize(img, (320, 240))
             ok, jb = cv2.imencode(".jpg", img,
                                   [cv2.IMWRITE_JPEG_QUALITY, 75])
