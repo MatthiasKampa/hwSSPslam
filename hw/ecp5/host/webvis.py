@@ -276,10 +276,14 @@ class CamMap:
     vector and paints the response density on the map."""
 
     HFOV = np.deg2rad(69.0)          # D455 RGB horizontal FOV (nominal)
-    HAM_T = 11                       # cluster threshold (of 32) — raised
-                                     # from 8: MEASURED live adjacent
-                                     # bit-flip is 0.28 med (9/32), so 8
-                                     # fragmented same-thing clusters
+    HAM_T = 7                        # cluster threshold (of 32).
+                                     # NOISE-TRACKED: 0.28 med flip at
+                                     # 4 Hz kf wanted 11; at 10 Hz the
+                                     # flip is 0.128 med (4/32) and the
+                                     # capture3 sweep shows T=7 is the
+                                     # only positive-margin setting
+                                     # (intra 5 / inter-min 6); T>=9
+                                     # over-merges. Rate < ~8 Hz -> 11.
     MAX_C = 12
 
     def __init__(self):
@@ -772,7 +776,7 @@ class Demo:
                             cam=bool(self.cam)))
 
     # ---- chip-map image: decode fetched codes at estimated poses -------
-    DECODE_R = float(os.environ.get("SSP_DECODE_R", "12.0"))
+    DECODE_R = float(os.environ.get("SSP_DECODE_R", "6.0"))
 
     def _chip_image(self, batch=16):
         """Decode the CHIP map over the CONVEX HULL of all lidar points
