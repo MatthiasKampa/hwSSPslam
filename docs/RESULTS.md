@@ -11233,3 +11233,33 @@ answer needs (a) a clean-code OBJECT baseline (same few-entity set, no quant) to
 measure the true object-level quant cost, and (b) PREDICTED-region (non-oracle)
 grouping, not GT. Until then the encoder is aggregation-VIABLE, not proven
 map-ready. Banked pre-push; the earlier synthesis to the user is corrected here.
+
+## 2026-07-16 — HONEST in-map (non-oracle grouping + clean-vs-quant baseline): the MAP is a faithful container (quant ~free); the ENCODER's 150-class class-query is the weak link
+
+Redone per the audit's two asks — PREDICTED-region grouping (group val cells by
+the net's OWN seg-argmax, NOT GT) and a clean-vs-quant object baseline on the
+SAME few-entity set. ADE ch16, 120 val images, top-20 classes:
+  clean-object AUC (no quant)             : 0.631
+  4-bit-object AUC (map fidelity)         : 0.639   (quant cost -0.008 ~= ZERO)
+  top-1 route recall (query -> right predicted entity): 0.157 (~chance over ~few
+                                            entities/img)
+DECOMPOSITION (the useful result): 
+  - THE MAP IS FAITHFUL. 4-bit polar quant + superposition at object granularity
+    costs ~0 AUC (0.631 -> 0.639, within noise) — the SSP container preserves
+    whatever the encoder produces. This is the clean, isolated, non-oracle
+    positive (supersedes the retracted oracle-grouped 0.706).
+  - THE ENCODER IS THE LIMITER. Object-level class separability is only mild
+    (AUC 0.63) and TOP-1 route recall is ~chance (0.157) — a class-PROTOTYPE
+    query does NOT reliably retrieve its own region with this 150-class encoder
+    (code class-AUC ~0.66, pixacc ~0.31). Predicted (noisy) grouping also lowers
+    it vs oracle (0.71).
+RECONCILES with the deploy-side 0.94-1.00 map recall: that is for DISTINCT TARGET
+OBJECTS queried by a specific example code (well-separated); this is fuzzy
+150-CLASS-PROTOTYPE retrieval over many regions — a harder task the weak encoder
+can't do reliably. NET: the VSA map/quantization is NOT the deploy bottleneck
+(faithful, ~free); the encoder's fine-class discrimination is. Levers for that
+are the seg ceiling ones (input/task), NOT the map. "Map-ready for class-query"
+is NOT established at 0.157 top-1; "map-ready for distinct-object QBE" is
+plausible (their result) but untested here. Single-seed; pixel(u,v) for 3D.
+Anti-oracle: GT builds train prototypes + scores only; grouping is NON-oracle
+(predicted); no GT in the bound entities this time.
