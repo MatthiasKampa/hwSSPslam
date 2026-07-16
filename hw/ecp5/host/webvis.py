@@ -47,6 +47,7 @@ import serial                                                  # noqa: E402
 
 import hw_stream as HS                                         # noqa: E402
 import hw.ice40.golden as G                                    # noqa: E402
+import mapdec as MD                                            # noqa: E402
 import runners.datasets as DS                                  # noqa: E402
 import runners.spot as SP                                      # noqa: E402
 import sspslam.encoder as S                                    # noqa: E402
@@ -264,6 +265,107 @@ def hull_mask(gx, gy, hull):
         a, b = hull[i], hull[(i + 1) % n]
         m &= ((b[0]-a[0])*(YY-a[1]) - (b[1]-a[1])*(XX-a[0])) >= -1e-9
     return m
+
+
+# ------------------------------------------------------------- wall lane
+class WallLane:
+    """Incremental WALL RECONSTRUCTION (mapdec consumer). Dataset /
+    capture replays: golden FIDELITY-band fold (chip fold algebra,
+    ring-specific-LUT ladder — the specced RTL rung) at the SAME pose
+    estimates the display points register at; each frozen segment is
+    pursued once (CLEAN line atoms); a worker recomputes path-veto +
+    collinearity consensus over the accumulated lines and broadcasts.
+    Live SOLO: the same consumer runs on the chip's dumped MATCHER-band
+    segments instead (set_segs), comb-collapse enabled."""
+
+    _BANKS = {}                   # shared atom banks (one per band)
+
+    def __init__(self, band="joint"):
+        # walls3 verdict (2026-07-16): JOINT dual-band readout (matcher
+        # + fidelity, 480 comps) wins recall@30 0.98/0.68/0.72 at p50
+        # 1.3-2.4 cm across spot/school_run2/hunter — both bands ride
+        # the same fold cadence (196 B/seg on the wire).
+        self.band = band
+        self.mapper = self.mapper_m = None
+        if band in ("fidelity", "joint"):
+            self.mapper = MD.FidMapper(MD.make_luts_gen())
+        if band == "joint":
+            self.mapper_m = MD.SOLO.SoloMapper(G.make_luts())
+        if band not in WallLane._BANKS:
+            WallLane._BANKS[band] = MD.AtomBank(
+                MD.PARAMS,
+                MD.W_LAT if band == "matcher"
+                else MD.DEC.build_W(list(MD.FID_LAMS))
+                if band == "fidelity"
+                else np.vstack([MD.W_LAT,
+                                MD.DEC.build_W(list(MD.FID_LAMS))]))
+        self.bank = WallLane._BANKS[band]
+        self.raw = []                 # world lines [(c, th, ln, amp, si)]
+        self.n_seg = 0
+        self.dirty = False
+        self.msg = None
+        self.lock = threading.Lock()
+
+    def fold(self, r_m, pose):
+        """One keyframe into the open segment (replay lane)."""
+        if self.mapper is None:
+            return
+        q = G.scan_to_ints(np.asarray(r_m, float))
+        if len(q[0]) < 5:
+            return
+        pose_q = (int(round(pose[0] / MD.U)), int(round(pose[1] / MD.U)),
+                  int(round(pose[2] * MD.TAU_Q / (2 * np.pi))) % MD.TAU_Q)
+        self.mapper.fold(q, pose_q)
+        if self.mapper_m is not None:
+            self.mapper_m.fold(q, pose_q)
+        if len(self.mapper.frozen) > self.n_seg:
+            segs = MD.segs_from_mapper(self.mapper)
+            if self.mapper_m is not None:
+                segs = MD.join_segs(
+                    MD.segs_from_mapper(self.mapper_m), segs)
+            with self.lock:
+                for si in range(self.n_seg, len(segs)):
+                    for ln in MD.seg_lines_world(segs[si], self.bank):
+                        self.raw.append((*ln, si))
+                self.n_seg = len(segs)
+                self.dirty = True
+
+    def set_segs(self, segs):
+        """Replace ALL segments (live chip-dump lane): re-pursue only
+        new slots (dump is append-only until map reset)."""
+        with self.lock:
+            if len(segs) < self.n_seg:          # map reset
+                self.raw, self.n_seg = [], 0
+            for si in range(self.n_seg, len(segs)):
+                for ln in MD.seg_lines_world(segs[si], self.bank):
+                    self.raw.append((*ln, si))
+            self.n_seg = len(segs)
+            self.dirty = True
+
+    def rebuild(self, trail):
+        """veto + (matcher) comb-collapse + consensus -> broadcast
+        payload. Called from the walls worker, never the hot loop."""
+        with self.lock:
+            raw = list(self.raw)
+            self.dirty = False
+        if not raw or trail is None or not len(trail):
+            return None
+        tr = np.asarray(trail, float)[::5, :2]
+        lines = MD.path_veto(raw, tr, MD.PARAMS["veto_r"])
+        if self.band == "matcher":
+            lines = MD.comb_collapse(lines)
+        lines = MD.consensus_collinear(lines)
+        seg = []
+        for (c, th, ln, amp, si) in lines:
+            h = 0.5 * ln * np.array([np.cos(th), np.sin(th)])
+            seg.append([round(float(c[0] - h[0]), 3),
+                        round(float(c[1] - h[1]), 3),
+                        round(float(c[0] + h[0]), 3),
+                        round(float(c[1] + h[1]), 3),
+                        round(float(amp), 3)])
+        self.msg = dict(lines=seg, n_seg=self.n_seg, band=self.band,
+                        n_raw=len(raw))
+        return self.msg
 
 
 # ------------------------------------------------------- camera VSA obj map
@@ -749,6 +851,7 @@ class Demo:
         self.camq = queue.Queue(maxsize=8)
         self._load(data)
         threading.Thread(target=self._cam_worker, daemon=True).start()
+        threading.Thread(target=self._walls_worker, daemon=True).start()
 
     def _load(self, data):
         print(f"[webvis] loading '{data}'...", flush=True)
@@ -780,6 +883,8 @@ class Demo:
         self.chip_img = None
         self.hull = None                  # convex hull of lidar points
         self._chip_cursor = 0             # batched sequential decode
+        self.walls = WallLane()           # golden fidelity-band fold
+                                          # (live subclasses swap band)
         self.ms_slam = self.ms_fpga = 0.0
         self.overruns = 0
         if self.fpga:
@@ -985,6 +1090,15 @@ class Demo:
         # SOLO deploy: the ON-CHIP tracker (webvis_live.SoloDemo).
         e = self.pose_for(k, r, gtp)
         self.est[k] = e
+        # wall lane: fold this keyframe at the SAME pose the points
+        # register at (fidelity band, chip fold algebra); pursuit runs
+        # per freeze inside, veto/consensus in the walls worker
+        if self.walls is not None and self.walls.mapper is not None:
+            try:
+                self.walls.fold(rr, e)
+            except Exception as ex:
+                print(f"[webvis] wall lane off ({ex})", flush=True)
+                self.walls = None
         # chip-map readout: ONE slot every 4 kf, stamped with THIS
         # frame's pose (the chip wrote frame k to slot k%64 during
         # streaming, so the fetch pairs codes+pose exactly; over 64
@@ -1044,6 +1158,25 @@ class Demo:
             if img:
                 self.broadcast(dict(chipmap=img))
 
+    def _walls_worker(self):
+        """Rebuild veto+consensus over accumulated wall lines (1 Hz,
+        dirty-flagged) and broadcast — never in the hot loop."""
+        while True:
+            time.sleep(1.0)
+            w = getattr(self, "walls", None)
+            if w is None or not w.dirty:
+                continue
+            try:
+                with self.lock:
+                    trail = np.array(self.trail_py, float) \
+                        if len(self.trail_py) > 5 else None
+                msg = w.rebuild(trail)
+                if msg:
+                    self.broadcast(dict(walls=msg))
+            except Exception as e:
+                print(f"[webvis] walls worker error: {e}", flush=True)
+                time.sleep(5.0)
+
     # ---- SSE ------------------------------------------------------------
     def broadcast(self, obj):
         dead = []
@@ -1059,10 +1192,12 @@ class Demo:
 
     def snapshot(self):
         with self.lock:
+            w = getattr(self, "walls", None)
             return dict(init=True, n=self.n, k=self.k, data=self.data,
                         cam=bool(self.cam), pts=self.pts,
                         datasets=(["live"] if self.live_capable else [])
                         + avail_datasets(),
+                        walls=w.msg if w else None,
                         trail_py=self.trail_py, trail_gt=self.trail_gt)
 
     def run(self, realtime=True, stop_after=None, loop=False):
@@ -1258,6 +1393,11 @@ def make_handler(demo):
                     fx_tot=demo.fpga.total if demo.fpga else 0,
                     chip_segs=len(demo.chip_segs),
                     chip_corr=getattr(demo, "chip_corr", None),
+                    walls=(len(demo.walls.msg["lines"])
+                           if getattr(demo, "walls", None)
+                           and demo.walls.msg else 0),
+                    wall_segs=(demo.walls.n_seg
+                               if getattr(demo, "walls", None) else 0),
                     cam_kf=len(demo.cam.bits) if demo.cam else 0,
                     pose_src=getattr(demo, "pose_src", "ref"),
                     ms_py=round(demo.ms_slam, 1),
@@ -1326,6 +1466,13 @@ def selftest(n=40, use_fpga=True):
              + (f" | med err vs ref {np.median(errs):.3f} m"
                 if errs else ""))
     print(line)
+    if demo.walls is not None and demo.walls.n_seg:
+        msg = demo.walls.rebuild(np.array(demo.trail_py, float))
+        print(f"  wall lane: {demo.walls.n_seg} fidelity segs -> "
+              f"{len(msg['lines']) if msg else 0} consensus walls "
+              f"({demo.walls.msg['n_raw'] if demo.walls.msg else 0} raw)")
+        assert demo.walls.n_seg >= 4, "wall lane folded too few segs"
+        assert msg and msg["lines"], "wall lane produced no walls"
     if demo.cammap:
         cls = demo.cammap.classes()
         nb = len(demo.cammap.vecs)

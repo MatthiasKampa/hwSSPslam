@@ -10986,3 +10986,114 @@ wins spot, loses run2; 16-bit regresses) -> "16-bit store" REFUTED;
 the deploy store stays 2b phase-only = what the silicon already does.
 webvis "quantized" recipe fixed to nmag=1 (chip-exact); est_demo __q
 rebuilt.
+
+## 2026-07-16 — WALL RECONSTRUCTION on ECP5 (mapdec): segment-frame
+CLEAN pursuit; ghost-comb physics of the octave ladder; INCOMMENSURATE
+FIDELITY BAND; joint dual-band readout = the recipe
+
+New consumer hw/ecp5/host/mapdec.py (imports ice40 decode.py + solo.py,
+rule 1): per-segment CLEAN line pursuit run in the SEGMENT ANCHOR FRAME
+(exact heading — the ice40 recipe snapped content rotation to the 3-deg
+permutation grid, up to ~15 cm smear at 6 m), driven-path veto,
+collinearity consensus (the ice40 center-distance consensus rejects two
+views of one wall seen from different segments — replaced), and a
+GHOST-COMB COLLAPSE step.
+
+PHYSICS (selftest-proven): the matcher octave ladder (0.25/0.5/1/2 m)
+shares a 2 m period across ALL rings -> a wall decodes as a comb of
+parallel rows spaced 2 m; walls separated by exact multiples of 2 m
+alias onto each other IRREDUCIBLY (response at truth and ghosts is
+mathematically identical — worst-case room in the selftest). Real
+venues break exactness but corridors keep strong partial combs.
+FIX: a second reconstruction-only fold on an INCOMMENSURATE ladder
+FID_LAMS = 0.31/0.83/2.17/5.71 (pairwise non-integer ratios -> no
+common period at venue scale). RTL cost: ring-specific angle LUTs
+(u_r = (x*C_r[a]+y*S_r[a])>>F_ANG, scale 0.25/lam_r) instead of the
+shared-u shift — 4x angle-ROM entries, same multiplier datapath, same
+store/permutation algebra (golden-integer encode_gen_at in mapdec; RTL
+rung specced, not yet built). Selftest: fidelity band recovers the
+comb-degenerate room ABSOLUTELY (p50 0.066/p90 0.246, rec@30 0.67)
+where the matcher band is provably mod-comb-only (dev 0.000).
+
+BENCH (GT-free scatter-reference at the fold poses; prec p50/p90 m,
+recall@15/@30; scratch_walls*.py):
+                      spot              school_run2        hunter cap
+  matcher band     0.021/0.62 .51/.61  0.140/1.38 .24/.30  0.039/0.14 .15/.19
+  fid4             0.013/0.37 .78/.87  0.022/0.42 .45/.54  0.019/0.08 .43/.59
+  fid4 tau.25      0.023/0.61 .89/.95  0.040/0.60 .53/.63  0.022/0.09 .55/.69
+  JOINT m+f4       0.013/0.58 .93/.98  0.024/0.50 .61/.68  0.019/0.08 .59/.72
+  fid6             0.017/0.53 .93/.98  0.032/0.42 .58/.66  0.022/0.10 .56/.69
+  fid4 64-seg CHIP 0.012/0.31 .76/.84  (envelope arm)      rec .04 (map
+                                                            exhaustion)
+VERDICTS: (1) fidelity band DOMINATES matcher band for readout on all
+venues (comb physics confirmed on real data); (2) tau 0.25 = the
+multi-venue dial (recall +6-10 pts at p50 <= 4 cm) — mapdec default;
+(3) JOINT dual-band (196 B/seg) is the readout recipe (best or tied
+everywhere); fid6 close second, banked as the single-band alternative;
+(4) planes (liveness+scales) buy precision, planes-off buys recall at
+2-4x worse p50 — planes stay ON; (5) spot 64-seg chip envelope:
+floorplan at 1.2 cm p50 / 0.84 rec@30 from a 3.8 KB resident map.
+webvis: WallLane folds BOTH bands at the display poses (chip fold
+algebra, golden), pursuit per freeze, veto+consensus in a worker,
+orange wall overlay + toggle; live SOLO path consumes the chip dump
+(matcher band + comb collapse) until the fidelity RTL rung lands.
+
+## 2026-07-16 — SOLO-ON-HUNTER ROTATION STUDY: the metric trap, the
+decomposition, and v8 = NOVELTY-GATED FOLDING ONLY (crispness 9.29 ->
+10.73); window/retry/global-RS/clamps/floor all REFUTED
+
+User report: live rotational tracking bad on the Hunter. Diagnosis
+chain (scratch_rot_diag / scratch_yaw_arbiter / scratch_solo_rot on
+capture_1784226283, 2810 kf @ 10 Hz):
+  (1) odom-yaw residual vs scan-xcorr: p90 3.6 deg/kf during turns,
+      12.4% of turning kf beyond the +-6 deg fine window -> motivated
+      wider windows. (2) BUT the scan-xcorr yaw INTEGRAL drifts (med
+      46 deg vs odom over the tour) — yaw-err-vs-xcorr is NOT an
+      absolute metric. ARBITER (GT-free): map crispness = pts per
+      occupied 0.1 m cell of the scatter at the arm's own poses —
+      odom yaw beats xcorr yaw (7.27 vs 6.37) => hunter odom yaw is
+      long-term GOOD (IMU-fused), the xcorr reference was the drifter.
+  (3) Crispness decomposition (odom arm):
+        raw odom 7.27 | v7 stock 9.29 | novelty ONLY 10.73 <- v8
+        +rho window/retry 10.12 | +staged local RS 10.12 (never fired)
+        | full E bundle (window+retry+global RS) 10.45 | heading
+        clamps 7.7-8.2 | abs floor 25% self 7.66 (kills 795 honest
+        commits)
+      Wider candidate sets inflate the EMA gate (the K_TRY=3 failure
+      class); the matcher's heading corrections IMPROVE the map (do
+      NOT clamp); global re-search barely fires and reopens the
+      aliasing door (user pushback confirmed by data).
+  (4) Root cause of the live symptom: 64 segs x 5 kf @ 10 Hz = the
+      resident map covered the FIRST 32 s of driving; everything after
+      ran beyond-map (stock hunter: 864 holds + garbage commits that
+      made heading WORSE than odom).
+v8 SHIPPED CHANGE (one bit): NOVELTY-GATED FOLDING — open a new
+segment only when the tracker's own nearest-anchor scan flags the
+prediction > 0.8 m from every anchor (map budget buys AREA). Spot
+no-regression: crisp 15.31->15.38, self-map ATE p90 4.48->2.37 (only
+21/64 segs spent). NSEG=128 measured better still (10.88) — banked as
+the next rung (segment-index width surgery through top_solo).
+RTL: hw/ecp5/rtl/solo_tracker2.v (v7 + `novel` output, tracking
+semantics BIT-IDENTICAL — gated verbatim on the untouched l1/lr lean
+fixtures) + top_solo2.v (K_FOLDQ novelty gate) + top_solo_ecp5_v2.v
+(49.1 MHz placed on the 25 MHz /2 domain). Golden hw/ecp5/host/
+solo2.py; gates solo2_gates.py (step parity + novelty top incl.
+reset-map arm).
+
+## 2026-07-16 — VISION OBJECT MAP on the REAL hunter capture (#46
+QBE domain-gap baseline): desc bits temporally solid; class queries
+mark; whatis over-merge quantified; real classes await the bottleneck
+artifact
+
+scratch_vision_hunter.py, capture_1784226283 (2810 kf, cam bits all
+kf): ingest 2810 kf vectors / 12 appearance clusters in 25 s. QBE on
+real platform imagery: self-hit 20/20, +-2 kf neighbor <= 7/32 bits
+20/20 — the exported head's bits are temporally coherent on the D455
+at 10 Hz (the #46 answer: no domain collapse). Class-chip queries
+produce marks at z 4.8-9.6 (above the 4-sigma gate) for all 12
+clusters, but WHATIS reverse readout agrees with the queried class at
+only 10/70 marks — the appearance clusters over-merge real imagery
+(16k-79k obs/cluster; local readouts are mixtures). HAM_T sweep filed
+(scratch_vision_ham). Verdict: the queryable-map machinery is healthy
+end-to-end on real data; SEMANTIC crispness is gated on the GPU
+agent's bottleneck artifact (msg round 7 P0), not on the map algebra.

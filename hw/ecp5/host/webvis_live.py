@@ -126,6 +126,8 @@ class LiveDemo(webvis.Demo):
         self.pts, self.trail_py, self.trail_gt = [], [], []
         self.chip_segs = {}
         self.chip_img = None
+        self.walls = None      # STREAM rolling slots: no wall lane;
+                               # SoloDemo swaps in a matcher-band one
         self.ms_slam = self.ms_fpga = 0.0
         self.overruns = 0
         self._camq_live = []             # (t_us, jpeg) pending frames
@@ -252,6 +254,9 @@ class SoloDemo(LiveDemo):
             self._chip.reset_map()
             self._chip.set_pose(0, 0, 0)
             self.pose_src = "CHIP solo tracker"
+            # walls from the CHIP's own dumped segments (matcher band,
+            # liveness+scales planes ride the dump)
+            self.walls = webvis.WallLane("matcher")
 
     def pose_for(self, k, r, gtp):
         if self.data != "live" or self._chip is None:
@@ -268,6 +273,13 @@ class SoloDemo(LiveDemo):
             if segs:
                 self.chip_segs = {i: (s[0], s[1])
                                   for i, s in enumerate(segs)}
+                if self.walls is not None:  # matcher-band wall lane
+                    try:
+                        self.walls.set_segs(webvis.MD.segs_from_dump(segs))
+                    except Exception as ex:
+                        print(f"[webvis] wall lane off ({ex})",
+                              flush=True)
+                        self.walls = None
         return np.array([x, y, yaw])
 
 

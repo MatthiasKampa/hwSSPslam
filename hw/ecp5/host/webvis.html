@@ -38,6 +38,7 @@
     <button id="lrbtn" onclick="toggleLR()" style="display:none;background:#274427">&#9654; recorded</button>
     <button onclick="fetch('/reset',{method:'POST'})">reset map</button>
     <button id="cmtoggle" onclick="showChip=!showChip;draw()">chip-map: on</button>
+    <button id="wtoggle" onclick="showWalls=!showWalls;draw()">walls: on</button>
   </div>
   <div class="grp">FPGA (top_stream_enc)</div>
   <table>
@@ -71,6 +72,7 @@
     <span><span class="dot" style="background:#4c8dff"></span>estimate trail</span>
     <span><span class="dot" style="background:#5dd39e"></span>withheld ref (display only)</span>
     <span><span class="dot" style="background:#c77dff"></span>chip-map readout (decoded from on-chip codes)</span>
+    <span><span class="dot" style="background:#ff8c42"></span>reconstructed walls (CLEAN pursuit on the chip's 2b segments)</span>
     <span><span class="dot" style="background:#ffd166"></span>QBE match strength</span>
   </div>
   <div style="margin-top:10px;color:#7f93ad;font-size:11px">
@@ -87,6 +89,7 @@
 const cv = document.getElementById("cv"), cx = cv.getContext("2d");
 let pts = [], tp = [], tg = [], st = {}, bb = null;
 let chip = null, showChip = true, qbe = null, camKf = null;
+let wallsMsg = null, showWalls = true;
 let obj = null, objCanvas = null, selCls = null;
 function fit() { cv.width = cv.clientWidth * devicePixelRatio; cv.height = cv.clientHeight * devicePixelRatio; }
 addEventListener("resize", () => { fit(); draw(); });
@@ -148,6 +151,16 @@ function draw() {
   }
   cx.fillStyle = "#39445a";
   for (const p of pts) { const q = T(p); cx.fillRect(q[0], q[1], 1.6, 1.6); }
+  if (showWalls && wallsMsg) {
+    cx.lineCap = "round";
+    for (const [x0,y0,x1,y1,a] of wallsMsg.lines) {
+      const q0 = T([x0,y0]), q1 = T([x1,y1]);
+      cx.strokeStyle = `rgba(255,140,66,${Math.min(0.35+a, 0.95)})`;
+      cx.lineWidth = 2.6;
+      cx.beginPath(); cx.moveTo(q0[0],q0[1]); cx.lineTo(q1[0],q1[1]); cx.stroke();
+    }
+    cx.lineCap = "butt";
+  }
   cx.strokeStyle = "#5dd39e"; cx.setLineDash([4,4]); cx.lineWidth = 1.2;
   cx.beginPath(); let pen = false;
   for (const g of tg) { const q = T(g); if (!g[2]) { pen = false; continue; }
@@ -188,6 +201,8 @@ function panel() {
   }
   $("fill").style.width = `${100*(st.k+1)/st.n}%`;
   $("cmtoggle").textContent = `chip-map: ${showChip?"on":"off"}`;
+  $("wtoggle").textContent = `walls: ${showWalls?"on":"off"}` +
+    (wallsMsg ? ` (${wallsMsg.lines.length} · ${wallsMsg.band})` : "");
   $("lrbtn").innerHTML = st.data === "live" ?
     "&#9654; recorded" : "&#9654; back to LIVE";
   if ($("dsel").value !== st.data && dsets.includes(st.data))
@@ -244,7 +259,7 @@ cv.onclick = e => {
 const es = new EventSource("/events");
 es.onmessage = ev => {
   const d = JSON.parse(ev.data);
-  if (d.reset) { pts=[]; tp=[]; tg=[]; bb=null; chip=null; chipCanvas=null; qbe=null; camKf=null;
+  if (d.reset) { pts=[]; tp=[]; tg=[]; bb=null; chip=null; chipCanvas=null; qbe=null; camKf=null; wallsMsg=null;
     obj=null; objCanvas=null; selCls=null; $("chips").innerHTML="";
     $("camimg").src=""; $("qmark").style.display="none"; $("qbetop").textContent="";
     if (d.data) $("dsel").value = d.data; draw(); return; }
@@ -261,7 +276,7 @@ es.onmessage = ev => {
   if (d.whatis) {
     $("qbetop").textContent = `map readout: class C${d.whatis.cls} (hamming ${d.whatis.ham}/32, ${d.whatis.nk} kf, conf ${d.whatis.conf})`;
     qc(d.whatis.cls); return; }
-  if (d.init) { pts=d.pts; tp=d.trail_py; tg=d.trail_gt;
+  if (d.init) { pts=d.pts; tp=d.trail_py; tg=d.trail_gt; if (d.walls) wallsMsg=d.walls;
     if (d.datasets) { dsets = d.datasets;
       $("dsel").innerHTML = dsets.map(x =>
         `<option value="${x}">${dlabel(x)}</option>`).join("");
@@ -269,6 +284,7 @@ es.onmessage = ev => {
     if (d.data) $("dsel").value=d.data;
     pts.forEach(grow); tp.forEach(grow); draw(); return; }
   if (d.chipmap) { chip = d.chipmap; bakeChip(); draw(); return; }
+  if (d.walls) { wallsMsg = d.walls; draw(); return; }
   if (d.cam_kf !== undefined) { camKf = d.cam_kf;
     if (d.jpg) $("camimg").src = "data:image/jpeg;base64," + d.jpg; return; }
   if (d.qbe) { qbe = d.qbe;
