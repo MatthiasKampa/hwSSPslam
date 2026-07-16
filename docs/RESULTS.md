@@ -10730,3 +10730,42 @@ GATE RESULT (rebuild with t0.72/rot9/cap0.30): spot 0.038 med /
 5.5 vs 5.4 deg/kf; run2 identical 2.185/2.504. Holds across all three
 logs — ADOPTED for the offline/chip-tracker config; est_demo.npz
 shipped from it.
+
+## 2026-07-16 — ODOM-RPE CROSS-CHECK on the first 10 Hz odom corpus (capture_1784225621: 2156 kf / 216 s / 59x24 m): tracker >> raw odom; configs indistinguishable AT RATE; extrinsic hypothesis refuted
+
+First corpus with an independent reference (Hunter wheel odom, 50 Hz,
+in every datagram; base bringup now in bringup_all.sh — post-reboot it
+was down: can0 DOWN + driver not launched + base unpowered, so the
+datagram pose was FROZEN; also banked: D455 dead after reboot =
+/dev/video* perms (user not in `video` group; fixed durably) — the USB
+authorized-toggle recovery attempt knocked the D455 off the bus and
+needed a physical replug: DO NOT use authorized 0/1 on RealSense. USB3
+cable upgrade -> 5 Gbps, 640x360@60 fps real (USB2 had silently capped
+at 15).)
+
+RPE harness (scratch_hunter_rpe.py; windowed relative-pose vs odom —
+odom honest short-horizon only): ALL FOUR configs (adopted t.72/rot9/
+cap.30, old t.72/rot18/cap.60, t.48/rot9/cap.30, t1.0/rot9/cap.60)
+produce BIT-IDENTICAL trajectories (audited: max diff 0.0 over 600 kf)
+— at 10 Hz the per-kf motion (~5 cm/1 deg) is inside every window's
+common search, so the window only matters in the STALL regime, which
+is what retune 2 measured at 4 Hz. Retune-2 verdict stands as stall
+insurance; no at-rate counterevidence.
+
+Tracker quality at rate: pair-cos med 0.971 / p10 0.902 vs RAW WHEEL
+ODOM 0.842 / 0.443 — the lidar tracker explains the scans far better
+than odometry. vs odom over 1 s windows: translation MAGNITUDE agrees
+med 7.3 cm; the vector difference (19.7 cm med) is heading-driven —
+tracker turns 8.8 deg/s med where odom reports 6.7 (Ackermann yaw
+underreport in turns). EXTRINSIC HYPOTHESIS REFUTED: fitted lidar->
+base yaw 1.2 deg with 22 deg circular spread, correction buys 0.2 cm
+-> no fixed mount rotation; the disagreement is time-varying odom
+heading noise (as predicted: odom = magnitude sanity + gross-
+divergence alarm, not a yaw reference).
+
+Cam lane during the drive was DEAD by my own reset-race bug (worker
+check-then-pop vs _load queue swap -> escaped IndexError killed the
+thread; cam_kf 0 all drive). Fixed (atomic ref + recover-and-log
+loop), deployed, and the same race FIRED AGAIN on the next reset and
+was absorbed ("cam worker error (recovered)") with cam_kf pacing 1:1
+— field-proven. Second drive (with cam bits) captured next.
