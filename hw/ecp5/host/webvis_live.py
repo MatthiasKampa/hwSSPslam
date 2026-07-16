@@ -72,7 +72,7 @@ class LiveCam:
         with self.lock:
             self.bits[k] = b
             self.jpeg[k] = jb
-            if len(self.jpeg) > 40:
+            if len(self.jpeg) > 300:
                 self.jpeg.pop(next(iter(self.jpeg)))
         return b
 

@@ -943,6 +943,38 @@ def make_handler(demo):
                 self.send_header("Content-Type", "text/html")
                 self.end_headers()
                 self.wfile.write(html)
+            elif self.path == "/capture":
+                # dump the session so far (scans/poses/cam bits+jpegs)
+                # for offline retuning. GT-free; est poses only.
+                import time as _t
+                out = str(Path.home() / f"capture_{int(_t.time())}.npz")
+                with demo.lock:
+                    n = demo.k
+                    mm = np.stack([np.where(
+                        np.isfinite(np.asarray(demo.keys[i][0], float)),
+                        np.clip(np.asarray(demo.keys[i][0], float) * 1e3,
+                                0, 65535), 0).astype(np.uint16)
+                        for i in range(n)]) if n else np.zeros((0, 1024),
+                                                               np.uint16)
+                    ts = np.array([demo.keys[i][2] for i in range(n)])
+                d = dict(mm=mm, ts=ts, est=demo.est[:n].copy())
+                if demo.cam:
+                    with demo.cam.lock:
+                        ks = sorted(demo.cam.bits)
+                        d["cam_kf"] = np.array(ks, np.int64)
+                        d["cam_bits"] = np.stack(
+                            [demo.cam.bits[i] for i in ks]) if ks else \
+                            np.zeros((0, 15, 20, 32), bool)
+                        d["jpeg_kf"] = np.array(
+                            sorted(demo.cam.jpeg), np.int64)
+                        d["jpegs"] = np.array(
+                            [demo.cam.jpeg[i] for i in
+                             sorted(demo.cam.jpeg)], object)
+                np.savez_compressed(out, **{k: v for k, v in d.items()
+                                            if not isinstance(v, dict)},
+                                    allow_pickle=True)
+                self._json(dict(ok=True, path=out, kf=int(n),
+                                cam=len(d.get("cam_kf", []))))
             elif self.path == "/status":
                 self._json(dict(
                     k=demo.k, n=demo.n, data=demo.data, done=demo.done,
