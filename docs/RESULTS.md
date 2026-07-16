@@ -11263,3 +11263,26 @@ is NOT established at 0.157 top-1; "map-ready for distinct-object QBE" is
 plausible (their result) but untested here. Single-seed; pixel(u,v) for 3D.
 Anti-oracle: GT builds train prototypes + scores only; grouping is NON-oracle
 (predicted); no GT in the bound entities this time.
+
+## 2026-07-16 — cross-image QBE-by-EXAMPLE (the deployable path) on the real ADE encoder: genuine ~2.1x-chance semantic signal, modest absolute precision
+
+The deployable capability (webvis does exactly this: desc bits -> Hamming match
+against stored grids). Query = a specific predicted-region's OWN code; retrieve
+similar-code regions ACROSS other images (cosine = inverse Hamming); score
+precision@k = fraction sharing the query's TRUE class. 4007 predicted-region
+entities, 300 val images, 116 true classes:
+  precision@1  0.149   (chance 0.068, lift 2.18x)
+  precision@5  0.146   (chance 0.068, lift 2.14x)
+  precision@10 0.142   (chance 0.068, lift 2.08x)
+QBE carries a GENUINE cross-image semantic signal — robustly ~2.1x above the
+class-prior chance across @1/@5/@10, and BETTER than the class-PROTOTYPE query
+(which was ~chance, top-1 0.157). But ABSOLUTE precision is MODEST (0.15): the
+150-class code retrieves same-class regions at 2x chance, not high-precision.
+REFINES "distinct-object QBE works (deploy 0.94-1.00)": that holds for FEW
+well-separated TARGET objects; GENERAL 150-class cross-image QBE is only 2x-chance
+(0.15) — quality scales with target DISTINCTNESS, not a blanket win. Honest
+deployable claim: QBE gives a real "highlight things like this" lift (2x) usable
+for salient/distinct targets, NOT reliable fine-grained 150-class labeling — the
+encoder's fuzzy code (AUC 0.66) again, not the map. Single-seed; predicted
+(non-oracle) grouping; GT for scoring only. Consistent with the whole session:
+map faithful, front-end (fine-class code) is the wall.
