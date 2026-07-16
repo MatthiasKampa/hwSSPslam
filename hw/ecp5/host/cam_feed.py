@@ -41,6 +41,8 @@ def test_mode(dst, fps):
             x = int(130 + 100 * np.cos(a))
             y = int(90 + 60 * np.sin(a))
             img[y:y + 60, x:x + 60] = t
+        cv2.putText(img, "TEST PATTERN (no camera attached)",
+                    (12, 228), cv2.FONT_HERSHEY_SIMPLEX, 0.45, 255, 1)
         ok, jb = cv2.imencode(".jpg", img,
                               [cv2.IMWRITE_JPEG_QUALITY, 80])
         send(sock, dst, jb.tobytes())
@@ -108,7 +110,8 @@ def ros_mode(dst, topic, fps):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dst", default="127.0.0.1:8791")
-    ap.add_argument("--topic", default="/oak/rgb/image_raw")
+    ap.add_argument("--topic",
+                    default="/camera/camera/color/image_raw")
     ap.add_argument("--fps", type=float, default=2.0)
     ap.add_argument("--test", action="store_true")
     a = ap.parse_args()
