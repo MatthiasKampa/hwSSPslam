@@ -10053,3 +10053,58 @@ The naive full-density surfaces-tier (64 cells, ~628 B, floor 0.878 / wall
 0.955 / QBE 0.986) STANDS as the ship recipe; there is no free byte win here.
 Lesson (again): never score a subsampled map on the subsampled set — evaluate
 on a fixed full probe. Banked pre-push, caught pre-push; nothing shipped.
+
+## 2026-07-16 — semantic map ROLE-PHASE quantization: roles quantize to 3-bit loss-free, 1-bit sign still works (real-only role arithmetic)
+
+Prior quant work coarsened the STORED map (4 bits/cell). This coarsens the ROLE
+codes themselves — the bind/query arithmetic backbone — since on FPGA role
+phases come from a small LUT/CORDIC, not full-precision. Chair-recall gate
+(D=360, map full-precision, roles quantized identically in bind AND unbind =
+the correct deploy model), 24 scenes x 3 role-seeds:
+  roles full        0.956 +/- 0.014
+  roles 3-bit/8ph   0.949 +/- 0.004    (loss-free)
+  roles 2-bit/4ph   0.934 +/- 0.036    (-0.02)
+  roles 1-bit/sign  0.888 +/- 0.014    (-0.07, but WORKS)
+Monotone, stable. 3-bit (8-phase) role LUT is loss-free; 1-bit SIGN roles
+(roles in {+1,-1}, real) cost ~0.07 recall but make the role arithmetic
+REAL-only — the bind roles[bits].sum ⊙ exp(iW·x) needs no complex multiply for
+the role factor, halving that multiplier cost on the FPGA. Combined with the
+4-bit/cell stored map, the entire semantic map is a low-precision fixed-point
+object end to end: 3-bit role LUT + 4-bit map storage, no recall loss. No leak
+(bind/unbind self-consistent; synthetic GT scores only). Rule-4 audit dispatched.
+
+## 2026-07-16 — CORRECTION to the role-phase quant entry above (rule-4 audit + end-to-end run)
+
+The banked role-phase numbers reproduce EXACTLY (audit confirmed: full 0.956 /
+8ph 0.949 / 4ph 0.934 / 2ph 0.888; 1-bit is genuinely real {+-1}; a random-code
+query scores 0.000 so the metric is honest). But three framings were over-reads:
+
+1. STRUCTURAL CAVEAT (the important one). Bind and unbind use the SAME quantized
+   roles, so the matched-code readout carries the factor qr·conj(qr)=|qr|^2=1
+   for ANY magnitude-preserving phase quantization — the signal PEAK is
+   phase-quant-INVARIANT by identity (verified: peak density barely moves full
+   vs 1-bit). Only the CROSS-TALK floor rises (raising the MAD detect threshold,
+   burying weak peaks). So "roles quantize gracefully" is a statement about
+   cross-talk robustness on SPARSE scenes, NOT about role signal-path precision
+   — the signal path cannot be stressed by this test by construction.
+
+2. "3-bit role + 4-bit map, no loss end to end" was NEVER RUN — it multiplied
+   two single-factor results. Now run (roles AND map quantized together, 24x3):
+     roles full  + map 4-bit : 0.901
+     roles 3-bit + map 4-bit : 0.889
+     roles 2-bit + map 4-bit : 0.881
+     roles 1-bit + map 4-bit : 0.880
+   Combined 3-bit-role+4-bit-map = 0.889, ~0.07 BELOW full 0.956 — NOT loss-free.
+   The map quant dominates the cost; once the map is 4-bit, role precision is
+   irrelevant (1/2/3-bit all 0.880-0.889, within noise). Corrected deploy read:
+   at the shipped 4-bit map, roles can drop to 1-bit sign essentially for free.
+
+3. "real-only (1-bit) is the FPGA enabler" over-narrows: 2-bit {+-1,+-i}
+   (Gaussian-integer) is ALSO multiplier-free (sign flip + real/imag swap, no
+   CORDIC) and scores HIGHER in isolation (0.934 vs 0.888). 1-bit buys no extra
+   hardware saving over {+-1,+-i}. (At 4-bit map they tie, so it is moot there.)
+
+Also: the +-0.004/0.014 bars are std of 3 role-seed MEANS; per-scene recall is
+bimodal (many 1-chair scenes), true uncertainty is wider. Net: role phases DO
+tolerate coarse LUTs, but the honest end-to-end low-precision map costs ~0.07
+recall (0.956->0.889), driven by MAP quant, not roles. Nothing pushed.
