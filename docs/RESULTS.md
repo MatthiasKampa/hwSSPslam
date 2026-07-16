@@ -10933,3 +10933,27 @@ ADDENDUM: K_TRY=3 offline arms — NO rescue (hunter500 1.95 vs 1.99 m
 = noise; full tour 36.5 vs 17.8 m worse-or-noise at 3x step cost).
 The envelope problem is the gate-vs-unmapped-territory policy, not
 anchor selection. Filed with the post-demo tuning list.
+
+## 2026-07-16 — AUTONOMY ON SILICON + websim SOLO recipe (demo-eve close)
+
+ECP5 SOLO deploy CLOSED THE LOOP ON THE ROBOT: 220/220 full-tour sim
+regate bit-exact (EBR shim); openFPGALoader built from source on the
+robot (apt lacks it; tunnel-shipped); top_solo_ecp5.bit FLASHED to
+QSPI; SILICON PARITY 30/30 pose frames bit-exact vs solo.py on REAL
+capture keyframes (odom-pred arm); webvis SSP_SOLO=1 live: pose_src =
+CHIP solo tracker, 8.2 Hz keyframes, cam 1:1, 0 errors. Ops lessons
+banked: chip UART parser has no timeout — a host killed mid-keyframe
+wedges it (SoloChip.ping now zero-flushes + retries); flash flip
+scripts (~/flash_solo.sh / ~/flash_stream.sh) stage the one-command
+fallback to the proven STREAM demo. Rate note: 1 Mbaud keyframe
+roundtrip caps ~8 Hz — PLL/2 Mbaud or the user's half-ring decimation
+are the levers if 10 Hz matters later.
+
+WEBSIM ("add the recipe... both data sets... option for the
+synthetic"): SoloPipe (solo.py golden via FakeFab = the silicon-parity
+model, board-less) is now a websim pipeline with a recipe selector
+(matcher/solo) valid on ALL envs incl. synthetic + WASD driving;
+HunterFeed (capture3, recorded odom = deploy-config pred) joins spot
+as the second real dataset. python SLAM stays as the comparison lane.
+Selftest (both datasets, headless): PASS — hunter 60 kf: 12 segs,
+tracking, fx-vs-ghost med 1.5 cm early-window.
