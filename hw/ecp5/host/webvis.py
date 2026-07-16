@@ -139,6 +139,139 @@ def load_bundle(name):
     return DE.make(env=name, laps=1, seed=11)
 
 
+# ------------------------------------------------------- camera VSA obj map
+class CamMap:
+    """The camera-side VSA OBJECT MAP (laptop-side, per the decode-on-
+    laptop directive). Cell codes (the exported head's desc bits — honest
+    post-demotion classes are APPEARANCE CLUSTERS; real class bits slot in
+    when the bottleneck artifact lands) are BOUND at world positions
+    lifted from the LIDAR: cell bearing (D455 HFOV, nominal yaw-aligned
+    extrinsics — demo-grade, stated) -> ring-33 range at that bearing ->
+    world point. Per keyframe ONE bounded D=240 vector holds its
+    object-aggregated bindings (capacity law: cluster cells -> centroids,
+    3-6 bindings/kf). Selecting a class UNBINDS its code from every kf
+    vector and paints the response density on the map."""
+
+    HFOV = np.deg2rad(69.0)          # D455 RGB horizontal FOV (nominal)
+    HAM_T = 8                        # cluster leader threshold (of 32)
+    MAX_C = 12
+
+    def __init__(self):
+        from sspax import headio as HIO
+        self.keys = HIO._head_keys(32, len(W_MAIN))   # (32, D) spatter
+        self.cents = []              # cluster centroid bit-freqs (float)
+        self.counts = []
+        self.example = []            # (kf, cy, cx) per cluster
+        self.vecs = {}               # kf -> (anchor_pose, D complex)
+        self.lock = threading.Lock()
+
+    def _amp(self, bits):
+        return ((1.0 - 2.0 * bits.astype(np.float64)) @ self.keys
+                / np.sqrt(32.0))
+
+    def _cluster(self, b):
+        """leader clustering on hamming; -> cluster id."""
+        for i, c in enumerate(self.cents):
+            if np.abs((c > 0.5).astype(int)
+                      - b.astype(int)).sum() <= self.HAM_T:
+                n = self.counts[i]
+                self.cents[i] = (c * n + b) / (n + 1)
+                self.counts[i] += 1
+                return i
+        if len(self.cents) < self.MAX_C:
+            self.cents.append(b.astype(np.float64))
+            self.counts.append(1)
+            self.example.append(None)
+            return len(self.cents) - 1
+        d = [np.abs((c > 0.5).astype(int) - b.astype(int)).sum()
+             for c in self.cents]
+        i = int(np.argmin(d))
+        self.counts[i] += 1
+        return i
+
+    def ingest(self, k, bits, scan, pose):
+        """bits (15,20,32); bind this keyframe's object aggregates."""
+        beam_n = len(scan)
+        cells = []                   # (cid, x, y, cy, cx)
+        for cy in range(3, 13):      # content rows (skip ceiling/floor)
+            for cx in range(20):
+                brg = self.HFOV / 2 - (cx + 0.5) / 20.0 * self.HFOV
+                bi = int(round((brg + np.pi) / (2 * np.pi) * beam_n)) \
+                    % beam_n
+                r = np.nanmedian(np.where(
+                    np.isfinite(scan[max(0, bi - 2):bi + 3]),
+                    scan[max(0, bi - 2):bi + 3], np.nan))
+                if not np.isfinite(r) or r < 0.3 or r > 12.0:
+                    continue
+                a = pose[2] + brg
+                cells.append((self._cluster(bits[cy, cx]),
+                              pose[0] + r * np.cos(a),
+                              pose[1] + r * np.sin(a), cy, cx))
+        if not cells:
+            return
+        v = np.zeros(len(W_MAIN), complex)
+        with self.lock:
+            byc = {}
+            for cid, x, y, cy, cx in cells:
+                byc.setdefault(cid, []).append((x, y))
+                if self.example[cid] is None:
+                    self.example[cid] = (int(k), cy, cx)
+            for cid, ps in byc.items():
+                p = np.mean(ps, axis=0)
+                code = (self.cents[cid] > 0.5)
+                v += self._amp(code) * np.exp(
+                    1j * ((p - pose[:2]) @ W_MAIN.T))
+            self.vecs[int(k)] = (pose.copy(), v)
+
+    def classes(self):
+        with self.lock:
+            return [dict(id=i, n=int(self.counts[i]),
+                         ex=self.example[i])
+                    for i in range(len(self.cents)) if self.counts[i] >= 8]
+
+    def query(self, cid, grid_lo, grid_hi, ngrid=96):
+        """UNBIND class cid from every kf vector -> density image +
+        peak markers (world frame)."""
+        with self.lock:
+            if cid >= len(self.cents):
+                return None
+            code = (self.cents[cid] > 0.5)
+            vecs = list(self.vecs.items())
+        qa = np.conj(self._amp(code))
+        gx = np.linspace(grid_lo[0], grid_hi[0], ngrid)
+        gy = np.linspace(grid_lo[1], grid_hi[1], ngrid)
+        XX, YY = np.meshgrid(gx, gy)
+        P = np.stack([XX.ravel(), YY.ravel()], 1)
+        img = np.zeros(ngrid * ngrid, np.float64)
+        for k, (pose, v) in vecs:
+            d = P - pose[:2]
+            m = (np.abs(d) < 8.0).all(1)
+            if not m.any():
+                continue
+            unb = qa * v
+            sc = (np.exp(-1j * (d[m] @ W_MAIN.T)) @ unb).real / len(W_MAIN)
+            np.maximum.at(img, np.flatnonzero(m), sc)
+        img = img.reshape(ngrid, ngrid)
+        mx = img.max()
+        if mx <= 0:
+            return None
+        marks = []
+        im = np.clip(img / mx, 0, 1)
+        th = 0.72
+        cand = np.argwhere(im > th)
+        for yy, xx in cand[np.argsort(-im[im > th])][:24]:
+            wx, wy = gx[xx], gy[yy]
+            if all((wx - a) ** 2 + (wy - b) ** 2 > 0.36
+                   for a, b, _ in marks):
+                marks.append((float(wx), float(wy),
+                              float(im[yy, xx])))
+        return dict(x0=float(grid_lo[0]), y0=float(grid_lo[1]),
+                    x1=float(grid_hi[0]), y1=float(grid_hi[1]),
+                    png=base64.b64encode(
+                        (im * 255).astype(np.uint8).tobytes()).decode(),
+                    n=ngrid, marks=marks[:12], cls=int(cid))
+
+
 # --------------------------------------------------------------- camera/QBE
 class CamLane:
     """Aligned D455 frames -> exported vision head desc bits (laptop).
@@ -216,12 +349,19 @@ class Demo:
         self.port = port
         self.use_fpga = use_fpga
         self.want_cam = cam
-        self.fpga = Fpga(port) if use_fpga else None
+        self.fpga = None
+        if use_fpga:
+            try:
+                self.fpga = Fpga(port)
+            except Exception as e:
+                print(f"[webvis] FPGA lane OFF (board unplugged?): {e}",
+                      flush=True)
         self.clients = []
         self.lock = threading.Lock()
         self._req_reset = False
         self._req_data = None
         self._qbe = None                  # latest {kf: score}
+        self._thumbs = {}
         self.camq = queue.Queue(maxsize=8)
         self._load(data)
         threading.Thread(target=self._cam_worker, daemon=True).start()
@@ -235,9 +375,11 @@ class Demo:
         self.gt_ok = np.asarray(self.b.get("gt_ok", np.ones(self.n, bool)))
         self.slam = make_slam()
         self.cam = None
+        self.cammap = None
         if data == "spot" and self.want_cam:
             try:
                 self.cam = CamLane(np.asarray(self.b["kts"]))
+                self.cammap = CamMap()
             except Exception as e:
                 print(f"[webvis] cam lane off: {e}", flush=True)
         self.est = np.zeros((self.n, 3))
@@ -287,8 +429,10 @@ class Demo:
                         (img * 255).astype(np.uint8).tobytes()).decode(),
                     n=ngrid)
 
-    # ---- camera worker (desc bits off the hot loop) --------------------
+    # ---- camera worker (desc bits + VSA obj-map bind, off the hot loop)
     def _cam_worker(self):
+        from PIL import Image
+        import io as _io
         while True:
             k = self.camq.get()
             if self.cam is None:
@@ -296,6 +440,37 @@ class Demo:
             b = self.cam.compute(k)
             if b is None:
                 continue
+            if self.cammap is not None:
+                self.cammap.ingest(k, b,
+                                   np.asarray(self.keys[k][0], float),
+                                   self.est[k])
+                # thumbnails for freshly-exampled clusters
+                with self.cam.lock:
+                    jb = self.cam.jpeg.get(k)
+                cls = self.cammap.classes()
+                if jb:
+                    im = None
+                    for c in cls:
+                        ex = c["ex"]
+                        if (ex and ex[0] == k
+                                and c["id"] not in self._thumbs):
+                            if im is None:
+                                im = Image.open(_io.BytesIO(jb)) \
+                                    .convert("L").resize((320, 240))
+                            cy, cx = ex[1], ex[2]
+                            crop = im.crop((max(0, cx * 16 - 8),
+                                            max(0, cy * 16 - 8),
+                                            min(320, cx * 16 + 24),
+                                            min(240, cy * 16 + 24))) \
+                                .resize((40, 40))
+                            buf = _io.BytesIO()
+                            crop.save(buf, "JPEG", quality=70)
+                            self._thumbs[c["id"]] = base64.b64encode(
+                                buf.getvalue()).decode()
+                self.broadcast(dict(classes=[
+                    dict(id=c["id"], n=c["n"],
+                         thumb=self._thumbs.get(c["id"]))
+                    for c in cls]))
             with self.cam.lock:
                 jb = self.cam.jpeg.get(k)
             self.broadcast(dict(cam_kf=int(k),
@@ -456,6 +631,19 @@ def make_handler(demo):
                     demo._req_data = d
                     demo.done = False
                 self._json(dict(ok=True, data=d))
+            elif self.path.startswith("/query_class"):
+                ln = int(self.headers.get("Content-Length", 0))
+                q = json.loads(self.rfile.read(ln) or b"{}")
+                if demo.cammap and demo.trail_py:
+                    tr = np.array(demo.trail_py)
+                    res = demo.cammap.query(int(q["id"]),
+                                            tr.min(0) - 3.0,
+                                            tr.max(0) + 3.0)
+                    if res:
+                        demo.broadcast(dict(objmap=res))
+                    self._json(dict(ok=res is not None))
+                else:
+                    self._json(dict(ok=False), 400)
             elif self.path.startswith("/query"):
                 ln = int(self.headers.get("Content-Length", 0))
                 q = json.loads(self.rfile.read(ln) or b"{}")
@@ -531,24 +719,42 @@ def serve(port=8790, use_fpga=True):
     srv.serve_forever()
 
 
-def selftest(n=40):
-    demo = Demo(use_fpga=True)
+def selftest(n=40, use_fpga=True):
+    demo = Demo(use_fpga=use_fpga)
     demo.run(realtime=False, stop_after=n)
-    f = demo.fpga
     errs = [np.linalg.norm(demo.est[k][:2]
                            - np.asarray(demo.keys[k][1])[:2])
             for k in range(n) if demo.gt_ok[k]]
-    time.sleep(2.0)                        # let the cam worker drain
+    time.sleep(3.0)                        # let the cam worker drain
     ncam = len(demo.cam.bits) if demo.cam else 0
-    print(f"selftest: {n} kf | digests {f.dig_ok}/{f.total} | on-chip "
-          f"vectors {f.vec_ok}/{f.total} bit-exact | chip map "
-          f"{len(demo.chip_segs)} segs fetched | cam desc grids {ncam} | "
-          f"med err vs ref {np.median(errs):.3f} m | "
-          f"mem {demo.slam.memory_kb():.1f} KB")
-    assert f.dig_ok == f.vec_ok == f.total == n
-    assert demo.chip_segs
-    print("WEBVIS v2 SELFTEST PASS: every scan digest-verified AND "
-          "on-chip-encoded bit-exact; chip map fetched + decoded")
+    line = f"selftest: {n} kf | "
+    if demo.fpga:
+        f = demo.fpga
+        line += (f"digests {f.dig_ok}/{f.total} | on-chip vectors "
+                 f"{f.vec_ok}/{f.total} bit-exact | chip map "
+                 f"{len(demo.chip_segs)} segs | ")
+    else:
+        line += "FPGA lane off | "
+    line += (f"cam grids {ncam} | med err {np.median(errs):.3f} m | "
+             f"mem {demo.slam.memory_kb():.1f} KB")
+    print(line)
+    if demo.cammap:
+        cls = demo.cammap.classes()
+        nb = len(demo.cammap.vecs)
+        tr = np.array(demo.trail_py)
+        res = demo.cammap.query(cls[0]["id"], tr.min(0) - 3,
+                                tr.max(0) + 3) if cls else None
+        print(f"  cam VSA map: {nb} kf vectors | {len(cls)} appearance "
+              f"classes (n>=8) | class-{cls[0]['id'] if cls else '-'} "
+              f"unbind -> {len(res['marks']) if res else 0} object "
+              f"marks (peak {max(m[2] for m in res['marks']):.2f})"
+              if res else "  cam VSA map: query returned nothing")
+        assert cls and res and res["marks"], "cam obj-map query failed"
+    if demo.fpga:
+        assert demo.fpga.dig_ok == demo.fpga.vec_ok == demo.fpga.total == n
+        assert demo.chip_segs
+    print("WEBVIS SELFTEST PASS "
+          f"({'full' if demo.fpga else 'laptop-lanes'} mode)")
 
 
 if __name__ == "__main__":

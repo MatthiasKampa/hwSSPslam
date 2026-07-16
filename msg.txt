@@ -59,9 +59,59 @@ P3 (idle option): same-class detector tuning — the matched-threshold /
   small semantic.detect() variant + gate (closes the detector-artifact
   thread constructively).
 
-== 4. CONSTRAINTS (standing) ==================================================
+== 5. ROUND 6b — ARCH + DATASET suggestions (user-requested) =================
+
+The demo now has the full class-query path live (webvis: cam VSA map,
+cell codes bound at lidar-depth-lifted positions, class chips -> UNBIND
+on the laptop -> objects painted on the map). Today it runs on desc-bit
+APPEARANCE CLUSTERS; your P1 bottleneck artifact drops in as real class
+names with zero glue (same headio spatter keys, same W band). So P1's
+value just went up — and here is the requested input for it:
+
+ARCHITECTURE (each grounded in your own measured levers):
+  A1. Depthwise-separable RF stack: replace the dense 3x3 (your
+      precision-SENSITIVE param hog) with dw3x3(>=int4) + 1x1 mixes —
+      ~8x fewer RF params; REINVEST in two dw+pw blocks of depth. Your
+      depth lever was noise-limited at fixed budget; cheap RF may break
+      the tie. headio already supports dw — exports unchanged.
+  A2. Dilated context pyramid: dw3x3 at d=1,2,4 — RF growth at ~zero
+      param cost (your shallow arm proved RF is what hurts).
+  A3. Global scene-context branch: GAP -> FC(16) -> broadcast-add
+      BEFORE the bottleneck (~1-2k params). Scene prior lifts per-cell
+      classes; the single-linear-head constraint stays intact.
+  A4. Bit decorrelation: your audit measured effective entropy < 32
+      bits (DC component). Per-bit batch-mean->0 + soft decorrelation
+      penalty = more usable code bits at zero deploy cost. Gate on
+      effective entropy + balanced code AUC.
+  A5. Confidence head for free: per-cell FC-logit entropy ->
+      temperature-calibrated confidence -> deploy bit-commitment (the
+      reframed ship recipe's significance input).
+  Precision per your own Pareto: int4 default, RF layer >= int4, tail
+  may drop to int2/binary, narrow-ch8 for the tiny tier.
+
+DATASETS (limiter = 1449 labeled images; you measured the overfit):
+  D1. SUN RGB-D — 10,335 labeled indoor RGB-D frames, 37 classes,
+      SUPERSETS NYUv2, same Kinect-class domain. The drop-in 7x fix;
+      PRIMARY recommendation, do this first.
+  D2. Hypersim — ~77k photoreal synthetic indoor frames, perfect dense
+      labels+depth. PRETRAIN arm -> SUN/NYU finetune; attacks the
+      ceiling without label noise. (Big download; sample scenes.)
+  D3. Self-sup pretrain on OUR OWN platform imagery — the classroom +
+      school D455 JPEG shards are unlabeled, IN-DOMAIN, and already on
+      disk. Contrastive/luma-jitter trunk pretrain -> seg finetune:
+      simultaneously the QBE domain-adaptation lever. Zero download;
+      cheap; strategic. Run alongside D1.
+  D4. ScanNet v2 (2.5M frames/1513 scenes, 20-class) only if D1+D2
+      plateau — frames are video-correlated (sample per scene) and the
+      license needs an agreement form.
+  Gate discipline: keep NYUv2 held-out as THE fixed eval (never train
+  on its test split via SUN's overlap — SUN contains NYU images; dedup
+  by scene id before mixing).
+
+== 6. CONSTRAINTS (standing) ==================================================
 
 Unchanged: determinism; anti-oracle statements; negatives banked;
 budgets printed (name the quant level per your Pareto vocabulary now);
 no banking positives before audit; numpy-only deploy-box paths.
 Multi-seed for any claim finer than the int4/int2/narrow coarse story.
+NEW: dataset mixing requires a dedup statement (SUN supersets NYU).

@@ -10448,3 +10448,41 @@ is code/ledger-level). Verdicts:
   direction for gating, deploy-more-precise-than-trained). When the
   CNN moves on-chip, headio needs an activation-quant mode for
   bit-faithful golden parity — filed as the headio v2.1 item.
+
+## 2026-07-16 — WEBVIS v2.2: the camera VSA OBJECT MAP with class-select -> laptop UNBIND -> objects on the map (the full query loop, live)
+
+User-directed: "select class, unbind from the cam VSA vec, see objects
+on the map; unbinding on laptop; FPGA does SLAM + map integration and
+transfers the map vec, laptop decodes." Implemented as the laptop-side
+prototype of EXACTLY that decode path (the cam band moves on-chip when
+the camera hangs off the FPGA; the lidar band already runs the full
+chip path, gated bit-exact):
+
+- CamMap (webvis.py): per keyframe, the exported head's 32-bit cell
+  codes are ONLINE-CLUSTERED (leader clustering, hamming<=8, cap 12 —
+  honest post-demotion classes = APPEARANCE CLUSTERS; the bottleneck
+  artifact's real class bits drop in with zero glue) and BOUND at
+  world positions lifted from the LIDAR: cell bearing (D455 HFOV 69
+  deg, NOMINAL yaw-aligned extrinsics — demo-grade, labeled in-code)
+  -> ring-33 range at that bearing -> world point. Capacity law
+  respected: cells aggregate to per-cluster centroids, 3-6 bindings
+  per keyframe, ONE bounded D=240 vector per kf on W_MAIN (the
+  contract band; spatter keys = headio._head_keys — the SAME
+  conventions a chip-built cam band will use).
+- Class query: UI chips (count + example thumbnail per cluster) ->
+  POST /query_class -> UNBIND (conj-amplitude elementwise product) on
+  the laptop against every kf vector -> matched-filter density on the
+  world grid -> orange objects layer + peak markers on the map,
+  alongside the lidar map layers.
+- SELFTEST (laptop-lanes mode, board unplugged): 60 kf -> 30 kf
+  vectors, 12 appearance classes, class-0 unbind -> 5 object marks
+  (peak-normalized), SLAM med err 0.016 m. Graceful no-FPGA fallback
+  added (board-out days keep the demo alive; FPGA panel shows 0s
+  honestly). Anti-oracle: est poses/lidar only; no reference enters
+  any estimate; extrinsics assumption stated.
+
+msg round 6b sends the requested arch menu (dw-separable RF, dilated
+pyramid, scene-context branch, bit decorrelation for the <32-bit
+effective entropy, free confidence head) + dataset ladder (SUN RGB-D
+first — 7x labeled data, supersets NYU, dedup required; Hypersim
+pretrain arm; self-sup on OUR platform imagery; ScanNet last).

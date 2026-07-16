@@ -53,6 +53,8 @@
   <div class="grp" id="camhdr">camera · click a cell to QUERY the map</div>
   <div id="campanel"><div id="camwrap"><img id="camimg"><div id="qmark"></div></div>
     <div id="qbetop"></div></div>
+  <div class="grp">map classes · click to UNBIND from the cam VSA map</div>
+  <div id="chips" style="display:flex;flex-wrap:wrap;gap:4px"></div>
   <div class="grp">legend</div>
   <div class="legend">
     <span><span class="dot" style="background:#39445a"></span>lidar map points</span>
@@ -73,6 +75,7 @@
 const cv = document.getElementById("cv"), cx = cv.getContext("2d");
 let pts = [], tp = [], tg = [], st = {}, bb = null;
 let chip = null, showChip = true, qbe = null, camKf = null;
+let obj = null, objCanvas = null, selCls = null;
 function fit() { cv.width = cv.clientWidth * devicePixelRatio; cv.height = cv.clientHeight * devicePixelRatio; }
 addEventListener("resize", () => { fit(); draw(); });
 fit();
@@ -99,6 +102,18 @@ function bakeChip() {
   }
   c2.putImageData(im, 0, 0);
 }
+function bakeObj() {
+  if (!obj) return;
+  const n = obj.n, raw = atob(obj.png);
+  objCanvas = new OffscreenCanvas(n, n);
+  const c2 = objCanvas.getContext("2d"), im = c2.createImageData(n, n);
+  for (let i = 0; i < n*n; i++) {
+    const v = raw.charCodeAt(i);
+    im.data[4*i] = 255; im.data[4*i+1] = 170 + v*0.2; im.data[4*i+2] = 60;
+    im.data[4*i+3] = v > 120 ? (v-120)*1.4 : 0;
+  }
+  c2.putImageData(im, 0, 0);
+}
 function draw() {
   cx.fillStyle = "#0b0e13"; cx.fillRect(0, 0, cv.width, cv.height);
   const T = xf(); if (!T) return;
@@ -106,6 +121,18 @@ function draw() {
     const a = T([chip.x0, chip.y1]), b = T([chip.x1, chip.y0]);
     cx.imageSmoothingEnabled = true;
     cx.drawImage(chipCanvas, a[0], a[1], b[0]-a[0], b[1]-a[1]);
+  }
+  if (obj && objCanvas) {
+    const a = T([obj.x0, obj.y1]), b = T([obj.x1, obj.y0]);
+    cx.imageSmoothingEnabled = true;
+    cx.drawImage(objCanvas, a[0], a[1], b[0]-a[0], b[1]-a[1]);
+    for (const [mx, my, s] of obj.marks) {
+      const q = T([mx, my]);
+      cx.strokeStyle = `rgba(255,209,102,${0.4 + 0.6*s})`;
+      cx.lineWidth = 2;
+      cx.beginPath(); cx.arc(q[0], q[1], 9*devicePixelRatio, 0, 7);
+      cx.stroke();
+    }
   }
   cx.fillStyle = "#39445a";
   for (const p of pts) { const q = T(p); cx.fillRect(q[0], q[1], 1.6, 1.6); }
@@ -147,6 +174,7 @@ function panel() {
   $("cmtoggle").textContent = `chip-map: ${showChip?"on":"off"}`;
 }
 $("dsel").onchange = e => fetch(`/select?data=${e.target.value}`, {method:"POST"});
+window.qc = id => fetch("/query_class", {method:"POST", body: JSON.stringify({id})});
 $("camimg").onclick = e => {
   if (camKf == null) return;
   const r = e.target.getBoundingClientRect();
@@ -162,8 +190,16 @@ const es = new EventSource("/events");
 es.onmessage = ev => {
   const d = JSON.parse(ev.data);
   if (d.reset) { pts=[]; tp=[]; tg=[]; bb=null; chip=null; chipCanvas=null; qbe=null; camKf=null;
+    obj=null; objCanvas=null; selCls=null; $("chips").innerHTML="";
     $("camimg").src=""; $("qmark").style.display="none"; $("qbetop").textContent="";
     if (d.data) $("dsel").value = d.data; draw(); return; }
+  if (d.classes) {
+    $("chips").innerHTML = d.classes.map(c =>
+      `<div onclick="qc(${c.id})" style="cursor:pointer;text-align:center;border:1px solid ${selCls===c.id?'#ffd166':'#2c3850'};border-radius:4px;padding:2px">` +
+      (c.thumb ? `<img src="data:image/jpeg;base64,${c.thumb}" width="36" style="display:block;border-radius:3px">` : `<div style="width:36px;height:36px;background:#1a2230"></div>`) +
+      `<span style="font-size:10px;color:#9fb2c9">C${c.id}·${c.n}</span></div>`).join("");
+    return; }
+  if (d.objmap) { obj = d.objmap; selCls = d.objmap.cls; bakeObj(); draw(); return; }
   if (d.init) { pts=d.pts; tp=d.trail_py; tg=d.trail_gt; if (d.data) $("dsel").value=d.data;
     pts.forEach(grow); tp.forEach(grow); draw(); return; }
   if (d.chipmap) { chip = d.chipmap; bakeChip(); draw(); return; }
