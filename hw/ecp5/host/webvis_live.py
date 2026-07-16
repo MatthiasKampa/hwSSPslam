@@ -268,6 +268,9 @@ class SoloDemo(LiveDemo):
                 self.chip_segs = {i: (s[0], s[1])
                                   for i, s in enumerate(segs)}
         return np.array([x, y, yaw])
+
+
+def udp_rx(demo, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", port))
     scan_len = 8 + 2 * N_BEAM
