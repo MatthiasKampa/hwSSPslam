@@ -10806,3 +10806,39 @@ RECORDED odom pose at native rate (chip encodes the replayed scans —
 FPGA stays in the loop), cam lane replays stored C-kernel bit grids
 (QBE/class/patch/reverse queries work offline), plus a live/recorded
 toggle button. Verified on the robot both ways.
+
+## 2026-07-16 — PER-LANE TUNE (real hw in loop) + chip-map region fixes: overlay was MIRRORED + decode radius; DECODE_R 6 m, HAM_T 7; live corr readout
+
+REGION BUG (user report): the chip-map overlay was VERTICALLY
+MIRRORED (grid row 0 = min-y, client draws row 0 at max-y) — flipud
+both overlays (chipmap + objmap; the objmap density underlay had the
+same bug, its world-coord marks were correct). Decode box widened
+3 -> DECODE_R. Local gate: QPSK codes decode with top-40 cells 100%
+within 1.5 m of real points; a corr-vs-points number ships with every
+chip image (+ /status chip_corr) so alignment is measured, not eyed.
+
+HW GATE: /chipsegs endpoint; 16/16 segments fetched from the LIVE
+chip during replay are bit-identical to golden mcodes of the same
+frames — the offline decode tuning operates on the chip's exact bits.
+
+LIDAR DECODE SWEEP (capture3, golden==chip codes): corr AND top-40
+hit fall monotonically with radius — R=6 wins (corr 0.357 / hit 1.00
+/ 10 ms vs 0.239/0.90/41 ms at 12) at fetch cadence 4; cadence 8
+halves cost for -0.06 corr (not taken; rate holds at 4). DECODE_R
+default 6.0 (SSP_DECODE_R). Far-field decode of 2-bit single-frame
+codes is noise — hugging the trajectory is CORRECT for this layer;
+the mirror was the actual "wrong region".
+
+CAM CLUSTER SWEEP (real D455 bits through the C kernel): at 10 Hz
+noise (0.128 med flip) HAM_T=7 is the ONLY positive-margin threshold
+(intra med 5 vs inter-centroid min 6; 9/11/13 over-merge, margin
+<= -1). HAM_T 11 -> 7, noise-tracked comment (rate < ~8 Hz wants 11).
+Margin +1 bit is THIN — appearance clusters remain demo-grade blobs,
+stated as such.
+
+REPLAY CAM PANEL (user report "I don't see cam"): the capture stored
+only the last ~300 jpegs (live cache bound) — kf outside that window
+now render the desc-bit grid (panel stays live + clickable, layout ==
+QBE grid); live jpeg cache 300 -> 3000 so future captures replay with
+full video. Deployed; replay verified: corr 0.249 live at k 246,
+fx 246/246 bit-exact, all 2810 cam grids served.
