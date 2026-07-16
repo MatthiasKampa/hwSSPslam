@@ -10928,3 +10928,8 @@ STAGED (robot offline at wrap): both bitstreams built + served,
 flash_solo.sh / flash_stream.sh one-command flip, solo_host +
 SSP_SOLO=1 webvis mode pushed; 220-kf sim regate still grinding
 (8-kf smoke bit-exact banked).
+
+ADDENDUM: K_TRY=3 offline arms — NO rescue (hunter500 1.95 vs 1.99 m
+= noise; full tour 36.5 vs 17.8 m worse-or-noise at 3x step cost).
+The envelope problem is the gate-vs-unmapped-territory policy, not
+anchor selection. Filed with the post-demo tuning list.
