@@ -1206,6 +1206,14 @@ def make_handler(demo):
                                     allow_pickle=True)
                 self._json(dict(ok=True, path=out, kf=int(n),
                                 cam=len(d.get("cam_kf", []))))
+            elif self.path == "/chipsegs":
+                # raw fetched chip codes (hw-in-loop parity checks)
+                with demo.lock:
+                    segs = {str(s): dict(
+                        pose=[float(x) for x in p] if p is not None
+                        else None, codes=[int(c) for c in cd])
+                        for s, (p, cd) in demo.chip_segs.items()}
+                self._json(dict(k=demo.k, segs=segs))
             elif self.path == "/status":
                 self._json(dict(
                     k=demo.k, n=demo.n, data=demo.data, done=demo.done,
