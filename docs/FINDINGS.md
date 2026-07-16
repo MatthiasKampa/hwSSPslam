@@ -1240,3 +1240,53 @@ included); (2) NEXT — the streaming-lane U-Net label head, gated on closing
 input RGB-D; (3) deploy depth for (2) = projected lidar, making
 lidar-camera extrinsics the gating hardware step for the THIRD independent
 thread (depth-lifted landmarks, verify fusion, label head).
+
+## Addendum (2026-07-16b, deploy vision-encoder + map-fidelity session) — the map is a faithful container; the encoder's fine-class discrimination is the wall (QBE-ready, not fine-class-ready)
+
+This session built and characterized the DEPLOY vision encoder and, crucially,
+decomposed where the semantic pipeline is/ isn't limited. All in
+`sspax/vision/bottleneck_seg.py` + `docs/RESULTS.md` 2026-07-16 entries.
+
+1. **The encoder is a PRETRAIN-then-TRUNCATE bottleneck (user architecture).**
+   An ordinary dense seg CNN, VSA-agnostic, with one structural constraint: a
+   narrow PER-OUTPUT-PIXEL bottleneck code followed by a SINGLE linear FC (1x1
+   conv, no convs after) that maps each cell's code to its class. That single
+   linear head forces the +-1 code to be COSINE-separable by class — which IS the
+   VSA query. Deploy cuts the FC and binds the binarized code (exports through the
+   existing headio `desc` slot, zero contract change). The cosine-readiness is
+   DESIGNED (audit: not an emergent "VSA-agnostic discovery"), and clean-code AUC
+   UPPER-BOUNDS in-map retrieval.
+
+2. **Quantization is not the limiter.** Full QAT (int8 weights+acts, STE) is FREE
+   vs float. Arch x quant Pareto (multi-seed): int4 is near-free (int2 a cliff),
+   keep the receptive-field 3x3 >= int4 and stagger the 1x1 tail down, narrow-ch8
+   is the tiny corner. Role phases quantize to a 3-bit LUT; the whole map is a
+   low-precision fixed-point object (map-quant dominates the end-to-end ~0.07,
+   not roles).
+
+3. **Deploy input spec (corrected): full QVGA 320x240, RGB, MANY classes** (not
+   Y8-mono/half-res/40-class). RGB trains stably once the input is PER-CHANNEL
+   standardized (the old RGB->NaN). Validated on ADE20K-150. CODE WIDTH is not a
+   lever (32 ~= 64-bit even at 150 classes); NET SCALE is not a lever (pixacc
+   walls ~0.31 across 6.6x params — capacity refuted; depth only mildly sharpens
+   code-AUC). More labeled DATA at fixed config did not lift it either.
+
+4. **THE decomposition (the session's core result).** Through the FULL SSP
+   bind+query pipeline with NON-oracle (predicted-region) grouping and a
+   clean-vs-quant baseline: the 4-bit map costs ~ZERO (0.631->0.639) — **the VSA
+   map/quantization is a FAITHFUL, ~free container, NOT the deploy bottleneck**.
+   But the encoder's fine-class discrimination is weak (object AUC 0.63; top-1
+   class-route recall ~chance 0.157). So a fuzzy 150-CLASS-PROTOTYPE query is not
+   reliable, while DISTINCT-object query-by-example is (deploy-side 0.94->1.00,
+   25%-bit-flip robust). **The encoder is QBE-ready, not fine-class-ready.**
+   Capacity law re-confirmed on the real code: bind OBJECTS/regions, not cells
+   (dense cell binding is 13x over ~sqrt(D) -> chance).
+
+**Shape (consistent with the whole project):** the REPRESENTATION/MAP is sound
+and cheap; the DISCRIMINATIVE FRONT-END is the wall — here the fine-grained
+150-class seg ceiling (input/task-bound, not net-size or map-fidelity bound).
+Deployable now = distinct-object QBE + the surfaces FLOOR; fine-class labels wait
+on a stronger front-end (or a better in-domain RGB set), not on the map or quant.
+Method note: three banked positives this session were audited and TWO
+walked back (P1-style over-reads: "map-ready 0.706" oracle-grouped; role-quant
+"emergent"); rule 4 remains load-bearing.
