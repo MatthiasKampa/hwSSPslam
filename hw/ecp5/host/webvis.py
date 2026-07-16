@@ -577,6 +577,8 @@ class Demo:
         (not a bbox square) — outside-hull cells are never decoded. The
         per-segment decode is BATCHED (`batch` segments per call, cursor
         cycling) so laptops spread the cost across keyframes."""
+        self.hull = getattr(self, 'hull', None)
+        self._chip_cursor = getattr(self, '_chip_cursor', 0)
         if not self.chip_segs or self.hull is None or len(self.hull) < 3:
             return None
         lo = self.hull.min(0) - 1.0
@@ -743,7 +745,7 @@ class Demo:
         wpts = pts[::6] @ np.array([[c, -s], [s, c]]).T + e[:2]
         gt_ok = bool(self.gt_ok[k])
         if len(wpts):                      # grow-only hull, cheap update
-            base = wpts if self.hull is None else np.vstack(
+            base = wpts if getattr(self, 'hull', None) is None else np.vstack(
                 [self.hull, wpts])
             self.hull = convex_hull(base)
         with self.lock:
