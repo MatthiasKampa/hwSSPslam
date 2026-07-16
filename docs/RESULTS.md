@@ -10108,3 +10108,52 @@ Also: the +-0.004/0.014 bars are std of 3 role-seed MEANS; per-scene recall is
 bimodal (many 1-chair scenes), true uncertainty is wider. Net: role phases DO
 tolerate coarse LUTs, but the honest end-to-end low-precision map costs ~0.07
 recall (0.956->0.889), driven by MAP quant, not roles. Nothing pushed.
+
+## 2026-07-16 — deploy-side review of their round-4 close (401e34c..bacc435): all accepted; both artifacts verified cross-box
+
+Their five commits close every msg item: P0 lidar head exported per the
+§3 recipe; P3 surfaces_tier (the ship recipe: ONE D=360/segment, surface
+bits + desc bits on the deploy fine band, 4-bit quant — floor 0.878 /
+wall 0.955 / QBE 0.986 @ ~628 B); P1 platform_finetune harness
+(dataless-runnable, fires on camera day); seg_levers consolidation (no
+more scratch-only FINDINGS citations); and two same-day rule-4
+self-corrections done right — the sparse-binding "smaller AND sharper"
+false win (eval-set artifact; full-density recipe STANDS) and the
+role-quant over-read (matched-code readout is phase-quant-invariant by
+construction; honest end-to-end 4-bit map + any-precision roles = 0.889
+vs 0.956 full — map quant dominates, roles drop to 1-2 bit free).
+Verified on this box: semantic_golden check PASS incl. the compose
+grading triple (|d|max = 0.00, pure numpy); lidar_head.npz loads
+through headio v2 (_validate ok: lidar (3,1024,3), in_div 1.0 METERS,
+crelu), forward on a (3,1024) ring array -> track (256,1) + desc
+(256,32), deterministic. Real-raster desc stability on school data =
+deploy-side follow-up.
+
+## 2026-07-16 — WEBVIS: real-time FPGA-in-the-loop browser demo on REAL dataset data (hw/ecp5/host/webvis.py) — full tour 414/414 scans silicon-verified at 5 Hz, zero overruns
+
+User-directed demo, running live at http://localhost:8790. One process:
+the REAL SPOT classroom tour (data/spot_telluride, 1024-beam ring-33
+slice — the shipped 2D input) at its native 5 Hz keyframe rate; EVERY
+scan streams THROUGH the plugged Icepi Zero (top_stream, STREAM.md
+protocol, ring subset declared in-header) and is DIGEST-VERIFIED
+bit-exact on silicon before the pipeline consumes it — a live
+acceptance counter on the deploy ingest path; the SHIPPED lidar-only
+recipe (BandSLAM + matcher + CV-guess chain, replicated-with-cite from
+runners/spot.run_cv) builds the bounded map in real time; browser UI
+(SSE + canvas) renders registered world points, the estimate trail,
+the WITHHELD-odometry ghost (display/eval only, anti-oracle stated
+in-page), bounded-memory/segment counters, and the FPGA link panel.
+FULL-TOUR NUMBERS (first complete pass): 414/414 scan digests verified
+on silicon, 0 CRC drops, 0 real-time overruns; FPGA roundtrip 27 ms/kf
++ SLAM 45 ms/kf inside the 200 ms keyframe budget; final map 354 KB /
+63 segments; selftest arm (40 kf): med err vs withheld ref 0.010 m.
+Serve mode loops the tour (fresh SLAM per pass) so the browser always
+shows a live build. Fix banked en route: pyserial blocking-read
+granularity made roundtrips ~511 ms (a 256-byte read against a 0.5 s
+port timeout for a 21 B echo) -> 20 ms port timeout + per-frame echo
+polling = 27 ms; stale echoes from prior sessions are skipped by
+frame-id match. Headless: `python3 hw/ecp5/host/webvis.py selftest` =
+WEBVIS SELFTEST PASS (numbers only, rule 3). This is the stream v0's
+first live APPLICATION (G1 was its gate); G2 (fast9-through-ingest
+camera lane) and G3 (encoder-on-streamed-lidar, #43) extend the same
+loop with on-chip compute.

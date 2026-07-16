@@ -1,0 +1,133 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SSP-SLAM — ECP5 in the loop</title>
+<style>
+  body { margin:0; background:#0b0e13; color:#cfd8e3; font:13px/1.45 -apple-system, Menlo, monospace; display:flex; height:100vh; }
+  #cv { flex:1; display:block; }
+  #panel { width:270px; padding:14px 16px; background:#11151d; border-left:1px solid #222a36; overflow-y:auto; }
+  h1 { font-size:14px; margin:0 0 10px; color:#e8eef7; }
+  .grp { margin:12px 0 4px; color:#7f93ad; text-transform:uppercase; font-size:10px; letter-spacing:.08em; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:1.5px 0; }
+  td:last-child { text-align:right; color:#e8eef7; font-variant-numeric:tabular-nums; }
+  .ok { color:#5dd39e; } .bad { color:#ff6b6b; }
+  #bar { height:4px; background:#222a36; margin-top:8px; }
+  #fill { height:100%; width:0%; background:#4c8dff; }
+  .legend span { display:inline-block; margin-right:10px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:4px; vertical-align:-1px; margin-right:4px; }
+</style>
+<canvas id="cv"></canvas>
+<div id="panel">
+  <h1>SSP-SLAM live<br><span style="color:#7f93ad;font-size:11px">Icepi Zero (ECP5) in the loop · real SPOT data</span></h1>
+  <div class="grp">FPGA (top_stream, 2 Mbaud)</div>
+  <table>
+    <tr><td>scan digests verified</td><td id="fx"></td></tr>
+    <tr><td>link</td><td id="kbps"></td></tr>
+    <tr><td>roundtrip</td><td id="msfx"></td></tr>
+  </table>
+  <div class="grp">python SLAM (shipped recipe)</div>
+  <table>
+    <tr><td>keyframe</td><td id="k"></td></tr>
+    <tr><td>step</td><td id="mspy"></td></tr>
+    <tr><td>segments</td><td id="segs"></td></tr>
+    <tr><td>loop closures</td><td id="loops"></td></tr>
+    <tr><td>map memory (bounded)</td><td id="mem"></td></tr>
+    <tr><td>err vs withheld ref</td><td id="err"></td></tr>
+    <tr><td>rt overruns</td><td id="ovr"></td></tr>
+  </table>
+  <div id="bar"><div id="fill"></div></div>
+  <div class="grp">legend</div>
+  <div class="legend">
+    <span><span class="dot" style="background:#39445a"></span>map points</span><br>
+    <span><span class="dot" style="background:#4c8dff"></span>estimate</span><br>
+    <span><span class="dot" style="background:#5dd39e"></span>withheld ref (display only)</span>
+  </div>
+  <div style="margin-top:14px;color:#7f93ad;font-size:11px">
+    Every scan streams through the FPGA and is digest-verified on
+    silicon before the pipeline consumes it. The reference trail never
+    enters any estimate (anti-oracle).
+  </div>
+</div>
+<script>
+const cv = document.getElementById("cv"), cx = cv.getContext("2d");
+let pts = [], tp = [], tg = [], st = {};
+let bb = null;
+function fit() {
+  cv.width = cv.clientWidth * devicePixelRatio;
+  cv.height = cv.clientHeight * devicePixelRatio;
+}
+addEventListener("resize", () => { fit(); draw(); });
+fit();
+function grow(p) {
+  if (!bb) bb = [p[0], p[1], p[0], p[1]];
+  else {
+    bb[0] = Math.min(bb[0], p[0]); bb[1] = Math.min(bb[1], p[1]);
+    bb[2] = Math.max(bb[2], p[0]); bb[3] = Math.max(bb[3], p[1]);
+  }
+}
+function xf() {
+  if (!bb) return null;
+  const w = cv.width, h = cv.height, m = 40 * devicePixelRatio;
+  const sx = (w - 2 * m) / Math.max(bb[2] - bb[0], 1e-3);
+  const sy = (h - 2 * m) / Math.max(bb[3] - bb[1], 1e-3);
+  const s = Math.min(sx, sy);
+  return p => [m + (p[0] - bb[0]) * s, h - m - (p[1] - bb[1]) * s];
+}
+function draw() {
+  cx.fillStyle = "#0b0e13"; cx.fillRect(0, 0, cv.width, cv.height);
+  const T = xf(); if (!T) return;
+  cx.fillStyle = "#39445a";
+  for (const p of pts) { const q = T(p); cx.fillRect(q[0], q[1], 1.6, 1.6); }
+  cx.strokeStyle = "#5dd39e"; cx.setLineDash([4, 4]); cx.lineWidth = 1.2;
+  cx.beginPath();
+  let pen = false;
+  for (const g of tg) {
+    const q = T(g);
+    if (!g[2]) { pen = false; continue; }
+    pen ? cx.lineTo(q[0], q[1]) : cx.moveTo(q[0], q[1]); pen = true;
+  }
+  cx.stroke(); cx.setLineDash([]);
+  cx.strokeStyle = "#4c8dff"; cx.lineWidth = 1.8;
+  cx.beginPath();
+  tp.forEach((p, i) => { const q = T(p); i ? cx.lineTo(q[0], q[1]) : cx.moveTo(q[0], q[1]); });
+  cx.stroke();
+  if (st.est) {
+    const q = T(st.est), a = st.est[2], r = 7 * devicePixelRatio;
+    cx.fillStyle = "#4c8dff";
+    cx.beginPath();
+    cx.moveTo(q[0] + r * Math.cos(a), q[1] - r * Math.sin(a));
+    cx.lineTo(q[0] + r * .5 * Math.cos(a + 2.5), q[1] - r * .5 * Math.sin(a + 2.5));
+    cx.lineTo(q[0] + r * .5 * Math.cos(a - 2.5), q[1] - r * .5 * Math.sin(a - 2.5));
+    cx.fill();
+  }
+}
+const $ = id => document.getElementById(id);
+function panel() {
+  $("fx").innerHTML = `<span class="${st.fx_ok === st.fx_tot ? "ok" : "bad"}">${st.fx_ok}/${st.fx_tot}</span>`;
+  $("kbps").textContent = `${st.kbps} KB/s`;
+  $("msfx").textContent = `${st.ms_fx} ms`;
+  $("k").textContent = `${st.k + 1}/${st.n}${st.done ? " done" : ""}`;
+  $("mspy").textContent = `${st.ms_py} ms`;
+  $("segs").textContent = st.segs;
+  $("loops").textContent = st.loops;
+  $("mem").textContent = `${st.mem_kb} KB`;
+  $("err").textContent = st.err == null ? "—" : `${(st.err * 100).toFixed(1)} cm`;
+  $("ovr").textContent = st.overruns;
+  $("fill").style.width = `${100 * (st.k + 1) / st.n}%`;
+}
+const es = new EventSource("/events");
+es.onmessage = ev => {
+  const d = JSON.parse(ev.data);
+  if (d.reset) { pts = []; tp = []; tg = []; bb = null; draw(); return; }
+  if (d.init) {
+    pts = d.pts; tp = d.trail_py; tg = d.trail_gt;
+    pts.forEach(grow); tp.forEach(grow);
+    draw(); return;
+  }
+  if (d.wpts) { for (const p of d.wpts) { pts.push(p); grow(p); } }
+  if (pts.length > 60000) pts = pts.slice(-60000);
+  tp.push([d.est[0], d.est[1]]); grow(d.est);
+  tg.push([d.gt[0], d.gt[1], d.gt_ok]);
+  st = d; panel(); draw();
+};
+</script>
