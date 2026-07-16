@@ -10486,3 +10486,37 @@ pyramid, scene-context branch, bit decorrelation for the <32-bit
 effective entropy, free confidence head) + dataset ladder (SUN RGB-D
 first — 7x labeled data, supersets NYU, dedup required; Hypersim
 pretrain arm; self-sup on OUR platform imagery; ScanNet last).
+
+## 2026-07-16 — WEBVIS v2.3: real school runs in the selector (synth dropped, user directive); the map query system rebuilt — calibrated z-scores, structured region queries, reverse readout
+
+Dataset selector is REAL-only now: spot (classroom) + school_run1 +
+school_run2, built from each run's scans.npz (ring-33 1024-beam slices,
+stride-4 keyframes) with the honest reference semantics per venue —
+run1 est-only (ghost hidden, gt_ok all-False), run2 shows the ghost
+only inside its gated-LIO window (342/836 kf). Both school runs get the
+FULL experience incl. the cam VSA map (rgb_d455 shards align by
+timestamp). Synthetic worlds removed.
+
+QUERY SYSTEM v2 (user: "come up with a better way to query map") —
+three upgrades, one shared calibrated sweep:
+1. CALIBRATED SCORES: every query density is z-scored against a
+   seeded RANDOM-CODE control sweep (the semantic-thread's decisive-
+   control discipline, now in the live loop); marks require z > 4.
+   A garbage query now answers NO MATCH instead of a normalized fake
+   peak — measured live: a diffuse cluster query on a 12-grid map
+   reads z_max 3.8 -> 0 marks.
+2. STRUCTURED REGION QUERIES (the objmap patch form): drag a box on
+   the camera panel -> q = sum_c A(bits_c) * exp(iW.(p_c - x0)) over
+   the cells' lidar-lifted positions — object-shaped, position-
+   structured matching. Control shares the SPATIAL structure (random
+   codes at the same offsets) so the envelope calibrates away.
+   Measured: on the same thin school_run2 map where the centroid query
+   fails, the patch query clears the bar (z 4.3, 2 marks) — structure
+   adds real discrimination.
+3. REVERSE READOUT: click the MAP -> project the local readout onto
+   the spatter keys -> recover the code bits at that spot -> nearest
+   class + hamming + support count, then auto-highlight its other
+   locations. Query both directions: "where is X?" and "what is here?".
+Single-cell QBE click retained. All laptop-side on the same per-kf
+bounded vectors (the chip-band decode path unchanged). Anti-oracle:
+est poses + lidar only; nominal yaw extrinsics stated.

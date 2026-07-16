@@ -52,7 +52,6 @@ import runners.spot as SP                                      # noqa: E402
 import sspslam.encoder as S                                    # noqa: E402
 import sspslam.lattice as L                                    # noqa: E402
 import sspslam.quantized as F                                  # noqa: E402
-import sspslam.worlds_dyn as DE                                # noqa: E402
 
 PORT_SER = "/dev/cu.usbserial-DK0GEIG0"
 KF_DT = 0.2                     # 5 Hz keyframes
@@ -131,12 +130,34 @@ class Fpga:
 
 
 # --------------------------------------------------------------- data feeds
+DATASETS = ("spot", "school_run1", "school_run2")   # REAL data only
+
+
 def load_bundle(name):
-    """'spot' = the real classroom tour; 'classroom'/'school' = synthetic
-    dynenv worlds (exact GT, same 1024-beam format)."""
+    """'spot' = the real classroom tour; 'school_run1'/'school_run2' =
+    the real school sessions (ring-33 1024-beam slices, stride-4
+    keyframes). run1 has NO reference (est-only: gt_ok all-False, ghost
+    hidden); run2 carries the gated-LIO window (342/836 kf, display/eval
+    only there)."""
     if name == "spot":
         return SP.make_bundle()
-    return DE.make(env=name, laps=1, seed=11)
+    d = ROOT / "data" / "spot_telluride" / name
+    z = np.load(d / "scans.npz")
+    idx = np.arange(0, len(z["ts"]), SP.STRIDE)
+    ref = np.load(d / "ref_lio.npz")
+    gt = np.asarray(ref["gt"], float)[:len(idx)]
+    ok = np.asarray(ref["ok"], bool)[:len(idx)]
+    if len(gt) < len(idx):                      # ref shorter than run
+        pad = len(idx) - len(gt)
+        gt = np.vstack([gt, np.zeros((pad, gt.shape[1]))])
+        ok = np.concatenate([ok, np.zeros(pad, bool)])
+    keys = [(z["ranges"][i], gt[k][:3] if gt.shape[1] >= 3 else
+             np.append(gt[k], 0.0), z["ts"][i] / 1e9)
+            for k, i in enumerate(idx)]
+    return dict(name=name, kind="spot", keys=keys,
+                beam=-np.pi + np.arange(1024) * (2 * np.pi / 1024),
+                gt_ok=ok, kts=z["ts"][idx] / 1e9,
+                rmin=SP.R_MIN, rmax=SP.R_MAX)
 
 
 # ------------------------------------------------------- camera VSA obj map
@@ -163,6 +184,7 @@ class CamMap:
         self.counts = []
         self.example = []            # (kf, cy, cx) per cluster
         self.vecs = {}               # kf -> (anchor_pose, D complex)
+        self.cellpos = {}            # kf -> {(cy,cx): (wx,wy)}
         self.lock = threading.Lock()
 
     def _amp(self, bits):
@@ -192,6 +214,7 @@ class CamMap:
     def ingest(self, k, bits, scan, pose):
         """bits (15,20,32); bind this keyframe's object aggregates."""
         beam_n = len(scan)
+        self.cellpos.setdefault(int(k), {})
         cells = []                   # (cid, x, y, cy, cx)
         for cy in range(3, 13):      # content rows (skip ceiling/floor)
             for cx in range(20):
@@ -204,9 +227,10 @@ class CamMap:
                 if not np.isfinite(r) or r < 0.3 or r > 12.0:
                     continue
                 a = pose[2] + brg
-                cells.append((self._cluster(bits[cy, cx]),
-                              pose[0] + r * np.cos(a),
-                              pose[1] + r * np.sin(a), cy, cx))
+                wx, wy = (pose[0] + r * np.cos(a),
+                          pose[1] + r * np.sin(a))
+                self.cellpos[int(k)][(cy, cx)] = (wx, wy)
+                cells.append((self._cluster(bits[cy, cx]), wx, wy, cy, cx))
         if not cells:
             return
         v = np.zeros(len(W_MAIN), complex)
@@ -229,20 +253,17 @@ class CamMap:
                          ex=self.example[i])
                     for i in range(len(self.cents)) if self.counts[i] >= 8]
 
-    def query(self, cid, grid_lo, grid_hi, ngrid=96):
-        """UNBIND class cid from every kf vector -> density image +
-        peak markers (world frame)."""
+    # ---- calibrated matched-filter sweep (shared by all query forms) --
+    def _sweep(self, qa, grid_lo, grid_hi, ngrid=96):
+        """qa: conj query amplitude (D,) -> raw density image over the
+        world grid (max over kf vectors)."""
         with self.lock:
-            if cid >= len(self.cents):
-                return None
-            code = (self.cents[cid] > 0.5)
             vecs = list(self.vecs.items())
-        qa = np.conj(self._amp(code))
         gx = np.linspace(grid_lo[0], grid_hi[0], ngrid)
         gy = np.linspace(grid_lo[1], grid_hi[1], ngrid)
         XX, YY = np.meshgrid(gx, gy)
         P = np.stack([XX.ravel(), YY.ravel()], 1)
-        img = np.zeros(ngrid * ngrid, np.float64)
+        img = np.full(ngrid * ngrid, -1e9, np.float64)
         for k, (pose, v) in vecs:
             d = P - pose[:2]
             m = (np.abs(d) < 8.0).all(1)
@@ -251,25 +272,96 @@ class CamMap:
             unb = qa * v
             sc = (np.exp(-1j * (d[m] @ W_MAIN.T)) @ unb).real / len(W_MAIN)
             np.maximum.at(img, np.flatnonzero(m), sc)
-        img = img.reshape(ngrid, ngrid)
-        mx = img.max()
-        if mx <= 0:
-            return None
+        return img.reshape(ngrid, ngrid), gx, gy
+
+    def _zquery(self, qa, qa_ctrl, grid_lo, grid_hi, tag, ngrid=96):
+        """CALIBRATED query: z-score the density against a seeded
+        RANDOM-CODE control sweep (the honest 'no match' answer — a
+        garbage query yields no marks instead of a normalized peak)."""
+        img, gx, gy = self._sweep(qa, grid_lo, grid_hi, ngrid)
+        ctl, _, _ = self._sweep(qa_ctrl, grid_lo, grid_hi, ngrid)
+        val = ctl[ctl > -1e8]
+        mu, sd = (float(np.median(val)), float(val.std() + 1e-9)) \
+            if val.size else (0.0, 1.0)
+        z = np.where(img > -1e8, (img - mu) / sd, 0.0)
         marks = []
-        im = np.clip(img / mx, 0, 1)
-        th = 0.72
-        cand = np.argwhere(im > th)
-        for yy, xx in cand[np.argsort(-im[im > th])][:24]:
+        cand = np.argwhere(z > 4.0)                  # 4-sigma discipline
+        order = np.argsort(-z[z > 4.0]) if cand.size else []
+        for yy, xx in cand[order][:32]:
             wx, wy = gx[xx], gy[yy]
             if all((wx - a) ** 2 + (wy - b) ** 2 > 0.36
                    for a, b, _ in marks):
                 marks.append((float(wx), float(wy),
-                              float(im[yy, xx])))
+                              float(round(z[yy, xx], 1))))
+        im = np.clip(z / 8.0, 0, 1)                  # display scale z=8
         return dict(x0=float(grid_lo[0]), y0=float(grid_lo[1]),
                     x1=float(grid_hi[0]), y1=float(grid_hi[1]),
                     png=base64.b64encode(
                         (im * 255).astype(np.uint8).tobytes()).decode(),
-                    n=ngrid, marks=marks[:12], cls=int(cid))
+                    n=ngrid, marks=marks[:12], cls=tag,
+                    zmax=float(round(z.max(), 1)))
+
+    def _rand_amp(self, seed=99):
+        rng = np.random.default_rng(seed)
+        return np.conj(self._amp(rng.random(32) > 0.5))
+
+    def query(self, cid, grid_lo, grid_hi, ngrid=96):
+        """class-chip query: UNBIND cluster cid's code, z-calibrated."""
+        with self.lock:
+            if cid >= len(self.cents):
+                return None
+            code = (self.cents[cid] > 0.5)
+        return self._zquery(np.conj(self._amp(code)), self._rand_amp(),
+                            grid_lo, grid_hi, int(cid), ngrid)
+
+    def query_patch(self, k, cells, grid_lo, grid_hi, bits_grid):
+        """REGION query (objmap patch form): the dragged cells form a
+        position-STRUCTURED multi-cell query q = sum_c A(bits_c) *
+        exp(iW.(p_c - x0)) — matches object-shaped content, far sharper
+        than a single centroid code. Control = same structure, random
+        codes (calibrates away the spatial envelope)."""
+        with self.lock:
+            ps = self.cellpos.get(int(k), {})
+        pts = [(ps[(cy, cx)], bits_grid[cy, cx])
+               for cy, cx in cells if (cy, cx) in ps]
+        if len(pts) < 2:
+            return None
+        x0 = np.mean([p for p, _ in pts], axis=0)
+        rng = np.random.default_rng(7)
+        q = np.zeros(len(W_MAIN), complex)
+        qc = np.zeros(len(W_MAIN), complex)
+        for (p, b) in pts:
+            ph = np.exp(1j * ((np.asarray(p) - x0) @ W_MAIN.T))
+            q += self._amp(b) * ph
+            qc += self._amp(rng.random(32) > 0.5) * ph
+        n = np.sqrt(len(pts))
+        return self._zquery(np.conj(q / n), np.conj(qc / n),
+                            grid_lo, grid_hi, "patch")
+
+    def whatis(self, wx, wy):
+        """REVERSE readout: click the MAP -> decode the code bits at
+        that spot (project the local readout onto the spatter keys) ->
+        nearest cluster + bit confidence."""
+        with self.lock:
+            vecs = list(self.vecs.items())
+            cents = [c > 0.5 for c in self.cents]
+        r = np.zeros(len(W_MAIN), complex)
+        nk = 0
+        for k, (pose, v) in vecs:
+            d = np.array([wx, wy]) - pose[:2]
+            if np.abs(d).max() > 8.0:
+                continue
+            r += v * np.exp(-1j * (d @ W_MAIN.T))
+            nk += 1
+        if nk == 0 or not cents:
+            return None
+        c = (self.keys @ np.conj(r)).real          # per-bit correlation
+        bits = c < 0                               # A = (1-2b): b=1 -> -key
+        conf = float(np.abs(c).mean() / (np.abs(c).std() + 1e-9))
+        ham = [int(np.sum(bits != cc)) for cc in cents]
+        cid = int(np.argmin(ham))
+        return dict(cls=cid, ham=int(ham[cid]), nk=nk,
+                    conf=round(conf, 2))
 
 
 # --------------------------------------------------------------- camera/QBE
@@ -278,13 +370,13 @@ class CamLane:
     The appearance map: per-keyframe (15, 20, 32) bit grids anchored at
     estimated poses; QBE = hamming match of one clicked cell's bits."""
 
-    def __init__(self, kts_s):
+    def __init__(self, run, kts_s):
         from sspax import headio as HIO
         import runners.spot_cam as SC
         import golden_cam as GC
         self.HIO, self.GC = HIO, GC
         self.head = HIO.load_head(str(HEAD_NPZ))
-        self.shards, self.cts, self.where = SC._index("spot")
+        self.shards, self.cts, self.where = SC._index(run)
         kns = (np.asarray(kts_s) * 1e9).astype(np.int64)
         j = np.clip(np.searchsorted(self.cts, kns), 1, len(self.cts) - 1)
         j = j - (np.abs(self.cts[j - 1] - kns) < np.abs(self.cts[j] - kns))
@@ -376,9 +468,9 @@ class Demo:
         self.slam = make_slam()
         self.cam = None
         self.cammap = None
-        if data == "spot" and self.want_cam:
+        if self.want_cam:
             try:
-                self.cam = CamLane(np.asarray(self.b["kts"]))
+                self.cam = CamLane(data, np.asarray(self.b["kts"]))
                 self.cammap = CamMap()
             except Exception as e:
                 print(f"[webvis] cam lane off: {e}", flush=True)
@@ -627,10 +719,34 @@ def make_handler(demo):
                 self._json(dict(ok=True))
             elif self.path.startswith("/select"):
                 d = self.path.split("=")[-1]
-                if d in ("spot", "classroom", "school"):
+                if d in DATASETS:
                     demo._req_data = d
                     demo.done = False
                 self._json(dict(ok=True, data=d))
+            elif self.path.startswith("/query_patch"):
+                ln = int(self.headers.get("Content-Length", 0))
+                q = json.loads(self.rfile.read(ln) or b"{}")
+                res = None
+                if demo.cammap and demo.cam and demo.trail_py:
+                    with demo.cam.lock:
+                        bg = demo.cam.bits.get(int(q["k"]))
+                    if bg is not None:
+                        tr = np.array(demo.trail_py)
+                        res = demo.cammap.query_patch(
+                            int(q["k"]),
+                            [tuple(c) for c in q["cells"]],
+                            tr.min(0) - 3.0, tr.max(0) + 3.0, bg)
+                    if res:
+                        demo.broadcast(dict(objmap=res))
+                self._json(dict(ok=res is not None))
+            elif self.path.startswith("/whatis"):
+                ln = int(self.headers.get("Content-Length", 0))
+                q = json.loads(self.rfile.read(ln) or b"{}")
+                res = demo.cammap.whatis(float(q["x"]), float(q["y"])) \
+                    if demo.cammap else None
+                if res:
+                    demo.broadcast(dict(whatis=res, at=[q["x"], q["y"]]))
+                self._json(res or dict(ok=False))
             elif self.path.startswith("/query_class"):
                 ln = int(self.headers.get("Content-Length", 0))
                 q = json.loads(self.rfile.read(ln) or b"{}")

@@ -27,9 +27,9 @@
   <h1>SSP-SLAM live<br><span style="color:#7f93ad;font-size:11px">Icepi Zero in the loop · encode + map ON CHIP</span></h1>
   <div>
     <select id="dsel">
-      <option value="spot">spot (real classroom)</option>
-      <option value="classroom">classroom (synthetic)</option>
-      <option value="school">school (synthetic)</option>
+      <option value="spot">classroom (spot, real)</option>
+      <option value="school_run1">school run 1 (real)</option>
+      <option value="school_run2">school run 2 (real)</option>
     </select>
     <button onclick="fetch('/reset',{method:'POST'})">reset map</button>
     <button id="cmtoggle" onclick="showChip=!showChip;draw()">chip-map: on</button>
@@ -175,16 +175,41 @@ function panel() {
 }
 $("dsel").onchange = e => fetch(`/select?data=${e.target.value}`, {method:"POST"});
 window.qc = id => fetch("/query_class", {method:"POST", body: JSON.stringify({id})});
-$("camimg").onclick = e => {
-  if (camKf == null) return;
-  const r = e.target.getBoundingClientRect();
-  const cxl = Math.floor((e.clientX - r.left) / r.width * 20);
-  const cyl = Math.floor((e.clientY - r.top) / r.height * 15);
+// camera panel: click = single-cell QBE; DRAG = structured region query
+let dragS = null;
+const cellOf = e => {
+  const r = $("camimg").getBoundingClientRect();
+  return [Math.max(0, Math.min(14, Math.floor((e.clientY - r.top) / r.height * 15))),
+          Math.max(0, Math.min(19, Math.floor((e.clientX - r.left) / r.width * 20)))];
+};
+$("camimg").onmousedown = e => { dragS = cellOf(e); e.preventDefault(); };
+$("camimg").onmouseup = e => {
+  if (camKf == null || !dragS) return;
+  const [y0, x0] = dragS, [y1, x1] = cellOf(e);
+  dragS = null;
+  const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
+  const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
   const m = $("qmark");
-  m.style.left = `${cxl/20*100}%`; m.style.top = `${cyl/15*100}%`;
-  m.style.width = `${100/20}%`; m.style.height = `${100/15}%`;
+  m.style.left = `${xa/20*100}%`; m.style.top = `${ya/15*100}%`;
+  m.style.width = `${(xb-xa+1)/20*100}%`; m.style.height = `${(yb-ya+1)/15*100}%`;
   m.style.display = "block";
-  fetch("/query", {method:"POST", body: JSON.stringify({k:camKf, cy:cyl, cx:cxl})});
+  if (ya === yb && xa === xb) {
+    fetch("/query", {method:"POST", body: JSON.stringify({k:camKf, cy:ya, cx:xa})});
+  } else {
+    const cells = [];
+    for (let cy = ya; cy <= yb; cy++)
+      for (let cxx = xa; cxx <= xb; cxx++) cells.push([cy, cxx]);
+    fetch("/query_patch", {method:"POST", body: JSON.stringify({k:camKf, cells})});
+  }
+};
+// map click = REVERSE readout ("what is here?")
+cv.onclick = e => {
+  const T = xf(); if (!T || !bb) return;
+  const m = 40 * devicePixelRatio, w = cv.width, h = cv.height;
+  const s = Math.min((w-2*m)/Math.max(bb[2]-bb[0],1e-3), (h-2*m)/Math.max(bb[3]-bb[1],1e-3));
+  const wx = bb[0] + (e.offsetX * devicePixelRatio - m) / s;
+  const wy = bb[1] + (h - m - e.offsetY * devicePixelRatio) / s;
+  fetch("/whatis", {method:"POST", body: JSON.stringify({x: wx, y: wy})});
 };
 const es = new EventSource("/events");
 es.onmessage = ev => {
@@ -199,7 +224,13 @@ es.onmessage = ev => {
       (c.thumb ? `<img src="data:image/jpeg;base64,${c.thumb}" width="36" style="display:block;border-radius:3px">` : `<div style="width:36px;height:36px;background:#1a2230"></div>`) +
       `<span style="font-size:10px;color:#9fb2c9">C${c.id}·${c.n}</span></div>`).join("");
     return; }
-  if (d.objmap) { obj = d.objmap; selCls = d.objmap.cls; bakeObj(); draw(); return; }
+  if (d.objmap) { obj = d.objmap; selCls = d.objmap.cls; bakeObj(); draw();
+    $("qbetop").textContent = `query '${d.objmap.cls}': z_max ${d.objmap.zmax}` +
+      (d.objmap.marks.length ? ` · ${d.objmap.marks.length} marks (z>4)` : " · NO MATCH (z<4)");
+    return; }
+  if (d.whatis) {
+    $("qbetop").textContent = `map readout: class C${d.whatis.cls} (hamming ${d.whatis.ham}/32, ${d.whatis.nk} kf, conf ${d.whatis.conf})`;
+    qc(d.whatis.cls); return; }
   if (d.init) { pts=d.pts; tp=d.trail_py; tg=d.trail_gt; if (d.data) $("dsel").value=d.data;
     pts.forEach(grow); tp.forEach(grow); draw(); return; }
   if (d.chipmap) { chip = d.chipmap; bakeChip(); draw(); return; }
