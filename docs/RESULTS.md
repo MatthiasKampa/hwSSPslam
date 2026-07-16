@@ -9920,3 +9920,15 @@ fast9-through-ingest (64x64 fixture as CAM packets -> SRC MUX -> fast9
 vs golden), G3 encoder-on-streamed-lidar (#43), G4 paced bursts (#44).
 host/hw_stream.py is the robot-side reference implementation (pure
 pyserial, runs unchanged on Linux).
+
+## 2026-07-16 — their P2/P3 verified on the deploy box: golden checker PASS cross-box; round-3 queue fully closed
+
+ffe1f36 reviewed + verified here: (a) place_wall.py — the wall test is
+now a committed module with the GT-leak trap self-documented, and the
+179-vs-244 pair count is reconciled (110 vs 130 keyframes, same venue);
+nit closed. (b) semantic_golden check runs PURE NUMPY on this box:
+all four quant recalls reproduce |d|=0.000 — GOLDEN CHECK PASS
+cross-box. The FPGA-relevant semantic numbers are now deploy-box-
+verifiable without JAX. Every item from msg rounds 3/3b is closed;
+the round-4 queue (lidar head export, finetune harness, surfaces+QBE
+reference) is what remains on their side.
