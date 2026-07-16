@@ -10842,3 +10842,17 @@ now render the desc-bit grid (panel stays live + clickable, layout ==
 QBE grid); live jpeg cache 300 -> 3000 so future captures replay with
 full video. Deployed; replay verified: corr 0.249 live at k 246,
 fx 246/246 bit-exact, all 2810 cam grids served.
+
+## 2026-07-16 — HW-IN-LOOP TRACKER TUNE: chip-precision (QPSK nph=4) map store loses NOTHING at rate; adopted window holds; 15x map memory cut confirmed on real drive
+
+BandSLAM (sspslam/quantized.py — the FPGA-arithmetic model, OFFLINE
+ONLY per the shim directive) replayed on capture_1784226283 (1400 kf
+@ 10 Hz) with the map store at nph=4 = 2-bit QPSK — the SAME store as
+the on-chip bank (live parity 16/16 banked above): pair-cos
+0.956/0.892 vs float's 0.957/0.894, RPE1s 20.1 cm/15.5 deg vs
+20.0/15.6 (turn-heavy first segment), dyaw90 identical, mem 1058 ->
+68 KB. Wider windows at chip precision (rot 18, t 1.0) buy nothing.
+VERDICT: the on-chip tracker can match against the chip's own 2-bit
+map with no measurable accuracy loss at rate, and t0.72/rot9/cap0.30
+is confirmed at deploy precision. This closes the tracker-config
+input to rung #43 (multi-lane engine + on-chip matcher).
