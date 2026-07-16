@@ -232,12 +232,11 @@ def gate_top(n_kf=120, reset_at=None):
           flush=True)
     subprocess.run(
         [str(TOOLS / "iverilog"), "-g2012", "-o",
-         str(BUILD / "tbtop2.vvp"), "-DLEAN", "-DV8_TOP_SHIM",
+         str(BUILD / "tbtop2.vvp"), "-DLEAN",
          "rtl/uart.v", "rtl/encoder_lean.v",
          str(ECP5 / "rtl" / "solo_tracker2.v"),
          str(ECP5 / "rtl" / "top_solo2.v"),
-         str(ECP5 / "rtl" / "v8_shims.v"),
-         "rtl/tb_solo_top.v", str(CELLS)],
+         str(ECP5 / "rtl" / "tb_solo_top2.v"), str(CELLS)],
         cwd=ICE, check=True)
     out = subprocess.run([str(TOOLS / "vvp"), str(BUILD / "tbtop2.vvp")],
                          cwd=ICE, capture_output=True, text=True,
