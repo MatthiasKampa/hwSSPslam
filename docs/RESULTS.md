@@ -11440,3 +11440,26 @@ on a stationary robot; v7 folded 8 in the same window). LIVE bringup
 chip_segs 2 while parked (v7: map exhausted at kf 320), cam lane
 1:1. v7 bit + STREAM bit staged as fallbacks (~/flash_solo.sh,
 ~/flash_stream.sh).
+
+## 2026-07-17 — P1 learned decoder, shape-OOD check: the RECALL gain GENERALIZES (not home-field), the PRECISION regression is confirmed
+
+Addresses the home-field caveat on the P1 result above (real-venue eval is BLOCKED:
+school_run2 ref_lio.gt is all-zeros, est_cache 836 keyframes unaligned to the 3343
+scans). Shape-OOD: train the decoder on rectangular ROOMS, eval on CORRIDORS +
+L-shapes it NEVER saw, vs CLEAN, same GT-based metric (scratch/scratch_p1_ood.py):
+  decoder   recall@15  recall@30  prec-med(m)
+  CLEAN       0.446      0.504      0.068
+  LEARNED     0.644      0.774      0.363
+KEY: on UNSEEN shapes — where CLEAN performs NEAR its good numbers (recall 0.50,
+sharp 0.068 m, ~= its 0.071 m selftest) — the learned decoder STILL wins recall
+(0.774 vs 0.504, +0.27). So the recall gain is REAL and GENERALIZES; it is NOT
+in-distribution memorization (the earlier home-field worry is substantially
+resolved — the earlier low CLEAN numbers were partly my hard random rooms, which
+this corridor/L-shape set, closer to CLEAN's tuned regime, corrects). BUT the
+PRECISION regression is now firmly confirmed: LEARNED 0.363 m vs CLEAN 0.068 m
+(~5x worse) — cell-occupancy fundamentally cannot match line-fitting's sub-cell
+sharpness. NET P1 verdict: the learned decoder is a genuine, generalizing RECALL
+lift (recovers ~50% more of the map / the ghost-comb tails) at a real PRECISION
+cost. The clean win is a HYBRID (learned recall -> line-fit for precision) or a
+sub-cell learned output — both concrete next steps. Single-seed; synthetic (real
+venue still needs aligned scan-poses). Anti-oracle: GT walls train + score.
