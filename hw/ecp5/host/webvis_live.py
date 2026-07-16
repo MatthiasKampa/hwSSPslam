@@ -141,29 +141,42 @@ class LiveDemo(webvis.Demo):
         frame would only inflate cluster counts, not add information."""
         last_ingest = -1
         while True:
-            if self.data != "live" or not getattr(self, "_camq_live",
-                                                  None) or not self.k:
-                time.sleep(0.005)
-                continue
-            t_us, jb = self._camq_live.pop()      # newest
-            self._camq_live.clear()               # drop stale
-            k = self.k - 1
             try:
-                b = self.cam.compute(k, jb)
-            except Exception:
-                continue
-            self._cam_track(k, b)
-            if k == last_ingest:
-                continue
-            last_ingest = k
-            self.cammap.ingest(k, b, np.asarray(self.keys[k][0], float),
-                               self.est[k])
-            cls = self.cammap.classes()
-            if cls:
-                self.broadcast(dict(classes=[
-                    dict(id=c["id"], n=c["n"], thumb=None,
-                         boost=c["id"] in self.cammap.boost)
-                    for c in cls]))
+                # snapshot the queue REFERENCE: _load() (reset) swaps in
+                # a fresh list concurrently — check-then-pop on the
+                # attribute raced that and an escaped IndexError killed
+                # this thread for good (cam_kf froze at 0 live).
+                q = getattr(self, "_camq_live", None)
+                if self.data != "live" or not q or not self.k:
+                    time.sleep(0.005)
+                    continue
+                try:
+                    t_us, jb = q.pop()            # newest
+                    q.clear()                     # drop stale
+                except IndexError:
+                    continue
+                k = self.k - 1
+                try:
+                    b = self.cam.compute(k, jb)
+                except Exception:
+                    continue
+                self._cam_track(k, b)
+                if k == last_ingest:
+                    continue
+                last_ingest = k
+                self.cammap.ingest(k, b,
+                                   np.asarray(self.keys[k][0], float),
+                                   self.est[k])
+                cls = self.cammap.classes()
+                if cls:
+                    self.broadcast(dict(classes=[
+                        dict(id=c["id"], n=c["n"], thumb=None,
+                             boost=c["id"] in self.cammap.boost)
+                        for c in cls]))
+            except Exception as e:                # NEVER die silently
+                print(f"[webvis] cam worker error (recovered): {e}",
+                      flush=True)
+                time.sleep(0.1)
 
     def run(self, realtime=True, stop_after=None, loop=False):
         while True:
