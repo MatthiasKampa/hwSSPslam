@@ -11151,3 +11151,28 @@ both pixacc and code-AUC). NYU/SUN indoor results are RETIRED as deploy-relevant
 (wrong domain + wrong format). Anti-oracle: ADE GT trains/scores seg only; no GT
 in the code binarization or binding. Ties to the deploy query being 25%-bit-flip
 robust (their 0.94->1.00 map-recall push) — imperfect codes still recover objects.
+
+## 2026-07-16 — ADE20K-150 net-SCALING sweep: encoder capacity is NOT the pixacc lever (depth mildly helps code-AUC); the 150-class pixacc ~0.31 is a design/task floor, not a size floor
+
+Hypothesis (mine): the pinned ~20k-param tiny net constrains the 150-class
+numbers. Tested by scaling width/depth (full-QVGA RGB, 8000 train, 6000 steps,
+single seed):
+  config       pixacc  codeAUC  params   int4-KB
+  ch16 (base)   0.311   0.663    23463    11.5
+  ch32          0.314   0.667    73655    36.0
+  ch48          0.298   0.658   155591    76.0
+  ch32 deep     0.311   0.689   147447    72.0
+REFUTED. pixacc is FLAT-to-negative across a 6.6x param range (0.311->0.314->
+0.298; ch48 even DROPS). So encoder CAPACITY is not the constraint on 150-class
+pixacc; ~0.31 is a floor of the DESIGN (single linear FC head; 32-bit code; /4
+60x80 grid) + the TASK (150-class scene parsing, 8000 imgs), not of net size.
+ONE mild positive: DEPTH (ch32-deep, extra 3x3 RF block) lifts code class-AUC to
+0.689 (best of the sweep, +0.026 over base) while pixacc stays flat — more
+receptive field sharpens the CODE's class separability (the bind-relevant metric)
+without moving pixel accuracy. IMPLICATION: stop chasing 150-class pixacc via net
+size — it is walled ~0.31 for this design. The bind-relevant metric is code-AUC
+(0.66-0.69), and the deploy QUERY is 25%-bit-flip robust (their 0.94->1.00
+map-recall push), so imperfect codes still recover objects at the MAP level.
+Remaining pixacc levers (if wanted): DESIGN (finer grid) or coarser class sets
+(the surfaces FLOOR), not capacity. Caveats: single-seed; 8000/20k; 6000 steps.
+Anti-oracle: ADE GT scores seg only.
