@@ -11122,3 +11122,32 @@ inefficiency to fix — low effective entropy tracks the DATA ceiling. COROLLARY
 (worth a later width sweep): 32 bits is OVER-PROVISIONED for luma-40 — a
 narrower code (~12-16 bit) should match the 32-bit AUC at fewer descriptor
 bytes. Anti-oracle: GT trains/scores seg only; no GT in the code/query.
+
+## 2026-07-16 — DEPLOY SPEC CORRECTED: full-QVGA RGB many-class segmentation on ADE20K-150 (the mono/half-res/40-class config was wrong on every axis)
+
+User correction (superseding the Y8-mono/120x160/40-class assumption): the vision
+encoder target is FULL QVGA (320x240), RGB, segmentation, PLENTY of classes; and
+NYU/SUN indoor-furniture are the WRONG dataset (SUN-scaling was moot — wrong
+config). Reconfigured + rebuilt on the user-chosen ADE20K-150 (merve/scene_parse_150,
+~20k diverse RGB scenes, 150 classes + 0=void; 8000-train subset, 1000 val):
+  input RGB 320x240 QVGA -> /4 trunk -> 60x80 per-cell code grid, 32-bit code,
+  BottleneckSegNet, 6000 steps.
+  RESULT: pixacc 0.311, code class-AUC 0.663 (150 classes present).
+ESTABLISHED (the reusable wins, dataset-independent):
+  - RGB trains STABLY now — the earlier RGB->NaN was fixed by PER-CHANNEL input
+    standardization (3x input energy had overflowed the unnormalised CReLU stack).
+    (scratch/scratch_rgb_qvga.py, scratch/scratch_ade.py.)
+  - The ~20k-param bottleneck net segments 150 general-scene classes at pixacc
+    0.31 and the +-1 code separates them at AUC 0.66 (genuine, > chance) — the
+    code IS bind-ready for a 150-class map.
+  - CODE WIDTH is NOT the lever at this scale: on the QVGA many-class task, 32 vs
+    64-bit code gave codeAUC 0.681 vs 0.682 (flat) — 32 bits suffices even for
+    hundreds of classes; class info is input/data/net-limited, not code-limited
+    (consistent with A4). (128-bit arm OOM'd at the 0.45 GPU fraction; not a
+    result.)
+CAVEATS: single-seed; 8000/20k train subset; the pinned ~20k-param TINY net (the
+keyframe lane admits ~1 MB int8 -> a bigger net is the obvious next lever for
+both pixacc and code-AUC). NYU/SUN indoor results are RETIRED as deploy-relevant
+(wrong domain + wrong format). Anti-oracle: ADE GT trains/scores seg only; no GT
+in the code binarization or binding. Ties to the deploy query being 25%-bit-flip
+robust (their 0.94->1.00 map-recall push) — imperfect codes still recover objects.
