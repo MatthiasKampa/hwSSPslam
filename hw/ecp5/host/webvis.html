@@ -31,7 +31,7 @@
       <option value="school_run1">school run 1 (real)</option>
       <option value="school_run2">school run 2 (real)</option>
     </select>
-    <select id="rsel" title="dataset replay pose recipe: float = full-precision offline tracker; quantized = the chip's 2-bit QPSK map store (nph=4 — measured lossless at rate, 15x less map memory)" onchange="fetch(`/recipe?r=${this.value}`, {method:'POST'})">
+    <select id="rsel" title="dataset replay pose recipe: float = full-precision offline tracker; quantized = the chip's 2-bit PHASE-ONLY QPSK store — store-retune ladder 2026-07-16: BEATS float on both demo venues (spot 0.037 vs 0.038, run2 2.131 vs 2.185) at 2 b/component; richer stores refuted" onchange="fetch(`/recipe?r=${this.value}`, {method:'POST'})">
       <option value="float">float recipe</option>
       <option value="quantized">quantized 2b (chip)</option>
     </select>

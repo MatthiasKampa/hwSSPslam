@@ -10957,3 +10957,32 @@ HunterFeed (capture3, recorded odom = deploy-config pred) joins spot
 as the second real dataset. python SLAM stays as the comparison lane.
 Selftest (both datasets, headless): PASS — hunter 60 kf: 12 segs,
 tracking, fx-vs-ghost med 1.5 cm early-window.
+
+## 2026-07-16 — STORE RETUNE LADDER (user levers: scales / blanking /
+16-bit): THE CHIP'S PHASE-ONLY 2b STORE BEATS FLOAT on both demo
+venues; the shipped __q regression was the nmag=4 default, not the
+chip; 16-bit refuted
+
+scratch_store_retune.py, demo tracker config, spot (withheld-odom ref)
++ school_run2 (LIO window), err med/p90:
+  float            spot 0.038/0.071   run2 2.185/2.504
+  2b PHASE-ONLY    spot 0.037/0.069   run2 2.131/2.443   <- CHIP STORE
+  2b+2b (old __q)  spot 0.046/0.078   run2 2.289/2.524   <- the bug
+  +ringscales      spot 0.041         run2 2.272
+  +rings+dead      spot 0.037/0.065   run2 2.175
+  3b+2b+r+d        spot 0.036/0.062   run2 2.166
+  4b+4b+r+d        spot 0.033/0.059   run2 2.193
+  8b+8b+r+d (16b)  spot 0.040/0.070   run2 2.195
+VERDICTS: (1) the first __q cache used BandSLAM's nmag=4 DEFAULT —
+mid-tread magnitude code (noise-floor phasors at junk phases) + one
+per-vector scale (coarse rings crush fine) caused the whole 0.046
+regression; the pure phase-only chip store was never the problem and
+BEATS float slightly on BOTH logs (quantization-as-regularization,
+consistent with the hunter tracker bench). (2) The user's levers
+(ring scales + dead-zero blanking) fully REPAIR magnitude stores
+(0.046->0.037 / 2.289->2.175) — the repair kit works, but (3) no
+magnitude-carrying arm dominates phase-only across both venues (4b+4b
+wins spot, loses run2; 16-bit regresses) -> "16-bit store" REFUTED;
+the deploy store stays 2b phase-only = what the silicon already does.
+webvis "quantized" recipe fixed to nmag=1 (chip-exact); est_demo __q
+rebuilt.

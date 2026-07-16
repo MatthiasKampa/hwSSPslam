@@ -636,11 +636,14 @@ CV_CAP = 0.30          # cv-guess translation cap per kf (m). The
 
 
 def make_slam(nph=0):
-    # nph=4 = the QUANTIZED recipe: the chip's 2-bit QPSK map store
-    # (measured lossless at rate on the hunter corpus: pair-cos
-    # 0.956/0.892 vs float 0.957/0.894, map memory 1058 -> 68 KB).
+    # nph=4 = the QUANTIZED recipe: the chip's 2-bit PHASE-ONLY QPSK
+    # store (nmag=1). Store-retune ladder 2026-07-16: phase-only BEATS
+    # float on BOTH demo venues (spot 0.037 vs 0.038, run2 2.131 vs
+    # 2.185); the nmag=4 default was the regression (mid-tread noise
+    # phasors + per-vector scale); richer stores (16b) refuted.
     slam = F.BandSLAM(robust=True, attempt_every=4, relax_every=25,
-                      gap_kf=300, recent_aids=12, spec=None, nph=nph)
+                      gap_kf=300, recent_aids=12, spec=None, nph=nph,
+                      nmag=1 if nph else 0)
     slam.store_dtype = np.complex64
     # HUNTER RETUNE 2 (capture_1784219440 929 kf @ 4 Hz, pair-cos
     # evaluator — re-encode scan k at the estimated delta vs scan k-1):
