@@ -97,9 +97,13 @@ def ros_mode(dst, topic, fps):
                 img = a.reshape(m.height, m.width)
             else:
                 return
-            if img.shape[1] > 320:          # transport thrift at high fps
-                h2 = int(img.shape[0] * 320 / img.shape[1])
-                img = cv2.resize(img, (320, h2))
+            # exact QVGA: center-crop to 4:3, then 320x240 (the pinned
+            # deploy geometry; 120 Hz later = the OV5640's DVP job)
+            H, W = img.shape[:2]
+            cw = min(W, H * 4 // 3)
+            x0 = (W - cw) // 2
+            img = img[:, x0:x0 + cw]
+            img = cv2.resize(img, (320, 240))
             ok, jb = cv2.imencode(".jpg", img,
                                   [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ok:
