@@ -49,6 +49,13 @@
     <tr><td>map memory (bounded)</td><td id="mem"></td></tr>
     <tr><td>err vs withheld ref</td><td id="err"></td></tr>
   </table>
+  <div class="grp">tracking (lidar vs camera)</div>
+  <table>
+    <tr><td>lidar match corr</td><td id="tlid"></td></tr>
+    <tr><td>cam shift agree</td><td id="tcam"></td></tr>
+    <tr><td>yaw cam / lidar</td><td id="tyaw"></td></tr>
+    <tr><td>track divergence</td><td id="tdiv"></td></tr>
+  </table>
   <div id="bar"><div id="fill"></div></div>
   <div class="grp" id="camhdr">camera · click a cell to QUERY the map</div>
   <div id="campanel"><div id="camwrap"><img id="camimg"><div id="qmark"></div></div>
@@ -170,6 +177,12 @@ function panel() {
   $("segs").textContent = `${st.segs} / ${st.loops}`;
   $("mem").textContent = `${st.mem_kb} KB`;
   $("err").textContent = st.err == null ? "—" : `${(st.err*100).toFixed(1)} cm`;
+  if (st.trk_lid) $("tlid").textContent = `${(st.trk_lid[0]*100).toFixed(1)} cm / ${(st.trk_lid[1]*57.3).toFixed(1)}°`;
+  if (st.trk_cam) {
+    $("tcam").innerHTML = `<span class="${st.trk_cam[0]>0.6?"ok":"bad"}">${(st.trk_cam[0]*100).toFixed(0)}%</span>`;
+    $("tyaw").textContent = `${(st.trk_cam[1]*57.3).toFixed(1)} / ${(st.trk_cam[2]*57.3).toFixed(1)} °/s`;
+    $("tdiv").innerHTML = `<span class="${st.trk_cam[3]<0.26?"ok":"bad"}">${(st.trk_cam[3]*57.3).toFixed(1)} °/s</span>`;
+  }
   $("fill").style.width = `${100*(st.k+1)/st.n}%`;
   $("cmtoggle").textContent = `chip-map: ${showChip?"on":"off"}`;
 }

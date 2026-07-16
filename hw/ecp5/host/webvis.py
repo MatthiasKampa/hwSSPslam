@@ -162,6 +162,35 @@ def load_bundle(name):
                 rmin=SP.R_MIN, rmax=SP.R_MAX)
 
 
+def convex_hull(pts):
+    """monotone chain; pts (n,2) -> hull vertices (m,2) CCW."""
+    P = sorted(map(tuple, np.round(np.asarray(pts, float), 3)))
+    if len(P) < 3:
+        return np.asarray(P, float)
+    def half(seq):
+        h = []
+        for q in seq:
+            while len(h) > 1 and (
+                (h[-1][0]-h[-2][0])*(q[1]-h[-2][1])
+                - (h[-1][1]-h[-2][1])*(q[0]-h[-2][0])) <= 0:
+                h.pop()
+            h.append(q)
+        return h
+    lo, hi = half(P), half(P[::-1])
+    return np.asarray(lo[:-1] + hi[:-1], float)
+
+
+def hull_mask(gx, gy, hull):
+    """(ny,nx) bool: grid cells inside the convex hull (CCW)."""
+    XX, YY = np.meshgrid(gx, gy)
+    m = np.ones(XX.shape, bool)
+    n = len(hull)
+    for i in range(n):
+        a, b = hull[i], hull[(i + 1) % n]
+        m &= ((b[0]-a[0])*(YY-a[1]) - (b[1]-a[1])*(XX-a[0])) >= -1e-9
+    return m
+
+
 # ------------------------------------------------------- camera VSA obj map
 class CamMap:
     """The camera-side VSA OBJECT MAP (laptop-side, per the decode-on-
@@ -317,7 +346,8 @@ class CamMap:
                                      # the sweep showed it buys nothing
                                      # once fusion is max (tune_recall)
 
-    def _zquery(self, qa, qa_ctrl, grid_lo, grid_hi, tag, ngrid=96):
+    def _zquery(self, qa, qa_ctrl, grid_lo, grid_hi, tag, ngrid=96,
+                hull=None):
         """CALIBRATED query: z-score the density against a seeded
         RANDOM-CODE control sweep (the honest 'no match' answer — a
         garbage query yields no marks instead of a normalized peak).
@@ -328,6 +358,8 @@ class CamMap:
         mu, sd = (float(np.median(val)), float(val.std() + 1e-9)) \
             if val.size else (0.0, 1.0)
         z = np.where(img > -1e8, (img - mu) / sd, 0.0)
+        if hull is not None and len(hull) >= 3:
+            z[~hull_mask(gx, gy, hull)] = 0.0
         marks = []
         ok = (z > self.Z_TH) & (sup >= self.SUP_MIN)
         cand = np.argwhere(ok)
@@ -357,7 +389,8 @@ class CamMap:
                 return None
             code = (self.cents[cid] > 0.5)
         return self._zquery(np.conj(self._amp(code)), self._rand_amp(),
-                            grid_lo, grid_hi, int(cid), ngrid)
+                            grid_lo, grid_hi, int(cid), ngrid,
+                            hull=getattr(self, "hull_ref", None))
 
     def query_patch(self, k, cells, grid_lo, grid_hi, bits_grid):
         """REGION query (objmap patch form): the dragged cells form a
@@ -381,7 +414,8 @@ class CamMap:
             qc += self._amp(rng.random(32) > 0.5) * ph
         n = np.sqrt(len(pts))
         return self._zquery(np.conj(q / n), np.conj(qc / n),
-                            grid_lo, grid_hi, "patch")
+                            grid_lo, grid_hi, "patch",
+                            hull=getattr(self, "hull_ref", None))
 
     def whatis(self, wx, wy):
         """REVERSE readout: click the MAP -> decode the code bits at
@@ -525,6 +559,8 @@ class Demo:
         self.pts, self.trail_py, self.trail_gt = [], [], []
         self.chip_segs = {}               # slot -> (pose, codes)
         self.chip_img = None
+        self.hull = None                  # convex hull of lidar points
+        self._chip_cursor = 0             # batched sequential decode
         self.ms_slam = self.ms_fpga = 0.0
         self.overruns = 0
         if self.fpga:
@@ -536,19 +572,28 @@ class Demo:
                             cam=bool(self.cam)))
 
     # ---- chip-map image: decode fetched codes at estimated poses -------
-    def _chip_image(self):
-        if not self.chip_segs:
+    def _chip_image(self, batch=16):
+        """Decode the CHIP map over the CONVEX HULL of all lidar points
+        (not a bbox square) — outside-hull cells are never decoded. The
+        per-segment decode is BATCHED (`batch` segments per call, cursor
+        cycling) so laptops spread the cost across keyframes."""
+        if not self.chip_segs or self.hull is None or len(self.hull) < 3:
             return None
-        tr = np.array(self.trail_py) if self.trail_py else np.zeros((1, 2))
-        lo = tr.min(0) - 3.0
-        hi = tr.max(0) + 3.0
+        lo = self.hull.min(0) - 1.0
+        hi = self.hull.max(0) + 1.0
         ngrid = 96
         gx = np.linspace(lo[0], hi[0], ngrid)
         gy = np.linspace(lo[1], hi[1], ngrid)
+        mask = hull_mask(gx, gy, self.hull)
         img = np.zeros((ngrid, ngrid), np.float32)
         XX, YY = np.meshgrid(gx, gy)
         P = np.stack([XX.ravel(), YY.ravel()], 1)
-        for slot, (pose, codes) in list(self.chip_segs.items()):
+        items = list(self.chip_segs.items())
+        if len(items) > batch:             # sequential window
+            s = self._chip_cursor % len(items)
+            items = (items + items)[s:s + batch]
+            self._chip_cursor += batch
+        for slot, (pose, codes) in items:
             vec = np.exp(1j * np.pi / 2 * codes.astype(np.float32))
             d = P - pose[:2]
             m = (np.abs(d) < 3.0).all(1)
@@ -560,11 +605,40 @@ class Demo:
             img.ravel()[np.flatnonzero(m)] = np.maximum(
                 img.ravel()[np.flatnonzero(m)], sc)
         img = np.clip(img / max(img.max(), 1e-9), 0, 1)
+        img[~mask] = 0.0                   # decode only inside the hull
         return dict(x0=float(lo[0]), y0=float(lo[1]),
                     x1=float(hi[0]), y1=float(hi[1]),
                     png=base64.b64encode(
                         (img * 255).astype(np.uint8).tobytes()).decode(),
                     n=ngrid)
+
+    def _cam_track(self, k, bits):
+        """camera shift-tracking: best horizontal cell shift vs the
+        previous frame -> yaw rate estimate + agreement quality; compared
+        against the lidar yaw over the same interval = DIVERGENCE."""
+        prev = getattr(self, "_cam_prev", None)
+        self._cam_prev = (k, bits)
+        if prev is None or k <= prev[0]:
+            return
+        pk, pb = prev
+        best_s, best_a = 0, 0.0
+        for s_ in range(-3, 4):
+            if s_ >= 0:
+                a_ = (bits[:, s_:20] == pb[:, :20 - s_]).mean()
+            else:
+                a_ = (bits[:, :20 + s_] == pb[:, -s_:]).mean()
+            if a_ > best_a:
+                best_a, best_s = float(a_), s_
+        fov = getattr(self.cammap, "HFOV", np.deg2rad(69.0)) \
+            if self.cammap else np.deg2rad(69.0)
+        dtk = max(k - pk, 1) * KF_DT
+        yaw_cam = -best_s * (fov / 20.0) / dtk
+        yaw_lid = float(S.wrap(self.est[k][2] - self.est[pk][2])) / dtk
+        d = abs(float(S.wrap(yaw_cam - yaw_lid)))
+        a = 0.25
+        pv = getattr(self, "trk_cam", (best_a, 0.0, 0.0, 0.0))
+        self.trk_cam = (a * best_a + (1 - a) * pv[0], yaw_cam, yaw_lid,
+                        a * d + (1 - a) * pv[3])
 
     # ---- camera worker (desc bits + VSA obj-map bind, off the hot loop)
     def _cam_worker(self):
@@ -577,6 +651,7 @@ class Demo:
             b = self.cam.compute(k)
             if b is None:
                 continue
+            self._cam_track(k, b)
             if self.cammap is not None:
                 self.cammap.ingest(k, b,
                                    np.asarray(self.keys[k][0], float),
@@ -644,6 +719,12 @@ class Demo:
                               self.est[k - 1][1] + v[1],
                               self.est[k - 1][2] + S.wrap(v[2])])
         e = self.slam.add_keyframe(pts, w, guess)
+        dt_ = float(np.hypot(*(e[:2] - guess[:2])))
+        dr_ = abs(float(S.wrap(e[2] - guess[2])))
+        a = 0.15
+        self.trk_lid = (a * dt_ + (1 - a) * self.trk_lid[0],
+                        a * dr_ + (1 - a) * self.trk_lid[1]) \
+            if hasattr(self, "trk_lid") else (dt_, dr_)
         if self.slam.dirty:
             self.slam.relax()
             e = self.slam.pose_of(k)
@@ -661,6 +742,10 @@ class Demo:
         c, s = np.cos(e[2]), np.sin(e[2])
         wpts = pts[::6] @ np.array([[c, -s], [s, c]]).T + e[:2]
         gt_ok = bool(self.gt_ok[k])
+        if len(wpts):                      # grow-only hull, cheap update
+            base = wpts if self.hull is None else np.vstack(
+                [self.hull, wpts])
+            self.hull = convex_hull(base)
         with self.lock:
             self.pts.extend(np.round(wpts, 3).tolist())
             if len(self.pts) > MAX_PTS:
@@ -688,13 +773,17 @@ class Demo:
                             if ed[5] == "loop"),
                   chip_segs=len(self.chip_segs),
                   overruns=self.overruns,
+                  trk_lid=[round(v, 3) for v in
+                           getattr(self, "trk_lid", (0, 0))],
+                  trk_cam=[round(v, 3) for v in
+                           getattr(self, "trk_cam", (0, 0, 0, 0))],
                   wpts=np.round(wpts, 3).tolist())
         self.k += 1
         if self.k >= self.n:
             self.done = True
             st["done"] = True
         self.broadcast(st)
-        if self.fpga and k and k % 25 == 0:
+        if self.fpga and k and k % 8 == 0:
             img = self._chip_image()
             if img:
                 self.broadcast(dict(chipmap=img))
@@ -777,11 +866,16 @@ def make_handler(demo):
                     with demo.cam.lock:
                         bg = demo.cam.bits.get(int(q["k"]))
                     if bg is not None:
+                        h = demo.hull
                         tr = np.array(demo.trail_py)
+                        lo = (h.min(0) - 1.0) if h is not None \
+                            and len(h) >= 3 else tr.min(0) - 3.0
+                        hi = (h.max(0) + 1.0) if h is not None \
+                            and len(h) >= 3 else tr.max(0) + 3.0
+                        demo.cammap.hull_ref = h
                         res = demo.cammap.query_patch(
                             int(q["k"]),
-                            [tuple(c) for c in q["cells"]],
-                            tr.min(0) - 3.0, tr.max(0) + 3.0, bg)
+                            [tuple(c) for c in q["cells"]], lo, hi, bg)
                     if res:
                         demo.broadcast(dict(objmap=res))
                 self._json(dict(ok=res is not None))
@@ -811,10 +905,14 @@ def make_handler(demo):
                 ln = int(self.headers.get("Content-Length", 0))
                 q = json.loads(self.rfile.read(ln) or b"{}")
                 if demo.cammap and demo.trail_py:
+                    h = demo.hull
                     tr = np.array(demo.trail_py)
-                    res = demo.cammap.query(int(q["id"]),
-                                            tr.min(0) - 3.0,
-                                            tr.max(0) + 3.0)
+                    lo = (h.min(0) - 1.0) if h is not None and len(h) >= 3 \
+                        else tr.min(0) - 3.0
+                    hi = (h.max(0) + 1.0) if h is not None and len(h) >= 3 \
+                        else tr.max(0) + 3.0
+                    demo.cammap.hull_ref = h
+                    res = demo.cammap.query(int(q["id"]), lo, hi)
                     if res:
                         demo.broadcast(dict(objmap=res))
                     self._json(dict(ok=res is not None))

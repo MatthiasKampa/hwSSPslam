@@ -137,6 +137,7 @@ class LiveDemo(webvis.Demo):
                 b = self.cam.compute(k, jb)
             except Exception:
                 continue
+            self._cam_track(k, b)
             self.cammap.ingest(k, b, np.asarray(self.keys[k][0], float),
                                self.est[k])
             self.broadcast(dict(cam_kf=int(k), jpg=__import__(
