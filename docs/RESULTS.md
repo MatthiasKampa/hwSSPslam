@@ -11349,3 +11349,22 @@ ENCODER itself is ready (trains stable at /255, transfers to the real robot
 domain, code separates classes at 0.66). NOT banking a broken export. Alternative
 if RGB is negotiable: a Y8-MONO (240,320,1) bottleneck fits the geometry today but
 contradicts the user's explicit RGB spec — flagged for the user's call.
+
+## 2026-07-16 — D3 self-sup domain adaptation: NO gain — the ADE encoder already transfers, so adaptation has no headroom (negative)
+
+D3 (msg 6b), now unblocked by in-domain data. Arm A = ADE-only; Arm B = CONTRASTIVE
+trunk pretrain on 1632 in-domain robot RGB frames (school_run2 rgb_d455, global
+GAP-InfoNCE, luma-jitter+crop views, 2500 steps) -> ADE seg finetune. ch16, /255:
+  arm                         ADE codeAUC  real adj  real far   gap
+  A: ADE-only                    0.638      0.939    0.392    +0.547
+  B: in-domain-pretrain+ADE      0.646      0.940    0.396    +0.544
+NULL across all metrics (codeAUC +0.008 within noise; real-frame temporal
+discrimination unchanged 0.392->0.396). VERDICT: in-domain self-sup pretrain does
+NOT improve the encoder — because the ADE-trained encoder ALREADY transfers to the
+real robot domain (stability 0.954, prior entry), so there is little domain gap to
+close, and the simple global-InfoNCE adds nothing the seg-finetune doesn't. So
+domain adaptation is NOT the lever for the deploy encoder; the walled fine-class
+discrimination is intrinsic (input/task), not a domain mismatch. Caveats:
+single-seed; a stronger DENSE/pixel-contrastive or longer pretrain untested (could
+extract more, but the transfer-already-works prior makes big gains unlikely).
+Anti-oracle: self-sup uses no labels; ADE GT scores seg only.
