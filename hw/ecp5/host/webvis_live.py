@@ -151,12 +151,13 @@ class LiveDemo(webvis.Demo):
                 # this thread for good (cam_kf froze at 0 live).
                 q = getattr(self, "_camq_live", None)
                 if self.data != "live" or not q or not self.k:
-                    try:                     # replay mode: drain the
-                        k = self.camq.get_nowait()   # DATASET cam queue
-                        self._cam_step(k)    # (parent worker path)
-                        continue
-                    except queue.Empty:
-                        pass
+                    if self.data != "live":  # replay mode ONLY: drain
+                        try:                 # the DATASET cam queue —
+                            k = self.camq.get_nowait()   # in live mode
+                            self._cam_step(k)  # cam is LiveCam(k, jb)
+                            continue
+                        except queue.Empty:
+                            pass
                     time.sleep(0.005)
                     continue
                 try:
