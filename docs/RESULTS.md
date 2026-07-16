@@ -10157,3 +10157,34 @@ WEBVIS SELFTEST PASS (numbers only, rule 3). This is the stream v0's
 first live APPLICATION (G1 was its gate); G2 (fast9-through-ingest
 camera lane) and G3 (encoder-on-streamed-lidar, #43) extend the same
 loop with on-chip compute.
+
+## 2026-07-16 — SAME-CLASS multiplicity: shared-code instances are cross-talk-limited, NOT merge-limited (the _detect cliff is a fixed-threshold artifact)
+
+New regime (deploy-realistic: a room of many chairs). Bind K objects sharing
+ONE class code at separated positions (+6 filler), query the class, count
+distinct instances recovered. Raw _detect recall (D=360, 4-MAD, 20 scenes):
+  K:      1     2     4     6     8    12    16    20
+  recall 1.00  1.00  0.71  0.22  0.15  0.07  0.01  0.01
+Looks like a cliff at K~6 — but the DIAGNOSTIC (self-audit before banking)
+shows the signal is preserved and the cliff is the DETECTOR, not the map:
+  K   peak@true  bg-MAD  thr(4MAD)  true-chairs>thr  z-score
+  1     12.52    1.485     5.82         1.00           8.5
+  4     12.21    2.308     8.99         0.97           5.4
+  8     11.72    3.127    12.28         0.45           3.8
+  16    11.05    4.081    16.22         0.07           2.7
+The peak AMPLITUDE at true chair positions is ~constant (12.5 -> 11.0); what
+grows is the cross-talk BACKGROUND (MAD 1.49 -> 4.08) as K shared-code deltas
+sum their sidelobes. The true-position z-score degrades GRACEFULLY (8.5 -> 2.7
+over K=1..16), ~1/sqrt(K)-like — NOT a merge. The recall cliff is the FIXED
+4-MAD threshold crossing the falling z-score around K~6-8 (z~4). Honest reads:
+  - Same-class multiplicity IS more limited than distinct-class capacity
+    (~sqrt(D)~19 distinct vs the shared-code regime), because every instance
+    excites the SAME query, so their sidelobes stack into common background.
+  - But the limit is CROSS-TALK, not peak merging: the map still holds each
+    instance's peak (amplitude preserved); a fixed 4-MAD detector recovers ~4-5
+    clean same-class instances, and a tuned (lower/matched) threshold recovers
+    more since the peaks stay well above the median out to K~16 (z~2.7).
+  - Deploy implication: same-class-dense scenes (chairs) are a DETECTOR
+    problem, not a representation problem — lower the threshold or read out
+    per-instance at known candidate positions; the bounded vector keeps the
+    peaks. Anti-oracle: synthetic, GT positions score only.
