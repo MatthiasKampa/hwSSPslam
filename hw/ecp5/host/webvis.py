@@ -188,14 +188,18 @@ EST_DEMO = ROOT / "data" / "spot_telluride" / "est_demo.npz"
 
 
 def _attach_est(b):
-    """Attach the offline-built pose-estimate trajectory (est_demo.npz,
-    keyed by dataset name). With no python SLAM in the serving path this
-    is where dataset points register; without it the recorded reference
-    is the fallback (run1 has none -> broken until estcache runs)."""
+    """Attach the offline-built pose-estimate trajectories
+    (est_demo.npz, keyed by dataset name; '<name>__q' = the QUANTIZED
+    recipe variant, nph=4 chip-precision store). With no python SLAM in
+    the serving path this is where dataset points register; without it
+    the recorded reference is the fallback."""
     if EST_DEMO.exists():
         z = np.load(EST_DEMO)
         if b["name"] in z.files and len(z[b["name"]]) >= len(b["keys"]):
             b["est"] = np.asarray(z[b["name"]], float)
+        qk = b["name"] + "__q"
+        if qk in z.files and len(z[qk]) >= len(b["keys"]):
+            b["est_q"] = np.asarray(z[qk], float)
     return b
 
 
@@ -631,9 +635,12 @@ CV_CAP = 0.30          # cv-guess translation cap per kf (m). The
                        # stable. scratch_hunter_retune 2026-07-16.
 
 
-def make_slam():
+def make_slam(nph=0):
+    # nph=4 = the QUANTIZED recipe: the chip's 2-bit QPSK map store
+    # (measured lossless at rate on the hunter corpus: pair-cos
+    # 0.956/0.892 vs float 0.957/0.894, map memory 1058 -> 68 KB).
     slam = F.BandSLAM(robust=True, attempt_every=4, relax_every=25,
-                      gap_kf=300, recent_aids=12, spec=None, nph=0)
+                      gap_kf=300, recent_aids=12, spec=None, nph=nph)
     slam.store_dtype = np.complex64
     # HUNTER RETUNE 2 (capture_1784219440 929 kf @ 4 Hz, pair-cos
     # evaluator — re-encode scan k at the estimated delta vs scan k-1):
@@ -674,12 +681,14 @@ def build_est_cache(names=None):
     if EST_DEMO.exists():
         z = np.load(EST_DEMO)
         out = {k: np.asarray(z[k]) for k in z.files}
-    for name in names or DATASETS:
+    for name, suffix, nph in [(n_, s_, q_) for n_ in (names or DATASETS)
+                              for s_, q_ in (("", 0), ("__q", 4))]:
         b = load_bundle(name)
         b.pop("est", None)                     # never seed from a cache
+        b.pop("est_q", None)
         keys, beam = b["keys"], b["beam"]
         n = len(keys)
-        slam = make_slam()
+        slam = make_slam(nph=nph)
         est = np.zeros((n, 3))
         t0 = time.time()
         for k in range(n):
@@ -696,7 +705,7 @@ def build_est_cache(names=None):
         dy = np.abs(np.diff(est[:, 2]))
         dy = np.rad2deg(np.minimum(dy, 2 * np.pi - dy))
         gt_ok = np.asarray(b.get("gt_ok", np.zeros(n, bool)))[:n]
-        line = (f"  {name}: {n} kf in {time.time()-t0:.0f}s | "
+        line = (f"  {name}{suffix}: {n} kf in {time.time()-t0:.0f}s | "
                 f"|dyaw|/kf med {np.median(dy):.2f} p90 "
                 f"{np.percentile(dy, 90):.1f} deg")
         if gt_ok.any():
@@ -707,7 +716,7 @@ def build_est_cache(names=None):
                      f"p90 {np.percentile(err, 90):.3f} m "
                      f"({len(err)} kf)")
         print(line, flush=True)
-        out[name] = est
+        out[name + suffix] = est
     np.savez_compressed(EST_DEMO, **out)
     print(f"wrote {EST_DEMO} ({', '.join(sorted(out))})")
 
@@ -745,7 +754,10 @@ class Demo:
         self.keys, self.beam = self.b["keys"], self.b["beam"]
         self.n = len(self.keys)
         self.gt_ok = np.asarray(self.b.get("gt_ok", np.ones(self.n, bool)))
+        rq = getattr(self, "recipe", "float") == "quantized"
         self.pose_src = ("odom (replay)" if self.b.get("kind") == "capture"
+                         else "est-cache (QUANTIZED 2b)"
+                         if rq and self.b.get("est_q") is not None
                          else "est-cache" if self.b.get("est") is not None
                          else "ref")
         self.cam = None
@@ -939,10 +951,16 @@ class Demo:
             self.broadcast(dict(cam_kf=int(k),
                                 jpg=base64.b64encode(jb).decode()))
 
+    recipe = "float"          # dataset replay: "float" | "quantized"
+
     def pose_for(self, k, r, gtp):
         """Pose estimate for keyframe k (the ONLY pose authority in the
-        serving path). Base: bundle est cache / recorded pose."""
-        est_ref = self.b.get("est")
+        serving path). Base: bundle est cache (float or QUANTIZED chip-
+        precision recipe per self.recipe) / recorded pose."""
+        est_ref = (self.b.get("est_q") if self.recipe == "quantized"
+                   else None)
+        if est_ref is None:
+            est_ref = self.b.get("est")
         return np.asarray(est_ref[k] if est_ref is not None else gtp,
                           float).copy()
 
@@ -1121,6 +1139,12 @@ def make_handler(demo):
                     if res:
                         demo.broadcast(dict(objmap=res))
                 self._json(dict(ok=res is not None))
+            elif self.path.startswith("/recipe"):
+                rr = self.path.split("=")[-1]
+                if rr in ("float", "quantized"):
+                    demo.recipe = rr
+                    demo._req_reset = True
+                self._json(dict(ok=True, recipe=rr))
             elif self.path.startswith("/whatis"):
                 ln = int(self.headers.get("Content-Length", 0))
                 q = json.loads(self.rfile.read(ln) or b"{}")
