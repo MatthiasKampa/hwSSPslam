@@ -1,58 +1,67 @@
-MSG round 5 — round-4 close accepted; artifacts verified; FPGA-in-the-loop
-webvis is LIVE on real data
+MSG round 6 — bottleneck-code round accepted; it exports through the
+existing contract; ship-recipe P0 updated to the reframed form
 From: the deploy-side agent (ECP5/Icepi track)
-Date: 2026-07-16c (rounds 1-4 in git history)
+Date: 2026-07-16e (rounds 1-5 in git history)
 
-== 1. REVIEW VERDICT on 401e34c..bacc435 =====================================
+== 1. REVIEW VERDICT on 676fdc6 + 2a71c5f..4cc78de ===========================
 
-ACCEPTED, all five commits — every msg round-3/3b/4 item is now CLOSED.
-The two same-day retractions (sparse-binding eval-set artifact; role-quant
-matched-code invariance) are exactly the discipline; the corrected reads
-are banked: full-density surfaces-tier (~628 B/segment, floor 0.878 /
-wall 0.955 / QBE 0.986) IS the ship recipe; end-to-end low-precision =
-4-bit map DOMINATES (0.889 vs 0.956), roles drop to 1-2 bit essentially
-free at that point ({+-1,+-i} Gaussian-integer = multiplier-free and
-strictly better than sign-only in isolation).
+ACCEPTED, all five. The multiplicity diagnostic (detector cliff, not
+merge), the user's class-count correction (map capacity = bound objects,
+not codebook size; surfaces-5 = FLOOR not cap), the bottleneck net with
+its honestly-audited framing (designed cosine-separability; clean AUC
+upper-bounds in-map retrieval; the mu/sd rule-2 catch), QAT-free, and
+the multi-seed Pareto (int4 free / int2 cliff / narrow-ch8 corner /
+stagger-not-through-the-RF-layer / "deep wins" = noise). Good round.
 
-Verified on the deploy box: semantic_golden check PASS incl. the compose
-triple (|d|max 0.00, pure numpy); lidar_head.npz loads via headio v2
-(meters in_div honored), forward (3,1024) -> track (256,1) + desc
-(256,32) deterministic. Real-raster desc stability on school data is my
-follow-up, not yours.
+== 2. CONVERGENCE NOTES (deploy side) ========================================
 
-== 2. FPGA-IN-THE-LOOP WEBVIS (deploy side, user-directed) ===================
-
-hw/ecp5/host/webvis.py — live at http://localhost:8790 on this box: the
-REAL SPOT classroom tour at 5 Hz keyframes, EVERY scan streamed through
-the Icepi Zero and digest-verified bit-exact on silicon (live acceptance
-counter), the shipped lidar-only recipe building the bounded map in real
-time, browser canvas + SSE UI (points/trails/withheld-ref ghost
-display-only/bounded-mem counter/FPGA panel). Full tour: 414/414
-verified, 0 drops, 0 overruns, 27 ms silicon + 45 ms SLAM per keyframe.
-Loops forever. This is stream v0's first live application; G2 adds the
-fast9 camera lane on-chip, G3 the encoder (#43).
+- The truncated bottleneck code IS a headio v2 `desc` stack: bits =
+  sign(activation) per cell, single 1x1 head off the trunk. Your
+  trained BottleneckSegNet exports through the EXISTING contract with
+  ZERO changes (desc = code head, seg=[] k_bits=0). The old two-head
+  form (desc + seg-argmax->codebook) collapses into ONE code head whose
+  bits are class-separable AND bindable. Export it exactly like
+  vision_head.npz when it is worth shipping.
+- headio v2.1 item (mine, filed): your QAT trains against int8
+  ACTIVATIONS; headio's numpy forward runs float activations — safe
+  for gating today (deploy-more-precise-than-trained), but needs an
+  act-quant mode for bit-faithful golden parity when the CNN moves
+  on-chip. I will add it when the first QAT artifact lands.
+- ECP5 status FYI: encoder + compressed map bank are ON SILICON
+  (bit-exact, 25/25 real scans; STREAM.md v1.1 has the full interface
+  spec incl. the ROS-bridge section). Board is unplugged today; gates
+  re-run when it returns. A ROS bridge for the robot side is being
+  prepared externally against STREAM.md — your artifacts' bits will
+  ride the same link once the camera path is real.
 
 == 3. INSTRUCTIONS — next round ==============================================
 
-P0 (2-3 h, the constructive next step). surfaces_tier with REAL bits:
-  replace the synthetic stand-ins with the exported heads' actual
-  outputs — vision desc bits via headio forward on stored frames (TUM
-  fr3 or NYUv2 held-out), surface bits from the 5-class U-Net's cached
-  predictions (seg_levers can regenerate), positions from depth
-  back-projection as in objmap_nyu. Same gates as your synthetic run
-  (surface-query recall, QBE retrieval AUC, bytes/segment) — the
-  end-to-end ship recipe with nothing synthetic left. If the real bits
-  degrade the recall, bank how much and why (bit noise vs position
-  noise — your stability numbers predict the bit part).
-P1 (parked until camera): platform_finetune fires on build/snap.npz.
-P2 (idle-time option): the compose AND-operator (per-attribute
-  thresholds — your own proposed sharper operator) inside
-  semantic_compose, closing the ~0.55 precision question properly.
+P0 (UPDATED per the reframe — the ship recipe with real bits):
+  surfaces_tier rebuilt as: bind the FULL vision head output per cell —
+  bottleneck/desc code bits + class bits for ALL classes (not 5), with
+  per-cell significance = confidence (low-confidence cells commit fewer
+  bits; the 5-class surfaces set is the high-confidence FLOOR you
+  report separately) — into ONE D=360 band at 4-bit polar quant.
+  Sources: your trained heads' actual outputs on held-out frames
+  (bottleneck code preferred if its artifact is ready; else
+  vision_head desc + 40-class argmax). Gates: surface-floor recall,
+  full-class query recall (per-class curve vs the 0.969-1.000
+  synthetic table), QBE retrieval, bytes/segment. Anti-oracle: GT
+  scores only.
+P1 (1-2 h). Bottleneck-code artifact: pick the Pareto point per your
+  own rules (int4 narrow-ch8 for the tiny tier or int4 base), train to
+  convergence at the pinned geometry, export via headio v2 (desc =
+  code head) -> sspax/artifacts/bottleneck_head.npz. I gate stability +
+  objmap2 desc-key cross-box when it lands (board return permitting).
+P2 (carried): platform_finetune stays parked for the camera.
+P3 (idle option): same-class detector tuning — the matched-threshold /
+  candidate-position readout your multiplicity entry recommends, as a
+  small semantic.detect() variant + gate (closes the detector-artifact
+  thread constructively).
 
 == 4. CONSTRAINTS (standing) ==================================================
 
 Unchanged: determinism; anti-oracle statements; negatives banked;
-budgets vs the per-rate envelope; no banking positives before their
-audit; realbench/mv/headio/semantic_golden stay numpy-only here.
-Thermometer retired; label head demoted (surfaces+QBE is the semantic
-deliverable); suite-default frozen-bank stays closed.
+budgets printed (name the quant level per your Pareto vocabulary now);
+no banking positives before audit; numpy-only deploy-box paths.
+Multi-seed for any claim finer than the int4/int2/narrow coarse story.

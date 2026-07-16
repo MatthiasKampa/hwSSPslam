@@ -10409,3 +10409,42 @@ int8-base" was PARTLY NOISE — over 3 seeds deep (0.345 +- 0.012) OVERLAPS int8
 int4 (all ~0.33-0.34, the luma-40 ceiling). The robust levers are only:
 int4-is-free, int2-is-a-cliff, and narrow-is-Pareto-efficient. Single-seed
 fine orderings (~+-0.02) were noise, as flagged; the coarse story holds.
+
+## 2026-07-16 — deploy-side review of 676fdc6 + 2a71c5f..4cc78de: all accepted; the bottleneck code exports through the EXISTING desc slot; ship-recipe update queued
+
+Five commits reviewed (ECP5 unplugged today — no hardware gates; review
+is code/ledger-level). Verdicts:
+
+- SAME-CLASS MULTIPLICITY — accepted, exemplary diagnostic: the K~6
+  recall cliff is the fixed 4-MAD detector crossing a gracefully
+  degrading z-score (~1/sqrt(K); peaks preserved to K=16), not peak
+  merging. Deploy read: dense same-class scenes are a DETECTOR-tuning
+  problem (matched thresholds / candidate-position readout).
+- CLASS COUNT IS NOT A MAP COST (user correction) — accepted, and it
+  usefully REVISES the demotion narrative: the label-head demotion was
+  always about CNN accuracy, never map capacity (recall flat-to-better
+  at 5->80 classes, fixed 45 B; mechanistic via fewer same-class
+  collisions). The ship recipe becomes: surfaces-5 = high-confidence
+  FLOOR; bind the FULL class output soft (significance = confidence) +
+  desc bits; lidar stays tracking-only. Their msg-r5 P0 (surfaces_tier
+  with real bits) should build THIS form — queued in msg round 6.
+- BOTTLENECK SEG NET (user architecture) — accepted with their audit's
+  honest frame (cosine-separability is DESIGNED by the single-linear-
+  head constraint; clean AUC upper-bounds in-map retrieval; a rule-2
+  mu/sd split leak self-caught and fixed). KEY CONVERGENCE (deploy
+  side): the truncated bottleneck code is bits = sign(act) per cell —
+  EXACTLY headio v2's `desc` stack semantics. The trained bottleneck
+  net exports through the EXISTING contract with zero changes (desc =
+  the code head; seg=[] stays legal). The separate desc+seg-argmax
+  pair collapses into one code head whose bits are simultaneously
+  class-separable and bindable.
+- FULL QAT FREE + ARCH x QUANT PARETO (multi-seed-firmed) — accepted:
+  int4 weights+acts near-free (robust), int2 a genuine unstable cliff,
+  narrow-ch8-int4 the Pareto corner (0.307 @ 4.2 KB), mixed precision
+  staggers DOWN toward the head but never through the receptive-field
+  layer, and the "deep beats int8" single-seed over-read was corrected
+  to noise. CONTRACT NOTE: their QAT trains against int8 ACTIVATIONS,
+  which headio's numpy forward does not model (float acts — the safe
+  direction for gating, deploy-more-precise-than-trained). When the
+  CNN moves on-chip, headio needs an activation-quant mode for
+  bit-faithful golden parity — filed as the headio v2.1 item.
