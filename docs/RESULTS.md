@@ -10769,3 +10769,40 @@ thread; cam_kf 0 all drive). Fixed (atomic ref + recover-and-log
 loop), deployed, and the same race FIRED AGAIN on the next reset and
 was absorbed ("cam worker error (recovered)") with cam_kf pacing 1:1
 — field-proven. Second drive (with cam bits) captured next.
+
+## 2026-07-16 — DRIVE 2 (capture_1784226283: 2810 kf / 282 s / 36x59 m, cam bits on EVERY kf): 10 Hz cam noise halves; scan<->odom pairing delay measured (+100 ms, r 0.982) and fixed at source; capture replay + live/recorded toggle in webvis
+
+CAM NOISE AT RATE: adjacent-kf desc-bit flip 0.128 med / 0.262 p90 at
+10 Hz keyframes — less than HALF the 4 Hz-era measurement (0.284 /
+0.414). HAM_T 11 now sits ABOVE the p90 same-object flip (~8.4/32)
+instead of below it: clustering improved with no change. (The drive-1
+cam outage was the reset-race bug, banked above; drive 2 recorded
+2810/2810 grids through the C kernel.)
+
+ODOM CROSS-CHECK, DRIVE 2: tracker pair-cos 0.974/0.915 vs raw odom
+0.950/0.506; RPE1s 9.1 cm / 2.13 deg (drive 1: 17.1 / 14.0 — that
+drive was turn-heavy where Ackermann yaw degrades). Configs again
+BIT-IDENTICAL at 10 Hz — at-rate indistinguishability replicated on a
+second log.
+
+PAIRING DELAY (user call: "compensate for the different delays,
+measurable from cross-cov"): the bridge paired each scan with the
+LATEST /odom sample at send time. Mean-centered cross-covariance of
+the speed series (tracker vs odom-as-paired): tau* = +100 ms, r =
+0.982 — exactly one 10 Hz keyframe of pipeline delay. The yaw-rate
+channel FAILS to lock (runs to the window edge, r -0.46; odom yaw-rate
+too noisy — consistent with the turn-heavy drive-1 disagreement).
+Series-shift compensation on the recorded corpus is marginal and
+mixed (RPE5s t 73.6 -> 66.7 cm, RPE1s 9.1 -> 10.9): median RPE
+underweights the turn moments where the lag actually bites (live map
+smear). FIXED AT THE SOURCE instead: stream_bridge now pairs each
+scan with odom INTERPOLATED AT THE SCAN STAMP (2 s stamped buffer;
+different-epoch stamps degrade to latest-sample). Deployed, 9.9 Hz
+kf, bit-exact. Next capture should re-fit tau* ~ 0.
+
+WEBVIS REPLAY ("inspect without driving"): capture_<ts>.npz dumps
+appear in the selector as drive_<ts>; replay registers scans at the
+RECORDED odom pose at native rate (chip encodes the replayed scans —
+FPGA stays in the loop), cam lane replays stored C-kernel bit grids
+(QBE/class/patch/reverse queries work offline), plus a live/recorded
+toggle button. Verified on the robot both ways.
