@@ -30,8 +30,114 @@ import jax.numpy as jnp
 import flax.linen as nn
 import optax
 
-from sspax.nnconv import Conv, crelu
+from sspax.nnconv import Conv, crelu, conv2d
 import sspax.vision.segnet as S
+
+
+# --------------------------------------------------------------------------
+#  full QAT: fake-quantize weights (int8 per-cout) AND activations (int8/uint8
+#  per-tensor) in the forward pass, STE through the rounding, so the net trains
+#  against its DEPLOY int8 arithmetic (headio models weight-int8 only; the
+#  activation int8 is the part it does NOT yet model). The bottleneck code stays
+#  1-bit (+-1) — the VSA descriptor.
+# --------------------------------------------------------------------------
+def _ste_round(x):
+    return x + jax.lax.stop_gradient(jnp.round(x) - x)      # round fwd, identity bwd
+
+
+def quant_w(w, bits=8):
+    """per-OUTPUT-CHANNEL symmetric weights at `bits` (matches headio per-cout).
+    bits=1 -> binary {-s,+s} (s = per-cout mean|w|); bits>=2 -> symmetric int."""
+    if bits <= 1:                                          # binary weights (BNN)
+        s = jax.lax.stop_gradient(jnp.mean(jnp.abs(w), axis=(0, 1, 2), keepdims=True) + 1e-12)
+        return jax.lax.stop_gradient(s * jnp.sign(w) - w) + w      # STE: fwd s*sign, bwd identity
+    qmax = 2 ** (bits - 1) - 1
+    s = jax.lax.stop_gradient(jnp.max(jnp.abs(w), axis=(0, 1, 2), keepdims=True) / qmax + 1e-12)
+    return _ste_round(jnp.clip(w / s, -qmax - 1, qmax)) * s
+
+
+def quant_a(x, signed, bits=8):
+    """per-tensor dynamic activations at `bits`. signed int (input) / unsigned
+    (>=0 post-CReLU). bits=1 unsigned -> {0,s} binary activation; 99.9-pct scale."""
+    qmax = (2 ** (bits - 1) - 1) if signed else (2 ** bits - 1)
+    lo = -(2 ** (bits - 1)) if signed else 0
+    s = jax.lax.stop_gradient(jnp.percentile(jnp.abs(x), 99.9) / max(qmax, 1) + 1e-9)
+    return _ste_round(jnp.clip(x / s, lo, qmax)) * s
+
+
+class QuantConv(nn.Module):
+    features: int
+    kernel_size: tuple = (3, 3)
+    strides: tuple = (1, 1)
+    padding: str = "SAME"
+    wbits: int = 8
+
+    @nn.compact
+    def __call__(self, x):
+        kh, kw = self.kernel_size
+        w = self.param("kernel", nn.initializers.lecun_normal(), (kh, kw, x.shape[-1], self.features))
+        b = self.param("bias", nn.initializers.zeros, (self.features,))
+        s = self.strides[0] if isinstance(self.strides, (tuple, list)) else self.strides
+        return conv2d(x, quant_w(w, self.wbits), b, s, self.padding)
+
+
+class QNet(nn.Module):
+    """config-driven QAT net: `layers` = ((features,k,stride,wbits,abits),...) trunk;
+    then int8-weight bottleneck -> 1-bit code -> single FC. Covers arch (widths,
+    depth, kernels) x per-layer quant (int8/int4/int2/binary) incl. STAGGERED."""
+    layers: tuple
+    n_class: int = S.N_CLASS
+    bits: int = 32                                         # code width (channels)
+    code_wbits: int = 8
+    head_wbits: int = 8
+    in_bits: int = 8
+
+    @nn.compact
+    def __call__(self, x):
+        x = quant_a(x, signed=True, bits=self.in_bits)     # input (camera is 8-bit)
+        for (f, k, st, wb, ab) in self.layers:
+            x = crelu(QuantConv(f, (k, k), (st, st), wbits=wb)(x))
+            x = quant_a(x, signed=False, bits=ab)          # post-CReLU (>=0)
+        code = QuantConv(self.bits, (1, 1), wbits=self.code_wbits)(x)
+        t = jnp.tanh(code)
+        b = jax.lax.stop_gradient(jnp.sign(t) - t) + t     # 1-bit code (the VSA descriptor)
+        logits = QuantConv(self.n_class, (1, 1), wbits=self.head_wbits)(b)
+        return dict(logits=logits, code=code, bits=b, trunk=x)
+
+
+def _weight_bytes(layers, code_bits=32, n_class=40):
+    """FPGA weight footprint = sum(param_count * wbits/8) over trunk+code+head.
+    CReLU doubles the channels feeding the next layer."""
+    tot = 0.0; cin = 1                                     # Y8 input
+    for (f, k, st, wb, ab) in layers:
+        tot += (k * k * cin * f) * wb / 8.0
+        cin = f * 2                                        # CReLU doubles
+    tot += (1 * 1 * cin * code_bits) * 8 / 8.0             # code conv (int8 weights)
+    tot += (1 * 1 * code_bits * n_class) * 8 / 8.0         # FC head (int8)
+    return tot
+
+
+class BottleneckSegNetQAT(nn.Module):
+    """full-QAT twin of BottleneckSegNet: int8 weights + int8/uint8 activations
+    (STE), 1-bit bottleneck code, int8 single-FC head."""
+    ch: int = S.CH
+    n_class: int = S.N_CLASS
+    bits: int = 32
+
+    @nn.compact
+    def __call__(self, x):
+        x = quant_a(x, signed=True)                          # int8 input
+        def blk(x, f, k, s):
+            return quant_a(crelu(QuantConv(f, (k, k), strides=(s, s))(x)), signed=False)  # uint8 post-CReLU
+        x = blk(x, self.ch, 3, 2)                            # /2
+        x = blk(x, self.ch, 3, 2)                            # /4
+        x = blk(x, self.ch * 2, 3, 1)                        # dense 3x3
+        trunk = blk(x, self.ch * 2, 1, 1)                    # 30x40x64 int8
+        code = QuantConv(self.bits, (1, 1))(trunk)           # int8-weight -> code (linear)
+        t = jnp.tanh(code)
+        b = jax.lax.stop_gradient(jnp.sign(t) - t) + t       # 1-bit code (STE)
+        logits = QuantConv(self.n_class, (1, 1))(b)          # int8 single FC on +-1 code
+        return dict(logits=logits, code=code, bits=b, trunk=trunk)
 
 
 class BottleneckSegNet(nn.Module):
@@ -60,14 +166,15 @@ def _cw(Ytr, n_class):
     return jnp.asarray(cw / cw[1:].mean())
 
 
-def train(bits=32, n_class=40, hw=(120, 160), steps=4000, seed=0):
+def train(bits=32, n_class=40, hw=(120, 160), steps=4000, seed=0, net=BottleneckSegNet):
     S.N_CLASS = n_class
     X, L = S.load_nyu(hw=hw, max_n=1449)
-    mu, sd = X.mean(), X.std() + 1e-6
+    ntr = int(0.8 * len(X))
+    mu, sd = X[:ntr].mean(), X[:ntr].std() + 1e-6      # TRAIN-only stats (rule 2: no test->train leak)
     X = ((X - mu) / sd).astype(np.float32)
-    ntr = int(0.8 * len(X)); Xtr, Ytr, Xte, Yte = X[:ntr], L[:ntr], X[ntr:], L[ntr:]
+    Xtr, Ytr, Xte, Yte = X[:ntr], L[:ntr], X[ntr:], L[ntr:]
     cw = _cw(Ytr, n_class)
-    model = BottleneckSegNet(n_class=n_class, bits=bits)
+    model = net(n_class=n_class, bits=bits)
     params = model.init(jax.random.PRNGKey(seed), jnp.zeros((1,) + X.shape[1:]))
     opt = optax.adamw(2e-3); st = opt.init(params)
 
@@ -124,6 +231,85 @@ def run(bits=32, n_class=40, steps=4000):
     return pixacc, auc
 
 
+def run_qat(bits=32, n_class=40, steps=4000):
+    """side-by-side: FLOAT-trained vs FULL-QAT (int8 weights + int8/uint8 acts,
+    1-bit code). Same seed/data — the gap is the honest int8-arithmetic cost."""
+    print(f"FULL QAT vs FLOAT bottleneck seg (int8 weights+acts, 1-bit code; "
+          f"bits={bits}, {n_class}-class):", flush=True)
+    print(f"  {'arm':>10}  {'seg pixacc':>10}  {'code AUC':>9}")
+    rows = {}
+    for tag, net in (("float", BottleneckSegNet), ("QAT-int8", BottleneckSegNetQAT)):
+        model, params, Xte, Yte, t0 = train(bits=bits, n_class=n_class, steps=steps, net=net)
+        pixacc, sc, dc, auc = _eval(model, params, Xte, Yte)
+        rows[tag] = (pixacc, auc)
+        print(f"  {tag:>10}  {pixacc:>10.3f}  {auc:>9.3f}   t={time.time()-t0:.0f}s", flush=True)
+    dp = rows["QAT-int8"][0] - rows["float"][0]; da = rows["QAT-int8"][1] - rows["float"][1]
+    print(f"  => QAT-int8 vs float: dpixacc {dp:+.3f}  dAUC {da:+.3f}. Full QAT "
+          f"trains the trunk against its int8 deploy arithmetic (headio models "
+          f"weight-int8 only); a near-zero gap means int8 is free here.")
+    return rows
+
+
+def _fit(model, Xtr, Ytr, cw, steps, seed=0):
+    ntr = len(Xtr)
+    params = model.init(jax.random.PRNGKey(seed), jnp.zeros((1,) + Xtr.shape[1:]))
+    opt = optax.adamw(2e-3); st = opt.init(params)
+
+    @jax.jit
+    def step(p, st, xb, yb):
+        def loss(pp): return S.seg_loss(model.apply(pp, xb)["logits"], yb, cw)
+        l, g = jax.value_and_grad(loss)(p); u, st2 = opt.update(g, st, p)
+        return optax.apply_updates(p, u), st2, l
+    rng = np.random.default_rng(0)
+    for s in range(steps):
+        b = rng.integers(0, ntr, 8)
+        xa = Xtr[b] + rng.normal(0, 0.05, Xtr[b].shape).astype(np.float32)
+        params, st, _ = step(params, st, jnp.asarray(xa), jnp.asarray(S._pool_labels(Ytr[b])))
+    return params
+
+
+def sweep(steps=2500, n_class=40):
+    """arch x quant-level sweep, incl. STAGGERED per-layer precision. Loads NYU
+    once; trains each config; reports pixacc / code-AUC / FPGA weight-KB."""
+    S.N_CLASS = n_class
+    X, L = S.load_nyu(hw=(120, 160), max_n=1449)
+    ntr = int(0.8 * len(X)); mu, sd = X[:ntr].mean(), X[:ntr].std() + 1e-6
+    X = ((X - mu) / sd).astype(np.float32)
+    Xtr, Ytr, Xte, Yte = X[:ntr], L[:ntr], X[ntr:], L[ntr:]
+    cw = _cw(Ytr, n_class)
+    TRUNK = [(16, 3, 2), (16, 3, 2), (32, 3, 1), (32, 1, 1)]        # the pinned base trunk
+    base = lambda q: tuple((f, k, st, q, q) for (f, k, st) in TRUNK)
+    stag = lambda ps: tuple((f, k, st, wb, ab) for (f, k, st), (wb, ab) in zip(TRUNK, ps))
+    arch = lambda tr, q: tuple((f, k, st, q, q) for (f, k, st) in tr)
+    configs = [
+        ("uniform int8",     base(8)),
+        ("uniform int4",     base(4)),
+        ("uniform int2",     base(2)),
+        ("uniform binary",   base(1)),
+        ("stagger 8-4-2-2",  stag([(8, 8), (4, 4), (2, 2), (2, 2)])),
+        ("stagger 8-4-4-2",  stag([(8, 8), (4, 4), (4, 4), (2, 2)])),
+        ("stagger 8-2-2-1",  stag([(8, 8), (2, 2), (2, 2), (1, 1)])),  # binary tail
+        ("narrow ch8 int4",  arch([(8, 3, 2), (8, 3, 2), (16, 3, 1), (16, 1, 1)], 4)),
+        ("wide ch24 int4",   arch([(24, 3, 2), (24, 3, 2), (48, 3, 1), (48, 1, 1)], 4)),
+        ("shallow int4",     arch([(16, 3, 2), (16, 3, 2), (32, 1, 1)], 4)),
+        ("deep int4",        arch([(16, 3, 2), (16, 3, 2), (32, 3, 1), (32, 3, 1), (32, 1, 1)], 4)),
+    ]
+    print(f"ARCH x QUANT sweep (NYUv2 {n_class}-class, {steps} steps, 1-bit code fixed):", flush=True)
+    print(f"  {'config':>18} {'pixacc':>7} {'codeAUC':>8} {'W-KB':>7} {'params':>8}")
+    rows = []
+    for name, layers in configs:
+        model = QNet(layers=layers, n_class=n_class, bits=32)
+        params = _fit(model, Xtr, Ytr, cw, steps)
+        pixacc, sc, dc, auc = _eval(model, params, Xte, Yte)
+        wkb = _weight_bytes(layers, 32, n_class) / 1024
+        nparam = int(sum(p.size for p in jax.tree_util.tree_leaves(params)))
+        rows.append((name, pixacc, auc, wkb, nparam))
+        print(f"  {name:>18} {pixacc:>7.3f} {auc:>8.3f} {wkb:>7.1f} {nparam:>8d}", flush=True)
+    print("  => pixacc/AUC vs weight-KB = the FPGA accuracy/footprint Pareto; "
+          "staggered rows test per-layer mixed precision. 1-bit code = the descriptor.")
+    return rows
+
+
 def smoke():
     """tiny synthetic dry-run (no NYU): confirms the net trains + shapes."""
     S.N_CLASS = 6
@@ -133,7 +319,12 @@ def smoke():
     o = model.apply(params, jnp.asarray(X[:2]))
     print("smoke shapes:", {k: tuple(np.asarray(v).shape) for k, v in o.items()})
     print("bits are +-1:", bool(np.all(np.abs(np.asarray(o["bits"])) == 1.0)))
+    q = BottleneckSegNetQAT(n_class=6, bits=32)
+    oq = q.apply(q.init(jax.random.PRNGKey(0), jnp.zeros((1,) + X.shape[1:])), jnp.asarray(X[:2]))
+    print("QAT smoke shapes:", {k: tuple(np.asarray(v).shape) for k, v in oq.items()},
+          " bits +-1:", bool(np.all(np.abs(np.asarray(oq["bits"])) == 1.0)))
 
 
 if __name__ == "__main__":
-    smoke() if len(sys.argv) > 1 and sys.argv[1] == "smoke" else run()
+    a = sys.argv[1] if len(sys.argv) > 1 else ""
+    (smoke if a == "smoke" else run_qat if a == "qat" else sweep if a == "sweep" else run)()

@@ -10313,3 +10313,76 @@ seg ACCURACY (pixacc 0.338 = the known luma-40-class ceiling; RESULTS 2026-07-15
 "seg bottleneck is NOT capacity"), NOT by the encoder architecture — more classes
 / a stronger input (RGB-D, at fewer classes) lift both together. Anti-oracle:
 NYUv2 GT labels train + score the seg task only; no GT touches the binding.
+
+## 2026-07-16 — bottleneck encoder: rule-4 audit corrections + FULL QAT is free (int8 weights+acts)
+
+AUDIT CORRECTIONS to the bottleneck-encoder entry above (read-only agent, all
+reproduced): (1) "VSA-agnostic pretrain PRODUCES a bind-ready code" was an
+over-read — the single-linear-head + binary-bottleneck IS the VSA-readiness
+inductive bias; the cosine-separability (AUC ~0.70) is a DESIGNED consequence of
+constraining the readout to one linear layer, NOT an emergent property (a soft
+tautology of linear-classifier training). The untrained control (0.496) proves it
+requires training, but does not make it "emergent." (2) per-class-BALANCED AUC =
+0.687 (~= pooled 0.700), so frequent-class (wall/floor) inflation is NOT the
+driver — separability is broad across classes. (3) clean-code AUC UPPER-BOUNDS
+in-map retrieval (superposition crosstalk lowers the real query fidelity) — it is
+not the deploy number. (4) low effective bit-usage: untrained same~=diff~=0.55
+DC component => effective code entropy < 32 bits. (5) rule-2: mu/sd were computed
+over full X (train+test) — FIXED to train-only (bottleneck_seg.py). Corrected
+claim: a per-pixel binary bottleneck + single linear head trained on seg CE gives
+a +-1 code cosine-separable by the seg classes (pixacc 0.338, AUC ~0.70 balanced,
+vs 0.50 untrained) — a valid end-to-end demo that the binary bottleneck can HOST
+the linear class boundary, quality bounded by seg accuracy; the cosine-readiness
+is designed, and clean AUC upper-bounds in-map retrieval.
+
+FULL QAT (new): int8 weights (per-cout) + int8/uint8 activations (per-tensor,
+STE), 1-bit code — the whole trunk trained against its int8 deploy arithmetic
+(headio models weight-int8 only; the activation-int8 is the part it does not yet
+model). NYUv2 40-class, same seed/data:
+  arm        seg pixacc   code AUC
+  float        0.340        0.728
+  QAT-int8     0.339        0.717     (dpixacc -0.000, dAUC -0.011)
+=> full int8 QAT is essentially FREE here — no accuracy cost over float. int8 is
+not the limiter; the seg accuracy is. Sets up the arch x quant-level sweep.
+
+## 2026-07-16 — ARCH x QUANT-LEVEL sweep for the FPGA bottleneck encoder (int8/int4/int2/binary + staggered mixed precision + arch variants)
+
+Generalized QAT (per-cout weights, per-tensor activations, STE, at arbitrary
+bits; 1-bit VSA code fixed) swept over quant levels AND architectures. NYUv2
+40-class, 2500 steps, single seed. pixacc = deployable binary-code path;
+W-KB = FPGA weight footprint (sum params*wbits/8). (sspax/vision/bottleneck_seg.py
+QNet + sweep().)
+  config              pixacc  codeAUC   W-KB   params
+  uniform int8         0.325   0.706    18.9   19512
+  uniform int4         0.311   0.689    11.1   19512
+  uniform int2         0.269   0.563     7.2   19512
+  uniform binary       0.250   0.694     5.2   19512
+  stagger 8-4-2-2      0.257   0.480     8.4   19512
+  stagger 8-4-4-2      0.313   0.668    10.6   19512
+  stagger 8-2-2-1      0.258   0.705     7.0   19512
+  narrow ch8 int4      0.299   0.670     4.2    6464
+  wide ch24 int4       0.326   0.707    21.8   40496
+  shallow int4         0.275   0.642     6.1    9240
+  deep int4            0.341   0.722    20.1   37976
+CAVEAT: single-seed; code-AUC carries ~+-0.03 noise (binary 0.694 > int2 0.563
+is within noise), so read pixacc as primary and only COARSE orderings as robust.
+All numbers sit in the luma-40-class band (0.25-0.34) — the sweep ranks FOOTPRINT
+at fixed task difficulty, NOT the accuracy ceiling.
+
+ACTIONABLE FPGA RULES (coarse, robust):
+1. int4 weights+acts is NEAR-FREE (0.311 vs int8 0.325) at ~60% the bytes ->
+   the DEFAULT deploy precision. int2 is the CLIFF (0.269); binary lower on
+   pixacc (0.250). Below int4, accuracy degrades.
+2. MIXED PRECISION has a rule: the dense-3x3 (main receptive-field) layer is
+   PRECISION-SENSITIVE — keep it >= int4; the final 1x1 TAIL tolerates int2/
+   binary. stagger 8-4-4-2 = int4-quality at 10.6 KB; 8-4-2-2 (int2 in the RF
+   layer) COLLAPSES (AUC 0.480, below chance). So stagger DOWN toward the head,
+   never through the RF layer.
+3. ARCHITECTURE: DEPTH/receptive-field helps most (deep int4 0.341 — best of
+   the sweep, beats int8-base); width helps modestly (wide 0.326); dropping the
+   dense 3x3 HURTS (shallow 0.275 — RF matters). narrow ch8 int4 is the
+   PARETO-EFFICIENCY corner: 0.299 at 4.2 KB / 6.5K params (~92% of int8-base
+   accuracy at ~22% of the bytes).
+PARETO: tiny = narrow-ch8-int4 (0.299 @ 4.2 KB); balanced = int4 / stagger-8-4-4-2
+(~0.31 @ ~11 KB); max = deep-int4 (0.341 @ 20 KB). Anti-oracle: NYUv2 GT trains/
+scores the seg task only; no GT touches the code binarization or binding.
