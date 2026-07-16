@@ -11097,3 +11097,28 @@ only 10/70 marks — the appearance clusters over-merge real imagery
 (scratch_vision_ham). Verdict: the queryable-map machinery is healthy
 end-to-end on real data; SEMANTIC crispness is gated on the GPU
 agent's bottleneck artifact (msg round 7 P0), not on the map algebra.
+## 2026-07-16 — A4 bit-decorrelation (msg round 6b): raises code entropy but HURTS class-AUC — the "wasted bits" were functional; low entropy is right-sizing, not a defect
+
+The rule-4 audit flagged effective code entropy < 32 bits (DC common-sign
+component). A4 adds per-bit balance (batch-mean->0) + soft decorrelation
+(off-diagonal code correlation -> 0) to the seg loss. NYUv2 40-class, single
+seed, 3 lambda arms (scratch/scratch_bitdecorr.py):
+  arm          pixacc  H-bits/32  PR-indep/32  codeAUC
+  baseline      0.329    28.7       10.6        0.712
+  decorr 0.5    0.323    30.9       20.2        0.659
+  decorr 1.0    0.324    31.3       23.6        0.642
+Decorrelation WORKS at its stated goal — effective INDEPENDENT bits
+(correlation participation ratio) more than double (10.6 -> 23.6), per-bit
+balance entropy rises (28.7 -> 31.3). BUT code class-AUC DROPS monotonically
+(0.712 -> 0.642, > the ~+-0.03 AUC noise, monotone in lambda -> robust). pixacc
+flat (seg task unaffected). VERDICT: A4 is a NEGATIVE for the descriptor. The
+correlated/DC structure the audit called "wasted" was partly CARRYING the class
+signal for cosine queries; decorrelating spreads the code across more bits that
+hold no additional class info (there is none to hold at the luma-40 ceiling:
+log2(40) ~= 5.3 bits + a little structure), so the extra independent dims are
+noise that DILUTES the cosine query. REFRAME of the audit caveat: the code's
+~11 effective bits are RIGHT-SIZED to the available class information, NOT an
+inefficiency to fix — low effective entropy tracks the DATA ceiling. COROLLARY
+(worth a later width sweep): 32 bits is OVER-PROVISIONED for luma-40 — a
+narrower code (~12-16 bit) should match the 32-bit AUC at fewer descriptor
+bytes. Anti-oracle: GT trains/scores seg only; no GT in the code/query.
