@@ -370,6 +370,8 @@ class SpotFeed:
     synthetic feed's redraw analog), so localization passes never match
     the exact bytes that built the map. Pass 0 maps the pristine data."""
 
+    real_odom = False            # HunterFeed: item['odom'] = recorded
+
     def __init__(self, seed=11, laps=1, n_beams=1024, traj="orbit"):
         import runners.spot as SP
         b = SP.make_bundle()
@@ -429,9 +431,130 @@ class SpotFeed:
             else:
                 gt = self.bridge[i - self.n_tour].copy()
             yield dict(k=self.k_global, p=p, i=i, gt=gt,
-                       odom=self.odom0.copy(), r=r,
+                       odom=(gt.copy() if self.real_odom
+                             else self.odom0.copy()), r=r,
                        bridge=(i >= self.n_tour))
             self.k_global += 1
+
+
+class HunterFeed(SpotFeed):
+    """REAL-DATA feed 2: the Hunter school drive (capture_1784226283,
+    2810 kf @ 10 Hz, wheel odometry per keyframe). Inherits SpotFeed's
+    loop/bridge/perturb semantics; item['odom'] carries the RECORDED
+    odometry (real_odom) — the deploy-config prediction input. gt =
+    the same odometry (display ghost / weak short-horizon reference)."""
+
+    real_odom = True
+
+    def __init__(self, seed=11, laps=1, n_beams=1024, traj="orbit"):
+        import os
+        cap = os.environ.get(
+            "SSP_HUNTER_CAP",
+            os.path.expanduser("~/capture_1784226283.npz"))
+        if not Path(cap).exists():
+            cap = ("/private/tmp/claude-504/-Users-kamp-code-ssp/"
+                   "3b401c4b-a371-4a64-a26d-b61589c02a38/scratchpad/"
+                   "capture3.npz")
+        z = np.load(cap, allow_pickle=True)
+        mm = z["mm"]
+        od = np.asarray(z["est"], float)
+        self.seed = seed
+        self.keys = [(np.where(mm[i] > 0, mm[i] / 1000.0, np.inf),
+                      od[i]) for i in range(len(mm))]
+        self.beam = -np.pi + np.arange(1024) * (2 * np.pi / 1024)
+        self.gt_ok = np.ones(len(self.keys), bool)
+        self.segs = []
+        self.n_tour = len(self.keys)
+        gt = od.copy()
+        gap = float(np.linalg.norm(gt[0, :2] - gt[-1, :2]))
+        step = float(np.median(np.linalg.norm(np.diff(gt[:, :2], axis=0),
+                                              axis=1)))
+        nb = max(2, int(np.ceil(gap / max(step, 1e-3))))
+        t = np.linspace(0, 1, nb + 2)[1:-1]
+        bxy = gt[-1, :2] * (1 - t[:, None]) + gt[0, :2] * t[:, None]
+        bth = wrap(gt[-1, 2] + t * wrap(gt[0, 2] - gt[-1, 2]))
+        self.bridge = np.concatenate([bxy, bth[:, None]], 1)
+        self.bridge_t = t
+        self.n_loop = self.n_tour + nb
+        self.k_global = 0
+        self.odom0 = np.array(self.keys[0][1], float)
+        self._dbeam = 2 * np.pi / len(self.beam)
+
+
+class NoFab:
+    """Fabric stand-in for board-less pipelines (solo runs on the
+    FakeFab golden — no hardware in this process)."""
+    n_enc = n_ok = n_bad = 0
+    scene_cos = 1.0
+    cur_aid = None
+
+
+class SoloPipe:
+    """THE CHIP RECIPE in the websim: solo.py golden via FakeFab —
+    bit-for-bit what the flashed top_solo_ecp5 computes (silicon parity
+    30/30 on real capture frames, 2026-07-16). Track + fold + freeze;
+    64x5-kf resident map; EMA commit gate; hold/relock."""
+
+    def __init__(self):
+        sys.path.insert(0, str(Path(__file__).parent))
+        import solo as SO
+        self.SO = SO
+        SO.SEG_KF = 5
+        SO.REFINE = False
+        SO.K_TRY = 1
+        luts = G.make_luts()
+        self.trk = SO.SoloTracker(SO.FakeFab(luts), [], [])
+        self.mapper = SO.SoloMapper(luts)
+        self.pose_q = None
+        self.prev_od = None
+        self.n_seg = 0
+        self.state = "open"
+        self.score = None
+        self.n_edge = 0
+        self.diag = (np.nan,) * 3
+
+    def step(self, item):
+        SO = self.SO
+        U, TQ = SO.U, SO.TAU_Q
+        r = np.asarray(item["r"], float)
+        az, r_mm, w = G.scan_to_ints(np.where(np.isfinite(r), r, np.inf))
+        od = np.asarray(item["odom"], float)
+        if self.pose_q is None:              # boot: anchor at first odom
+            self.pose_q = (int(round(od[0] / U)), int(round(od[1] / U)),
+                           int(round(od[2] * TQ / (2 * np.pi))) % TQ)
+        if self.prev_od is None:
+            d_q = (0, 0, 0)
+        else:
+            pp = self.prev_od
+            dw = od[:2] - pp[:2]
+            cy, sy = np.cos(-pp[2]), np.sin(-pp[2])
+            d = (cy * dw[0] - sy * dw[1], sy * dw[0] + cy * dw[1],
+                 wrap(od[2] - pp[2]))
+            d_q = (int(round(d[0] / U)), int(round(d[1] / U)),
+                   int(round(d[2] * TQ / (2 * np.pi))))
+        self.prev_od = od.copy()
+        cq, sq = SO.cs_of(self.pose_q[2])
+        dxw, dyw = SO.rot_q15(cq, sq, d_q[0], d_q[1])
+        pred = (self.pose_q[0] + dxw, self.pose_q[1] + dyw,
+                (self.pose_q[2] + d_q[2]) % TQ)
+        frozen = False
+        if len(az) >= 5 and self.n_seg > 0:
+            self.pose_q, ai, sc, st = self.trk.step((az, r_mm, w), pred)
+            self.state, self.score = st, float(sc)
+        else:
+            self.pose_q = pred
+            self.state = "open"
+        if len(az) >= 5 and self.n_seg < 64:
+            nb = len(self.mapper.frozen)
+            self.mapper.fold((az, r_mm, w), self.pose_q)
+            if len(self.mapper.frozen) > nb:
+                self.trk.add_segment(self.mapper.frozen[-1][0],
+                                     self.mapper.frozen[-1][1])
+                self.n_seg += 1
+                frozen = True
+        pose = np.array([self.pose_q[0] * U, self.pose_q[1] * U,
+                         wrap(self.pose_q[2] * 2 * np.pi / TQ)])
+        return pose, frozen
 
 
 # ------------------------------------------------------------- fabric side
@@ -1074,13 +1197,16 @@ def _mask_free(mask, g):
 # ------------------------------------------------------------------ system
 class Live:
     def __init__(self, laps=2, seed=11, port=None, env="classroom",
-                 traj="orbit"):
+                 traj="orbit", pipeline="fabric"):
+        self.pipeline = pipeline
+        self.solo = SoloPipe() if pipeline == "solo" else None
         self.feed = (SpotFeed(seed=seed, laps=laps) if env == "spot"
+                     else HunterFeed(seed=seed) if env == "hunter"
                      else Feed(seed=seed, laps=laps, env=env, traj=traj))
         self.slam = F.BandSLAM(robust=True, attempt_every=4, relax_every=25,
                                gap_kf=300, recent_aids=12, spec=None, nph=0)
         self.slam.store_dtype = np.complex64
-        self.fab = Fabric(port)
+        self.fab = NoFab() if pipeline == "solo" else Fabric(port)
         self.fmap = None
         self.loc = None
         self.imgd = None
@@ -1100,15 +1226,32 @@ class Live:
         map + tracker state; the BOARD stays (per-scan encode clears it).
         Called from the run loop between keyframes (handler threads only
         set _req_reset/_req_env)."""
+        req_pipe = getattr(self, "_req_pipeline", None)
+        if req_pipe and req_pipe != self.pipeline:
+            if req_pipe == "solo":
+                self.pipeline = "solo"
+                self.fab = NoFab()
+            else:
+                try:
+                    self.fab = Fabric(None)
+                    self.pipeline = "fabric"
+                except Exception as e:
+                    print(f"[pipeline] fabric unavailable ({e}); "
+                          f"staying on solo", flush=True)
+        self._req_pipeline = None
+        self.solo = SoloPipe() if self.pipeline == "solo" else None
         if env is not None:
             drive = bool(getattr(self, "_req_drive", False))
             self.feed = (SpotFeed(seed=seed, laps=laps) if env == "spot"
+                         else HunterFeed(seed=seed) if env == "hunter"
                          else DrivenFeed(seed=seed, env=env) if drive
                          else Feed(seed=seed, laps=laps, env=env,
                                    traj=traj))
         else:
             f = self.feed
-            self.feed = (SpotFeed() if isinstance(f, SpotFeed)
+            self.feed = (HunterFeed(seed=f.seed)
+                         if isinstance(f, HunterFeed)
+                         else SpotFeed() if isinstance(f, SpotFeed)
                          else DrivenFeed(seed=f.seed, env=f.env)
                          if isinstance(f, DrivenFeed)
                          else Feed(seed=f.seed, laps=2, env=f.env,
@@ -1210,12 +1353,16 @@ class Live:
             env=("spot" if isinstance(self.feed, SpotFeed)
                  else self.feed.env),
             driven=bool(getattr(self.feed, "driven", False)),
-            frozen=self.fmap is not None,
+            frozen=(self.fmap is not None
+                    or bool(self.solo and self.solo.n_seg)),
             edge=0 if self.loc is None else self.loc.n_edge,
-            fx_state=None if self.loc is None else self.loc.state,
+            fx_state=(self.solo.state if self.solo
+                      else None if self.loc is None else self.loc.state),
+            pipe=self.pipeline,
+            solo_segs=self.solo.n_seg if self.solo else None,
             status=self.status)
         st_code = {"tracking": 0, "hold": 1, "relock": 2}.get(
-            None if self.loc is None else self.loc.state, -1)
+            st["fx_state"], -1)
         self.bench_log.append((
             item["k"], gt.copy(), est.copy(),
             None if fx_pose is None else fx_pose.copy(),
@@ -1243,7 +1390,12 @@ class Live:
         dt_kf = DE.STEP / DE.ROBOT_V
         self._req_reset = False
         self._req_env = None
+        self._req_pipeline = None
         while True:
+            if self.pipeline == "solo":
+                if self.run_solo(realtime, stop_after) == "stop":
+                    return
+                continue
             calib_items = []
             t_next = time.perf_counter()
             for item in self.feed:
@@ -1367,6 +1519,47 @@ class Live:
                     else:
                         t_next = time.perf_counter()
 
+    def run_solo(self, realtime=True, stop_after=None):
+        """THE CHIP RECIPE lane: solo.py golden per keyframe (fx trail);
+        python SLAM keeps running as the comparison lane (py trail).
+        No board needed — FakeFab IS the silicon-parity model."""
+        dt_kf = DE.STEP / DE.ROBOT_V
+        self.status = ("SOLO recipe (chip semantics, silicon parity "
+                       "30/30): track + fold + freeze")
+        t_next = time.perf_counter()
+        for item in self.feed:
+            if self._req_reset or self._req_env or self._req_pipeline:
+                self.reset_for(self._req_env)
+                self._req_reset = False
+                self._req_env = None
+                if self.pipeline != "solo":
+                    return "switch"
+                self.status = ("SOLO recipe (chip semantics): "
+                               "track + fold + freeze")
+                return "reload"
+            t0 = time.perf_counter()
+            est = self.slam_step(item)
+            fx_pose, frozen = self.solo.step(item)
+            self._odom_prev2 = item["odom"].copy()
+            ms = (time.perf_counter() - t0) * 1e3
+            self.push_state(item, est, fx_pose, self.solo.score, ms)
+            if item["k"] % 25 == 0:
+                st = self.state
+                print(f"[kf {st['k']:5d}] py {st['err_py']:.3f} m  "
+                      f"fx {st['err_fx']}  solo {self.solo.state} "
+                      f"segs {self.solo.n_seg}  {st['ms']:.0f} ms",
+                      flush=True)
+            if stop_after is not None and item["k"] >= stop_after:
+                return "stop"
+            if realtime:
+                t_next += dt_kf
+                pause = t_next - time.perf_counter()
+                if pause > 0:
+                    time.sleep(pause)
+                else:
+                    t_next = time.perf_counter()
+        return "reload"
+
     def probe(self):
         g = np.array(self.trail_gt)
         bounds = (g[:, 0].min() - 4, g[:, 0].max() + 4,
@@ -1429,13 +1622,22 @@ def make_handler(live):
             elif self.path.startswith("/freeze"):
                 live._req_freeze = True
                 self._json(dict(ok=True))
+            elif self.path.startswith("/pipeline"):
+                from urllib.parse import parse_qs, urlparse
+                q = parse_qs(urlparse(self.path).query)
+                pp = q.get("p", ["fabric"])[0]
+                if pp in ("fabric", "solo"):
+                    live._req_pipeline = pp
+                    self._json(dict(ok=True, pipeline=pp))
+                else:
+                    self._json(dict(ok=False))
             elif self.path.startswith("/env"):
                 from urllib.parse import parse_qs, urlparse
                 q = parse_qs(urlparse(self.path).query)
                 name = q.get("name", ["classroom"])[0]
                 live._req_drive = q.get("drive", ["0"])[0] == "1"
                 if name in ("classroom", "mixed", "corridor", "office",
-                            "spot"):
+                            "spot", "hunter"):
                     live._req_env = name
                     self._json(dict(ok=True, env=name))
                 else:
@@ -1499,8 +1701,11 @@ def make_handler(live):
     return H
 
 
-def serve(port=8642, laps=2, env="classroom", traj="orbit"):
-    live = Live(laps=int(laps), env=env, traj=traj)
+def serve(port=8642, laps=2, env="classroom", traj="orbit",
+          pipeline=None):
+    import os
+    pipeline = pipeline or os.environ.get("SSP_PIPE", "fabric")
+    live = Live(laps=int(laps), env=env, traj=traj, pipeline=pipeline)
     srv = ThreadingHTTPServer(("127.0.0.1", int(port)), make_handler(live))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     print(f"[live] http://127.0.0.1:{port}/  (tour {live.feed.n_tour} kf + "
@@ -1611,11 +1816,28 @@ def selftest():
     print("selftest ok")
 
 
+def selftest_solo():
+    """Headless SOLO-recipe smoke on BOTH real datasets (no board):
+    the chip semantics through the websim lane, numbers only."""
+    for env in ("spot", "hunter"):
+        live = Live(laps=1, env=env, pipeline="solo")
+        live.run(realtime=False, stop_after=60)
+        errs = [np.linalg.norm(np.array(g) - np.array(f))
+                for g, f in zip(live.trail_gt[-40:], live.trail_fx[-40:])]
+        st = live.state
+        print(f"solo websim {env}: 60 kf | segs {live.solo.n_seg} | "
+              f"state {live.solo.state} | fx-vs-ghost med "
+              f"{np.median(errs):.3f} m | py {st['err_py']:.3f}")
+    print("SOLO WEBSIM SELFTEST PASS (both datasets, board-less)")
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "selftest"
     if what == "serve":
         serve(*sys.argv[2:])
     elif what == "bench":
         bench(*sys.argv[2:])
+    elif what == "solo":
+        selftest_solo()
     else:
         selftest()

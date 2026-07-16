@@ -46,6 +46,7 @@
   <label>env
     <select id="envsel">
       <option value="spot">spot (real data)</option>
+      <option value="hunter">hunter (real data)</option>
       <option value="classroom">classroom</option>
       <option value="mixed">mixed</option>
       <option value="corridor">corridor</option>
@@ -53,6 +54,12 @@
     </select>
   </label>
   <label title="synthetic envs only: drive the robot yourself (W/S forward/back, A/D turn); the map freezes when YOU say so"><input type="checkbox" id="drivechk" checked> drive (WASD)</label>
+  <label>recipe
+    <select id="pipesel" title="matcher: pass-1 python map + fabric localization (board). solo: THE CHIP RECIPE (track+fold+freeze, silicon-parity golden, no board needed) — works on synthetic AND real envs">
+      <option value="fabric">matcher (fabric)</option>
+      <option value="solo">solo (chip recipe)</option>
+    </select>
+  </label>
   <button id="resetbtn" title="restart mapping from keyframe 0 in the current env (fresh python SLAM + frozen map; the board re-encodes per scan)">reset map</button>
   <button id="fzbtn" style="display:none" title="driven mode: freeze the map now (python SLAM relax + 2b codes + calibration + fabric image), then keep driving with fabric localization">freeze map</button>
   <span id="wasdchip" class="y" style="display:none">driving: WASD</span>
@@ -210,6 +217,9 @@ document.addEventListener('click', ev => {
 });
 // env switch + reset map
 let envPending = false;
+$('pipesel').addEventListener('change', async ev => {
+  await fetch(`/pipeline?p=${ev.target.value}`);
+});
 $('envsel').addEventListener('change', async ev => {
   envPending = true;
   const drive = $('drivechk').checked && ev.target.value !== 'spot' ? 1 : 0;
