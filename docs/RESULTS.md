@@ -10254,3 +10254,33 @@ the next #43 rung, after which SLAM poses also come from silicon.
 STREAM.md v1.1 = the full interface spec incl. the ROS-bridge
 implementer section (robot side codes against it; hw_stream.py is the
 reference sender).
+
+## 2026-07-16 — CLASS COUNT is not a map cost: the bounded vector holds many classes free; "demote to 5" was a framing error (user correction)
+
+User correction: "you only need to create the bottleneck according to spec; the
+output vec of encoding could theoretically hold many classes... more is better
+(not on lidar — lidar only optimized for tracking acc)." This separates two axes
+I had conflated:
+  - MAP class-capacity: set by the number of BOUND OBJECTS (positions), NOT the
+    codebook size. Role codes are ~orthogonal random keys regardless of K.
+  - CNN seg ACCURACY: the only thing that fell at 40-way — and it is a SOFT,
+    significance-weighted degradation (low-confidence cells contribute fewer
+    bits), not a reason to cap the class count.
+Validation (per-class query recall vs codebook size K, FIXED 8 objects/scene,
+D=360, 24 seeds):
+  K classes:   5     10    20    40    80
+  recall     0.969 0.958 1.000 1.000 1.000     map bytes = 45 B (D/8), UNCHANGED in K
+Recall is flat-to-IMPROVING as K grows, at fixed map cost — and the improvement
+is mechanistic: more classes -> fewer same-class instances per query -> less of
+the cross-talk that actually limits recovery (ties to the same-class
+multiplicity entry above). The codebook (role storage) is seed-generated on the
+FPGA, so K costs no storage either.
+
+REFRAME of the seg demotion: the 5-class SURFACES tier is the HIGH-CONFIDENCE
+FLOOR (where the CNN is accurate), NOT a cap on what the map holds. The deploy
+recipe binds the FULL vision head output — 40-class (or more) seg-argmax +
+32-bit desc — into the same bounded vector, per-cell significance = confidence,
+because more classes are strictly richer at ~zero extra map cost and degrade
+gracefully. The only real limiter is CNN per-class accuracy (a soft weighting),
+not the representation. LIDAR stays tracking-only (no seg head; seg=[], k_bits=0)
+— confirmed in the export contract. Anti-oracle: synthetic, GT scores only.

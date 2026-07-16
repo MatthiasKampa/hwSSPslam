@@ -1123,6 +1123,19 @@ reference (rule 2), positives audited (rule 4 — one retraction below).
    (coarse-class 0.858 pixacc) + label-free QUERY-BY-EXAMPLE on the tracking
    descriptor bits (0.95, compositional) — the object-label map waits on a real
    RGB-D sensor or a denser lidar + extrinsics, not from-scratch training.
+   REFRAME (2026-07-16, user correction): "demote to 5 classes" conflated two
+   independent axes. The MAP's class-capacity is set by the number of bound
+   OBJECTS, not the codebook size — per-class query recall is flat-to-improving
+   as the codebook grows 5→80 at FIXED 45 B map cost (`RESULTS` 2026-07-16
+   "CLASS COUNT is not a map cost"; the improvement is mechanistic — more classes
+   ⇒ fewer same-class instances ⇒ less cross-talk). So the 5-class surfaces tier
+   is the HIGH-CONFIDENCE FLOOR, NOT a cap: the deploy recipe binds the FULL
+   vision head output (40-class seg-argmax + 32-bit desc) into the same bounded
+   vector, per-cell significance = confidence, because more classes are strictly
+   richer at ~zero extra map cost and low-confidence classes degrade gracefully
+   (fewer bits). The ONLY real limiter is CNN per-class accuracy — a soft
+   weighting, not a representational cap. LIDAR stays tracking-only (no seg head;
+   the semantic/class path is the CAMERA alone).
 
 4. **The queryable map WORKS on real data — governed by a SUBLINEAR capacity
    trend.** Bounded-map capacity grows SUBLINEARLY with D
