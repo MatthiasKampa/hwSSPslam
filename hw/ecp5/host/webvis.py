@@ -205,7 +205,10 @@ class CamMap:
     vector and paints the response density on the map."""
 
     HFOV = np.deg2rad(69.0)          # D455 RGB horizontal FOV (nominal)
-    HAM_T = 8                        # cluster leader threshold (of 32)
+    HAM_T = 11                       # cluster threshold (of 32) — raised
+                                     # from 8: MEASURED live adjacent
+                                     # bit-flip is 0.28 med (9/32), so 8
+                                     # fragmented same-thing clusters
     MAX_C = 12
 
     def __init__(self):
@@ -509,7 +512,12 @@ def make_slam():
     slam = F.BandSLAM(robust=True, attempt_every=4, relax_every=25,
                       gap_kf=300, recent_aids=12, spec=None, nph=0)
     slam.store_dtype = np.complex64
-    slam.matcher = S.Matcher(L.ENC_MAIN, t_half=0.48, rot_half_deg=9.0,
+    # LIVE-VENUE RETUNE (capture_1784219440, 929 kf @ 4 Hz, ~1.2 m/s):
+    # the dataset window (t 0.48 / rot 9) flips heading at speed (p90
+    # |dyaw| 36 deg/kf); t 0.72 / rot 18 is 5x smoother (p90 7.6, med
+    # 0.51 deg) and halves step zigzag. Acceptance recipes in runners/
+    # are UNTOUCHED — this is the demo/live config.
+    slam.matcher = S.Matcher(L.ENC_MAIN, t_half=0.72, rot_half_deg=18.0,
                              rot_step_deg=1.5, perm=(4, L.N_ANG))
     return slam
 

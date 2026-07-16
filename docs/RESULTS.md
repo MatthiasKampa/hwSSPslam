@@ -10626,3 +10626,24 @@ cam_kf 61 and climbing on the live robot webvis, desc bits + cam map
 ingesting at the live pose. When the OAK lands: launch the depthai
 driver + `python3 cam_feed.py --topic /oak/rgb/image_raw --fps 2`
 (budget: 2 fps JPEG ~ tens of KB/s on loopback UDP — free).
+
+## 2026-07-16 — LIVE-DATA RETUNE (capture_1784219440: 929 kf / 232 s / 241 m drive): matcher window widened 5x-smoother heading; cluster threshold raised to measured bit noise
+
+/capture endpoint added to the live webvis; the user drove ~4 min.
+MEASURED: kf rate 4.0 Hz med (the "2 Hz" was wrong); drive ~1.2 m/s
+(30 cm/kf med); REAL cam adjacent bit-flip 0.284 med / 0.414 p90
+(above the synthetic worst arm); chip R_MASK irrelevant indoors here
+(0% beams > 31.2 m); LIVE heading UNSTABLE under the dataset matcher
+window (est med |dyaw| 136 deg/kf = flip chaos at speed, invisible to
+the green FPGA counters — transport/encode and SLAM quality are
+different things).
+OFFLINE SWEEP on the captured scans (internal-consistency metrics
+only — no reference exists; anti-oracle by construction): baseline
+t.48/rot9 -> med|dyaw| 2.21 deg p90 36.4; t.72/rot18 -> 0.51 / 7.6
+(5x smoother, med step 20.8 -> 12.2 cm); wider arms slightly worse.
+APPLIED to the demo/live config (runners/ acceptance recipes
+untouched): matcher t_half 0.72, rot_half 18. CamMap.HAM_T 8 -> 11
+(median flip 9/32 fragmented clusters at 8). Recall winner re-verified
+at MEASURED noise: boost x3 holds recall 1.000 at 0.28 flips; degrades
+to 0.76 at the p90 rotation-heavy extreme (bits carry less signal
+there — expected, banked). Deployed to the robot.
