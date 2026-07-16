@@ -452,9 +452,9 @@ class HunterFeed(SpotFeed):
             "SSP_HUNTER_CAP",
             os.path.expanduser("~/capture_1784226283.npz"))
         if not Path(cap).exists():
-            cap = ("/private/tmp/claude-504/-Users-kamp-code-ssp/"
-                   "3b401c4b-a371-4a64-a26d-b61589c02a38/scratchpad/"
-                   "capture3.npz")
+            cap = str(Path(__file__).parents[3] / "data"
+                      / "spot_telluride"
+                      / "hunter_capture_1784226283.npz")
         z = np.load(cap, allow_pickle=True)
         mm = z["mm"]
         od = np.asarray(z["est"], float)
