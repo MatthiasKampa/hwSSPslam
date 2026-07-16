@@ -11200,3 +11200,36 @@ single-seed; per-class-centroid aggregation (real deploy clusters spatially too)
 pixel (u,v) positions stand in for lidar-lifted 3D; 25%-flip untested for object
 binding (cell-binding flip was already at chance). Anti-oracle: ADE GT builds the
 prototypes/scores only; no GT in the code or binding.
+
+## 2026-07-16 — CORRECTION to the in-map validation above (rule-4 audit): "object 0.706 ~= clean 0.733 / map-ready" is an OVER-READ; the solid result is the like-for-like CELL collapse
+
+Read-only audit of the entry above. SPLITS CLEAN (train protos on Xtr[:1500],
+eval on disjoint Xva[:120]; code is a pure function of RGB). But three over-reads:
+
+1. NOT LIKE-FOR-LIKE (the headline fails). The three AUCs use different candidate
+   sets: clean 0.733 and CELL 0.524 discriminate class-c CELLS vs hundreds of
+   other cells; OBJECT 0.706 discriminates ONE class-c entity vs the few (~3-10)
+   other present-class entities in the image. Equating object 0.706 with the
+   clean CELL bound 0.733 is comparing different denominators/difficulty. No
+   clean-code OBJECT baseline was ever computed, so "quant+superposition costs
+   only ~0.03" is NOT established. The ONLY like-for-like pair is CELL:
+   0.733 -> 0.524 (a ~0.21 collapse from over-capacity crosstalk).
+2. ORACLE GROUPING (anti-oracle slip). The object entities are built from GT:
+   ecode/ecent = majority code / centroid of {cells where GT label==c}, exactly
+   one clean entity per class. GT decides the grouping, count, code, and position
+   of what gets bound. So the entry's "no GT in the binding" is WRONG for the
+   object pathway, and the object result is partly CIRCULAR (each entity is a
+   class-c majority code scored against the class-c train prototype). Deploy has
+   no GT to group cells -> would use predicted regions.
+3. The CELL-vs-OBJECT gap (0.524->0.706) conflates capacity relief with an
+   easier eval set (different metrics), so it is not a clean isolation of capacity.
+
+WHAT STANDS (solid): dense CELL binding at 13x over ~sqrt(D) collapses to chance
+(like-for-like 0.733->0.524) — the capacity law on the REAL trained code. And
+DIRECTIONALLY, aggregation helps (0.706 > chance) so "bind objects/regions, not
+cells" is sound. WHAT IS RETRACTED: "object-binding matches the clean bound",
+"cost only ~0.03", and "the encoder is MAP-READY" — none are established. A real
+answer needs (a) a clean-code OBJECT baseline (same few-entity set, no quant) to
+measure the true object-level quant cost, and (b) PREDICTED-region (non-oracle)
+grouping, not GT. Until then the encoder is aggregation-VIABLE, not proven
+map-ready. Banked pre-push; the earlier synthesis to the user is corrected here.
