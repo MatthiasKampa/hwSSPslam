@@ -9875,3 +9875,48 @@ low-precision (this fixture's scene is harder than the semantic_quant entry's
 0.97 — the golden is self-contained; the deploy check verifies CONSISTENCY
 against the frozen expected, not cross-entry absolutes). Anti-oracle:
 synthetic, GT scores only. P3 complete.
+
+## 2026-07-16 — USB virtual-sensor streaming (STREAM.md): protocol pinned, v0 SILICON-GATED — 3-ring lidar streams LIVE at 1.5x the 20 Hz target; OV5640 path kept
+
+Shipment-delay pivot (user directive): the robot's Linux PC will stream
+lidar + QVGA camera over USB; the FPGA ingests them as VIRTUAL SENSORS
+(no PC preprocessing — subsets/formats declared in stream headers; the
+OV5640 DVP path is KEPT: the cam assembler's output contract ==
+dvp_capture's pixel stream, SRC MUX selectable, tops/#31 untouched).
+
+Board transport facts (measured): the USB-UART is an FT231X (3 Mbaud
+ceiling; only TXD/RXD/RTS/DTR reach the FPGA — no FT245 mode), and TWO
+USB-C ports have D+/D- wired directly to FPGA pins (LPF usb_dp/dn[0/1])
+-> a soft USB-FS CDC device (~1 MB/s) is the pure-RTL v1 transport.
+
+Protocol (hw/ecp5/STREAM.md): transport-agnostic framed packets
+(A5 5A | type flags len seq | payload<=4096 | CRC16-CCITT), column-block
+lidar (ring_ids declared) + row-block camera + reserved IMU type +
+CTRL/STATUS/CREDIT; sensor timestamps travel IN the stream and are the
+temporal authority downstream (interval-matched delayfuse law holds at
+any link speed; sub-real-time replay is semantically identical).
+RTL v0 (rtl/stream_ingest.v + top_stream.v): byte-at-a-time parser with
+per-packet SHADOW-COMMIT (digest/meta snapshot at header, rollback on
+CRC fail — zero EBR, no store-and-forward); TX echoes per-frame CRC16
+digests + status. 54.2 MHz timing vs 50 constraint.
+
+Gates: G0 sim PASS (resync + 3 digests + corrupt-packet ROLLBACK with
+clean-resend recovery + counters). G1 SILICON PASS first run: 18/18
+frame digests bit-exact (6 cam QVGA + 12 lidar 3x1024 interleaved),
+583 pkts, 0 crc_drops, 0 seq_gaps, 197 KB/s goodput @ 2 Mbaud; soak =
+241 lidar frames at 30.0 fps sustained (1.5x the 20 Hz live tier),
+7956 pkts, 0 drops. Negative banked: 2.4 Mbaud (FTDI-exact, DIV=21)
+FAILED on this host — the macOS VCP driver silently kept ~2 Mbaud
+(+19% line mismatch, zero packets parsed); reverted to 2 Mbaud, retest
+with Linux ftdi_sio on the robot box before enabling.
+
+Live matrix (v0 @ 197 KB/s): 3-ring lidar @ 20 Hz LIVE with 50%
+headroom; cam QVGA rides at ~1-2 fps alongside; the deploy-live combo
+(3-ring @ 20 Hz + cam @ 5 Hz keyframes = 507 KB/s) needs the v1
+soft-USB transport; full-fidelity 64-ring + 30 fps (4.9 MB/s) exceeds
+every link this board has -> sub-real-time (deterministic-identical) +
+SDRAM-paced at-rate bursts (G4, needs #44). Next gates: G2
+fast9-through-ingest (64x64 fixture as CAM packets -> SRC MUX -> fast9
+vs golden), G3 encoder-on-streamed-lidar (#43), G4 paced bursts (#44).
+host/hw_stream.py is the robot-side reference implementation (pure
+pyserial, runs unchanged on Linux).

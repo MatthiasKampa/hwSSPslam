@@ -74,6 +74,13 @@ sim-spi:
 	  rtl/tb_spi.v
 	cd build && $(TOOLS)/vvp tb_spi.vvp
 
+# virtual-sensor streaming ingest (STREAM.md): G0 sim gate
+sim-stream:
+	@mkdir -p build
+	$(TOOLS)/iverilog -g2012 -o build/tb_stream.vvp rtl/stream_ingest.v \
+	  ../ice40/rtl/uart.v rtl/tb_stream.v
+	cd build && $(TOOLS)/vvp tb_stream.vvp
+
 sim-imu-stream:
 	@mkdir -p build
 	$(TOOLS)/iverilog -g2012 -o build/tb_ism330_stream.vvp \
