@@ -105,6 +105,34 @@ def _recall(W, roles, codes, seed0, nph, nmag, seeds=12, n_obj=8):
 
 
 QUANT = [(0, 0), (16, 4), (8, 2), (4, 2)]        # float, 6-bit, 4-bit, 3-bit
+CL2 = ["chair", "table", "bed", "couch"]
+CO2 = ["red", "blue", "green", "grey"]
+
+
+def _compose_triple(W, roles, seeds=24, k=12, n_obj=10):
+    """conjunctive-query grading: mean readout by #matching attributes (2/1/0)
+    for 'red chair' (REAL vs RANDOM query control). Returns [real2,real1,real0,
+    rand2,rand1,rand0]."""
+    rng0 = np.random.default_rng(3)
+    cc = {c: np.sort(rng0.choice(256, k, replace=False)) for c in CL2}
+    kc = {c: np.sort(rng0.choice(256, k, replace=False)) for c in CO2}
+    real = [[], [], []]; rand = [[], [], []]
+    for s in range(seeds):
+        rng = np.random.default_rng(s + 700)
+        objs = [(CL2[rng.integers(4)], CO2[rng.integers(4)],
+                 np.array([*rng.uniform([-5, -4], [5, 4]), 0.5])) for _ in range(n_obj)]
+        mp = np.zeros(W.shape[0], complex)
+        for cl, co, xyz in objs:
+            mp += roles[np.concatenate([cc[cl], kc[co]])].sum(0) * np.exp(1j * (xyz @ W.T))
+        cent = np.stack([o[2][:2] for o in objs])
+        g = np.concatenate([cent, np.full((len(cent), 1), 0.5)], 1)
+        dr = np.real(np.exp(1j * (g @ W.T)) @ np.conj(np.conj(roles[np.concatenate([cc["chair"], kc["red"]])]).sum(0) * mp)) / W.shape[0]
+        dn = np.real(np.exp(1j * (g @ W.T)) @ np.conj(np.conj(roles[np.sort(rng.choice(256, 2 * k, replace=False))]).sum(0) * mp)) / W.shape[0]
+        for i, (cl, co, _) in enumerate(objs):
+            m = (cl == "chair") + (co == "red")
+            real[m].append(dr[i]); rand[m].append(dn[i])
+    return np.array([np.mean(real[2]), np.mean(real[1]), np.mean(real[0]),
+                     np.mean(rand[2]), np.mean(rand[1]), np.mean(rand[0])], np.float32)
 
 
 def generate():
@@ -113,14 +141,17 @@ def generate():
     roles = np.exp(1j * rng.uniform(0, 2 * np.pi, (256, W.shape[0])))
     codes = _codes()
     recalls = np.array([_recall(W, roles, codes, 5000, nph, nmag) for nph, nmag in QUANT])
+    compose = _compose_triple(W, roles)
     GOLD.parent.mkdir(exist_ok=True)
     np.savez_compressed(GOLD, W=W.astype(np.float32), roles_seed=0, codes_seed=1,
                         quant=np.array(QUANT), recalls=recalls.astype(np.float32),
-                        m=256, k=12)
+                        compose=compose, m=256, k=12)
     print(f"wrote {GOLD}  ({GOLD.stat().st_size/1024:.1f} KB)")
     for (nph, nmag), r in zip(QUANT, recalls):
         tag = "float" if nph == 0 else f"{int(np.log2(nph)+np.log2(nmag))}-bit/cell"
         print(f"  quant nph={nph} nmag={nmag} ({tag}): chair recall {r:.3f}")
+    print(f"  compose 'red chair' REAL 2/1/0: {compose[0]:.1f}/{compose[1]:.1f}/"
+          f"{compose[2]:.1f}  RANDOM {compose[3]:.1f}/{compose[4]:.1f}/{compose[5]:.1f}")
 
 
 def check(tol=0.02):
@@ -136,6 +167,14 @@ def check(tol=0.02):
         d = abs(got - exp); pas = d <= tol; ok &= pas
         print(f"  nph={nph} nmag={nmag}: expected {exp:.3f} got {got:.3f}  "
               f"|d|={d:.3f}  {'PASS' if pas else 'FAIL'}")
+    if "compose" in z:
+        exp = z["compose"]; got = _compose_triple(W, roles)
+        cd = float(np.abs(got - exp).max()); pas = cd <= 0.5; ok &= pas
+        grades = got[0] > got[1] > got[2] and got[0] > 3 * got[3]  # 2>1>0 & real2 >> rand2
+        print(f"  compose triple REAL {got[0]:.1f}/{got[1]:.1f}/{got[2]:.1f} "
+              f"RANDOM {got[3]:.1f}/{got[4]:.1f}/{got[5]:.1f}  |d|max={cd:.2f}  "
+              f"grades(2>1>0 & rand-flat)={grades}  {'PASS' if pas and grades else 'FAIL'}")
+        ok &= grades
     print("GOLDEN CHECK", "PASS" if ok else "FAIL")
     return ok
 

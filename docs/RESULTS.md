@@ -9932,3 +9932,48 @@ cross-box. The FPGA-relevant semantic numbers are now deploy-box-
 verifiable without JAX. Every item from msg rounds 3/3b is closed;
 the round-4 queue (lidar head export, finetune harness, surfaces+QBE
 reference) is what remains on their side.
+## 2026-07-16 — P0 round 4: LIDAR head exported via headio v2 (geometry was a misread, not a mismatch); vision head gated cross-box (P0 fully DONE)
+
+LIDAR export unblocked (deploy-side clarification): headio's lidar meta
+(in_h=3, in_w=1024, in_ch=3) is the RAW deploy array (rings, beams)=(3,1024);
+forward() transposes to (1024, rings-as-channels) = exactly the layout the
+(1,1024,3) NHWC ring net consumes. No reconciliation needed. Exported
+lidar_ring.pkl -> `sspax/artifacts/lidar_head.npz` (16.9 KB int8): trunk =
+Conv_0-3 as kind=conv1d (k=7,7,5,1 squeezing the H axis), track=[w] (Conv_4,
+cout 1), desc=Conv_5 (32-bit), seg omitted; in_h=3 in_w=1024 in_ch=3
+in_div=1.0 (METERS, NOT /255), cell=4, act=crelu. load_head passes _validate;
+forward on a raw (3,1024) ring array -> track (256,1) + desc (256,32) per
+azimuth bin (256 = 1024/cell). Deploy side gates stability with ring
+fixtures. Its desc bits are the LIDAR QBE channel.
+VISION head (491477f) GATED CROSS-BOX on the deploy box: stability 0.750 adj
+/ 0.520 far — EXACTLY my numbers (v2 transfers artifacts bit-faithfully);
+objmap2 desc-key stage-1 16/16, stage-2 AUC 0.592/0.597, err 0.61/0.49 m
+(random 0.522/~1.2 m; native-TUM 0.805/0.165 m) = real-but-PARTIAL
+cross-dataset transfer (err halves vs random; native features win on home
+domain). CORRECTION to my stability entry's baseline: cite the MATCHED
+desc-bit random baseline 0.954/0.906 (gap 0.048), not the seg-bit 0.06 — the
+trained gap 0.230 is ~5x random either way. The QBE quality lever is
+PLATFORM-DOMAIN finetune (OV5640 frames), not more NYUv2 — prep as round-4
+P1. P0 (both heads) DONE.
+
+## 2026-07-16 — P3 round 4 (the demotion's constructive half): SURFACES-TIER + QBE per-segment band — the end-to-end recipe of what SHIPS
+
+`sspax/surfaces_tier.py` — the deployable semantic stack after the fine-object
+label head demoted: ONE bounded D=360 vector per 5-keyframe segment carrying
+TWO bit sources bound at cell 3D positions, on the P4 deploy fine-band
+geomspace(0.25, 2, 6), stored at 4-bit polar quant (q_polar_np):
+  1. SURFACE class bits (5-class U-Net output; pixacc 0.858 banked)
+  2. DESC bits (tracking descriptor's 32 sign bits; 0.95 retrieval, gated
+     cross-box) -> label-FREE query-by-example.
+Results (24 synthetic room segments; surface labels + desc clusters are the
+controlled stand-in for the exported vision head's seg-argmax + desc bits):
+  surface-query recall (readout AUC vs other cells): floor 0.878, wall 0.955
+  QBE retrieval (example cluster's desc bits -> its cells): AUC 0.986
+  bytes/segment: 180 B map (D=360 @ 4 bits) + ~448 B registry (64 cells) = ~0.6 KB
+So surfaces + label-free QBE ship in ONE ~0.6 KB bounded per-segment vector at
+4 bits/cell — the constructive endgame the whole semantic thread now points
+at. Fine-object CLASS labels wait on a real RGB-D sensor (demotion, efc5f0e).
+The registry (cell positions+class) dominates the map bytes and scales with
+bound-cell count -> aggregating cells to per-surface regions/objects (per the
+capacity+compose laws) shrinks it. Anti-oracle: synthetic, GT surface class +
+cluster id score only.
