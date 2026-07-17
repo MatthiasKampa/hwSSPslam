@@ -11749,3 +11749,37 @@ step 0.25 deg, verifies 16/37; 300 kf drift 0.76/1.11 m med — honest
 odometry + local-basin verify (no long-range closure in the 6-DoF
 stack yet; the GPU agent's P2 chip recipe (3676df9) is the next
 rung). Vis serves at :8791, replay ~4.5 Hz.
+
+## 2026-07-17 — webvis6d CORRECTION 2 (user report: "traces but lags
+behind by about half"): the RESAMPLING-ATTACHMENT bias; frame chaining
+RETIRED for anchor-target tracking (the SOLO pattern in 6-DoF)
+
+Root-cause chain (all measured on fr3 s2):
+(1) Per-step translation ratio |t_est|/|t_gt| med 0.84-0.90, p10 0.49
+— converged (iters 3 == 8), stride-invariant (1/2/3): NOT an
+optimizer artifact. Mechanism: BOTH channels sample scene surfaces on
+the camera's pixel grid (gridint cells, depth-cloud subsample), so
+consecutive frames encode DIFFERENT point sets of the same surface —
+sampled points partially travel WITH the camera and frame-to-frame
+GN under-observes translation (worst fronto-parallel: p10 0.49 = the
+"half" the user saw). This is projective-ICP shrinkage realized in
+the encode domain.
+(2) The stored-D verify solve SHRINKS offsets too (sinusoid
+linearization at 5-10 cm = 1.8 rad on the fine ring): quantized
+verify made drift WORSE (0.22 -> 0.57 med, path ratio 0.84 -> 0.65)
+and the store-time theta0 calibration did NOT fix it (bias is
+offset-dependent, not fixed). Verify re-registration replaced by
+FULL GN vs the QUANTIZED STORED TARGET (fresh derivatives from
+current points — the ego datapath vs an anchor vector; the frozen
+store contributes only v0q): verify-on now >= verify-off.
+(3) THE FIX for the lag: track every frame against the OPEN anchor's
+FIXED float target (the chip's live accumulator — no per-frame
+resampling of the target), freeze + hand off on basin exit
+(0.5 m/25 deg). Frame chaining retired. ALSO CAUGHT: an earlier
+step()-reorder patch had silently no-opped (unasserted str.replace)
+— the assert-every-hunk discipline is now absolute.
+AFTER (150 kf): pos err med 0.123 float / 0.121 2b (was 0.222/0.568),
+path ratio 1.00 (was 0.84/0.65), anchors 6, verifies fire strictly.
+THE HEADLINE: with GN-vs-target re-registration the 2b FPGA store
+MATCHES FLOAT (0.121 vs 0.123) — the store-quantization-is-free law
+(2D store ladder, map-container decomposition) now holds in 6-DoF.

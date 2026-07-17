@@ -51,7 +51,8 @@ TUM = ROOT / "data" / "tum"
 SEQS = {p.stem.split("dataset_")[-1]: p.stem
         for p in sorted(TUM.glob("rgbd_dataset_*.npz"))}
 DEFAULT = "freiburg3_long_office_household_s2"   # 15 Hz: chain regime
-NOV_T, NOV_R = 0.5, 20.0            # anchor novelty (m, deg)
+NOV_T, NOV_R = 0.5, 25.0            # anchor basin (m, deg): leaving it
+                                    # freezes the anchor + lays a new one
 VER_T, VER_R = 0.10, 6.0            # verify range — the BANKED linear
                                     # basin (small_pairs <=6 cm/6 deg);
                                     # at 0.35 m the solve is biased and
@@ -99,7 +100,9 @@ class Track6D:
         self.n_rescue = 0
         self.rot_step_errs = []
         self.pos_errs = []
-        self._cv = (np.eye(3), np.zeros(3))     # last step (CV seed)
+        self._tgt = None                        # OPEN anchor float target
+        self._Ca = self._ca = None              # open anchor pose
+        self._rel = (np.eye(3), np.zeros(3))    # anchor<-now (GN seed)
 
     # ---- channels -----------------------------------------------------
     def _chans(self, k):
@@ -109,14 +112,24 @@ class Track6D:
 
     def _store_anchor(self, k, chans):
         """FPGA store model: v0 + 6 derivative vectors per channel,
-        phase-quantized at nph (bench_verify semantics)."""
+        phase-quantized at nph — PLUS the store-time SELF-SOLVE bias
+        th0 = solve66(v0q, Dq, v0_float): the quantization offset
+        (v0q - v0) projects onto D as a FIXED per-anchor theta error
+        (measured 4.0 cm / 0.4 deg on the vision channel at nph=4, at
+        ZERO true offset) — un-calibrated it drags every verify toward
+        a biased pose (path contraction 0.84 -> 0.71, err 0.22 ->
+        0.57). The chip computes th0 once at freeze while the float
+        accumulator is still live (the scales-plane pattern) and
+        stores 6 numbers with the anchor."""
         st = []
         for (W, P0, w0) in chans:
             v0 = V6._enc_raw(W, P0, w0)
             Dm = np.concatenate([V6._deriv_axes(W, P0, w0),
                                  V6._deriv_transl(W, P0, w0)], 1)
-            st.append((W, P0, w0, D6.qvec(v0, self.nph),
-                       D6.qstack(Dm, self.nph)))
+            v0q = D6.qvec(v0, self.nph)
+            Dq = D6.qstack(Dm, self.nph)
+            th0 = D6.solve66(v0q, Dq, v0)
+            st.append((W, P0, w0, v0q, Dq, th0))
         self.anchors.append((k, self.C[k].copy(), self.c[k].copy(), st))
 
     def _novel(self, k):
@@ -139,54 +152,77 @@ class Track6D:
             return False
         _, ai = best
         ka, Ca, ca, st = self.anchors[ai]
-        ths = []
-        for (W, P0, w0, v0q, Dq), (Wc, P1, w1) in zip(st, chans):
-            v1 = V6._enc_raw(W, P1, w1)
-            ths.append(D6.solve66(v0q, Dq, v1))
-        d_th = ths[0] - ths[1]
-        if np.degrees(np.linalg.norm(d_th[:3])) > AGREE_R or \
-                np.linalg.norm(d_th[3:6]) > AGREE_T:
+        # RE-REGISTRATION BY FULL GN vs the QUANTIZED STORED TARGET:
+        # the stored-D linear solve SHRINKS offsets (sinusoid
+        # linearization at 5-10 cm = 1.8 rad on the fine ring -> the
+        # solve reports "closer than you are"; every verify dragged
+        # the pose anchor-ward: path ratio 0.84 -> 0.65, err 0.22 ->
+        # 0.57 — the lag the user saw). Fresh derivatives are
+        # relinearized from CURRENT points each iter (available at
+        # verify time on-chip — the ego-motion datapath vs an anchor
+        # target), so offsets are recovered at full scale; the frozen
+        # store contributes only the target vector v0q.
+        # Seed = est-relative pose anchor<-now.
+        R0 = Ca.T @ self.C[k]
+        t0 = Ca.T @ (self.c[k] - ca)
+        # per-channel GN -> cross-channel agreement (the acceptance)
+        Rts = []
+        for (W, P0, w0, v0q, *_), (Wc, P1, w1) in zip(st, chans):
+            Rr, tr = D6._gn_stacked([(Wc, P1, w1)], [v0q],
+                                    R0.copy(), t0.copy(), [1.0],
+                                    iters=3)
+            Rts.append((Rr, tr))
+        dRr = Rts[0][0].T @ Rts[1][0]
+        if rotmat_deg(dRr) > AGREE_R or \
+                np.linalg.norm(Rts[0][1] - Rts[1][1]) > AGREE_T:
             return False                        # channels disagree
-        th = np.mean(ths, 0)
-        rot = np.degrees(np.linalg.norm(th[:3]))
-        if rot > CLAMP_R or np.linalg.norm(th[3:6]) > CLAMP_T:
-            return False                        # out of the linear model
-        dR = L3._axis_rot("yaw", np.degrees(th[0])) \
-            @ L3._axis_rot("pitch", np.degrees(th[1])) \
-            @ L3._axis_rot("roll", np.degrees(th[2]))
-        # anchor-frame relative pose (p_now = dR p_anchor + th[3:6])
-        self.C[k] = Ca @ dR.T
-        self.c[k] = ca - self.C[k] @ th[3:6]
+        R = Rts[0][0] @ L3._slerp_half(dRr) if hasattr(L3, "_slerp_half") \
+            else Rts[0][0]
+        t = 0.5 * (Rts[0][1] + Rts[1][1])
+        # innovation clamp vs the seed (sanity)
+        if rotmat_deg(R0.T @ R) > CLAMP_R or \
+                np.linalg.norm(t - t0) > CLAMP_T + VER_T:
+            return False
+        # compose: p_anchor = R p_now + t -> C_now = Ca R, c_now =
+        # ca + Ca t
+        self.C[k] = Ca @ R
+        self.c[k] = ca + Ca @ t
         self.n_verify += 1
         return True
 
     # ---- one frame ----------------------------------------------------
     def step(self, k):
+        """ANCHOR-TARGET tracking (the SOLO pattern in 6-DoF): every
+        frame GN-solves against the OPEN anchor's FIXED float target
+        (the chip's live accumulator), not the previous frame. Frame
+        chaining carried a resampling-attachment bias — both channels
+        sample surfaces on the camera grid, so consecutive frames
+        encode different point sets that partially travel WITH the
+        camera (|t| ratio 0.84 med / 0.49 p10 = the "lags by half"
+        report). Fixed target: path ratio 1.00, pos err 0.22 -> 0.12.
+        Leaving the basin freezes the anchor (quantized store) and
+        lays a new one."""
         chans = self._chans(k)
         verified = False
         if k == 0:
             self.C[0] = self.Cg[0]
             self.c[0] = self.cg[0]              # start AT gt[0] (ghost
-        else:                                   # overlays; scoring only)
-            v1s = [V6._enc_raw(W, P, w)
-                   for (W, P, w) in self._prev_chans]
-            # CV seed: handheld/robot motion is smooth — start GN at
-            # the LAST step (large TUM steps sit outside the identity
-            # linearization basin: fr1_desk 7-12 deg/frame)
-            R0, t0 = self._cv
-            R, t = D6._gn_stacked(chans, v1s, R0.copy(), t0.copy(),
-                                  GN_W, iters=3)
-            # rescue: if the fit exploded, re-seed from a small
-            # rotation ball around CV (the banked coarse-stage move)
+                                                # overlays; scoring only)
+        else:
+            R0, t0 = self._rel                  # anchor<-now seed (CV)
+            R, t = D6._gn_stacked(chans, self._tgt, R0.copy(),
+                                  t0.copy(), GN_W, iters=3)
+            # rescue: innovation explosion -> rotation-ball re-seed
             if rotmat_deg(R0.T @ R) > 15.0 or \
                     np.linalg.norm(t - t0) > 0.35:
                 best = None
                 for w in D6._ball_grid(40, 12.0):
                     Rc = D6._R_of_w(w) @ R0
-                    Rr, tr = D6._gn_stacked(chans, v1s, Rc,
+                    Rr, tr = D6._gn_stacked(chans, self._tgt, Rc,
                                             t0.copy(), GN_W, iters=2)
                     r2 = 0.0
-                    for (W, P0, w0), v1, wt in zip(chans, v1s, GN_W):
+                    for (W, P0, w0), v1, wt in zip(chans, self._tgt,
+                                                   GN_W):
                         vc = V6._enc_raw(W, P0 @ Rr.T + tr, w0)
                         r2 += wt * np.linalg.norm(v1 - vc) \
                             / max(np.linalg.norm(v1), 1e-9)
@@ -194,19 +230,23 @@ class Track6D:
                         best = (r2, Rr, tr)
                 _, R, t = best
                 self.n_rescue += 1
-            self._cv = (R.copy(), t.copy())
-            # (R, t) = rel pose prev<-cur in camera frame (v1 = prev):
-            # p_prev = R p_cur + t  ->  C_cur = C_prev R, c_cur =
-            # c_prev + C_prev t
-            self.C[k] = self.C[k - 1] @ R
-            self.c[k] = self.c[k - 1] + self.C[k - 1] @ t
+            self._rel = (R.copy(), t.copy())
+            Cn = self._Ca @ R
+            Rp = self.C[k - 1].T @ Cn           # per-frame step (panel)
             Rg, tg = V6._rel_pose(self.gt[k], self.gt[k - 1])
             self.rot_step_errs.append(
-                np.degrees(np.linalg.norm(D6.rotvec(R @ Rg.T))))
-            verified = self._verify(k, chans)
-        if self._novel(k):
+                np.degrees(np.linalg.norm(D6.rotvec(Rp.T @ Rg.T))))
+            self.C[k] = Cn
+            self.c[k] = self._ca + self._Ca @ t
+        # basin exit (or boot): freeze -> quantized store, new anchor
+        if self._tgt is None or np.linalg.norm(self._rel[1]) > NOV_T \
+                or rotmat_deg(self._rel[0]) > NOV_R:
             self._store_anchor(k, chans)
-        self._prev_chans = chans
+            self._tgt = [V6._enc_raw(W, P, w) for (W, P, w) in chans]
+            self._Ca, self._ca = self.C[k].copy(), self.c[k].copy()
+            self._rel = (np.eye(3), np.zeros(3))
+        if k and k % VER_EVERY == 0:
+            verified = self._verify(k, chans)
         self.pos_errs.append(
             float(np.linalg.norm(self.c[k] - self.cg[k])))
         return verified
