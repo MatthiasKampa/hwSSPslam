@@ -341,7 +341,7 @@ def _mmacs(meta):
     if meta["modality"] == "lidar":
         h = 1                        # rings are channels; azimuth = spatial
     for name in ("trunk", "track", "seg", "desc"):
-        if not meta[name]:
+        if not meta.get(name):       # raw metas may lack optional stacks
             continue
         m, hh, ww = 0, h, w          # heads start at trunk-output res
         for L in meta[name]:

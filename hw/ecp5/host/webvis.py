@@ -1468,7 +1468,7 @@ def selftest(n=40, use_fpga=True):
     print(line)
     if demo.walls is not None and demo.walls.n_seg:
         msg = demo.walls.rebuild(np.array(demo.trail_py, float))
-        print(f"  wall lane: {demo.walls.n_seg} fidelity segs -> "
+        print(f"  wall lane: {demo.walls.n_seg} {demo.walls.band} segs -> "
               f"{len(msg['lines']) if msg else 0} consensus walls "
               f"({demo.walls.msg['n_raw'] if demo.walls.msg else 0} raw)")
         assert demo.walls.n_seg >= 4, "wall lane folded too few segs"

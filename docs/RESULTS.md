@@ -11463,3 +11463,41 @@ lift (recovers ~50% more of the map / the ghost-comb tails) at a real PRECISION
 cost. The clean win is a HYBRID (learned recall -> line-fit for precision) or a
 sub-cell learned output — both concrete next steps. Single-seed; synthetic (real
 venue still needs aligned scan-poses). Anti-oracle: GT walls train + score.
+
+## 2026-07-17 — RULE-4 AUDIT of the 2026-07-16 positives (Fable fork,
+read-only): walls CONFIRMED, v8 chain CONFIRMED, headio CONFIRMED;
+crispness CONFIRMED on hunter with ONE hole found and CLOSED SAME DAY
+(shipped-arm spot gate)
+
+Adversarial audit verdicts (evidence in the audit transcript):
+(1) WALLS metric: no cheat channel (decoder input = codes+anchors
+only; trail is veto-only); hallucinations punished through precision
+medians + coverage-not-volume recall; the more-lines hypothesis
+refuted twice in the logs (matcher 3497 lines -> rec 0.19 vs fidelity
+1889 -> 0.59; joint beats fid4 on BOTH axes everywhere). Caveat kept:
+the metric scores scatter reconstruction (furniture included), pose
+errors shared by design.
+(2) CRISPNESS: not gameable by holds (holds ANTI-correlate with
+crispness across arms: A 864->9.29, N 230->10.73, H3 1731->7.66);
+trajectory collapse structurally excluded for novelty arms (0.8 m
+anchor spread + bounded per-commit corrections). Soft spot: stock A's
+9.29 may carry contraction inflation from beyond-map commits — if so
+N's margin is LARGER; decision unaffected.
+(3) v8 chain: novel-latch timing (T_AR0) matches the golden call site
+for the same-kf fold gate; K_FOLDQ condition term-for-term equal to
+solo2.fold_gate incl. unreachable branches; the 40/40 parity is
+genuinely two-sided (golden compute vs parsed serial frames; only the
+transport quantization is shared — which is the contract under test).
+(4) headio v2.2: no consumer indexes forward()["track"]; all load
+paths go through load_head's setdefault; cbits rejects RGB heads at
+its geometry assert by design (variant pending). Latent _mmacs
+KeyError on raw metas -> fixed (meta.get).
+
+HOLE FOUND: "spot no-regression" for v8 was measured on SUPERSETS
+(E/X) of the shipped novelty-only config, not the config itself.
+CLOSED: spot arm N run — crisp 15.55 (BEST of all arms; stock 15.31),
+self-map ATE med 0.443 p90 2.326 (stock 0.461/4.481), 21/64 segs.
+The shipped config is regression-free on spot by direct measurement.
+Also fixed from the audit's new-risk list: webvis selftest wall-lane
+band label (said "fidelity", lane is joint); watch ms_py/overruns
+during the demo drive (65 ms at 10 Hz today, 0 overruns).
