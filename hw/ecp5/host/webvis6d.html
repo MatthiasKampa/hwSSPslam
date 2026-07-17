@@ -1,0 +1,126 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SSP 6-DoF — FPGA-sim replay</title>
+<style>
+  body { margin:0; background:#0b0e13; color:#cdd6e4; font:13px system-ui, sans-serif; display:flex; height:100vh; }
+  #cv { flex:1; cursor:grab; }
+  #panel { width:280px; padding:12px; background:#11151d; overflow-y:auto; border-left:1px solid #232a36; }
+  .grp { margin:12px 0 5px; color:#7f93ad; text-transform:uppercase; font-size:10px; letter-spacing:.08em; }
+  table { width:100%; border-collapse:collapse; } td { padding:2px 0; } td:last-child { text-align:right; color:#e8eef7; }
+  select, button { background:#1a2130; color:#cdd6e4; border:1px solid #2c3547; border-radius:4px; padding:4px 8px; margin:2px 2px 2px 0; font-size:12px; }
+  .ok { color:#5dd39e; } .warn { color:#ffd166; }
+  #bar { height:3px; background:#232a36; margin-top:8px; } #fill { height:3px; width:0; background:#4c8dff; }
+  .legend span { display:block; margin:2px 0; } .dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; }
+</style></head><body>
+<canvas id="cv"></canvas>
+<div id="panel">
+  <div class="grp">6-DoF FPGA-sim (TUM replay)</div>
+  <select id="ssel"></select>
+  <select id="rsel">
+    <option value="4">quantized 2b (FPGA store)</option>
+    <option value="0">float store</option>
+  </select>
+  <button onclick="resel()">restart</button>
+  <div class="grp">pipeline (banked deploy6d recipe)</div>
+  <table>
+    <tr><td>keyframe</td><td id="k">—</td></tr>
+    <tr><td>ego rot step (med20)</td><td id="rot">—</td></tr>
+    <tr><td>pos vs mocap (ghost)</td><td id="pe">—</td></tr>
+    <tr><td>anchors (bounded map)</td><td id="na">—</td></tr>
+    <tr><td>bytes / anchor</td><td id="ba">—</td></tr>
+    <tr><td>quantized verifies</td><td id="nv">—</td></tr>
+    <tr><td>step time</td><td id="ms">—</td></tr>
+  </table>
+  <div id="bar"><div id="fill"></div></div>
+  <div class="grp">legend</div>
+  <div class="legend">
+    <span><span class="dot" style="background:#39445a"></span>depth cloud @ est pose</span>
+    <span><span class="dot" style="background:#4c8dff"></span>est trajectory (6-DoF chain + verify)</span>
+    <span><span class="dot" style="background:#5dd39e"></span>mocap ghost (display only)</span>
+    <span><span class="dot" style="background:#ff8c42"></span>quantized anchors (v0 + 6 derivs @ 2b)</span>
+  </div>
+  <div style="margin-top:10px;color:#7f93ad;font-size:11px">
+    Two-space stacked-GN ego-motion (vision ladder + azel3d cloud, one
+    6×6 solve) chained per frame; a bounded map of PHASE-QUANTIZED
+    anchor snapshots (the FPGA 2b store model) re-registers the pose
+    near revisits via the stored-derivative 6×6 verify. Drag to orbit,
+    wheel to zoom, shift-drag to pan.
+  </div>
+</div>
+<script>
+const cv = document.getElementById("cv"), cx = cv.getContext("2d");
+let pts = [], est = [], gt = [], anchors = [], st = {};
+let yaw = 0.7, pitch = 0.45, dist = 9, cxw = [0, 0, 0.8];
+function fit() { cv.width = cv.clientWidth * devicePixelRatio; cv.height = cv.clientHeight * devicePixelRatio; }
+addEventListener("resize", () => { fit(); draw(); }); fit();
+function proj(p) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x = p[0] - cxw[0], y = p[1] - cxw[1], z = p[2] - cxw[2];
+  const x1 = cy * x + sy * y, y1 = -sy * x + cy * y;
+  const y2 = cp * y1 - sp * z, z2 = sp * y1 + cp * z;
+  const d = dist / (dist + y2 + 1e-6);
+  const s = Math.min(cv.width, cv.height) * 0.42;
+  return [cv.width / 2 + x1 * d * s / 4, cv.height / 2 - z2 * d * s / 4, d];
+}
+function draw() {
+  cx.fillStyle = "#0b0e13"; cx.fillRect(0, 0, cv.width, cv.height);
+  for (const p of pts) {
+    const q = proj(p);
+    const h = Math.max(0, Math.min(1, (p[2] + 0.5) / 2.5));
+    cx.fillStyle = `rgba(${57+h*60},${68+h*60},${90+h*80},${0.35+0.4*q[2]})`;
+    cx.fillRect(q[0], q[1], 1.5, 1.5);
+  }
+  cx.strokeStyle = "#5dd39e"; cx.setLineDash([4, 4]); cx.lineWidth = 1.2; cx.beginPath();
+  gt.forEach((p, i) => { const q = proj(p); i ? cx.lineTo(q[0], q[1]) : cx.moveTo(q[0], q[1]); });
+  cx.stroke(); cx.setLineDash([]);
+  cx.strokeStyle = "#4c8dff"; cx.lineWidth = 2; cx.beginPath();
+  est.forEach((p, i) => { const q = proj(p); i ? cx.lineTo(q[0], q[1]) : cx.moveTo(q[0], q[1]); });
+  cx.stroke();
+  cx.fillStyle = "#ff8c42";
+  for (const a of anchors) { const q = proj(a); cx.fillRect(q[0]-3, q[1]-3, 6, 6); }
+  if (est.length) { const q = proj(est[est.length-1]);
+    cx.fillStyle = "#4c8dff"; cx.beginPath(); cx.arc(q[0], q[1], 5, 0, 7); cx.fill(); }
+}
+let drag = null;
+cv.onmousedown = e => drag = [e.clientX, e.clientY, e.shiftKey];
+addEventListener("mouseup", () => drag = null);
+addEventListener("mousemove", e => {
+  if (!drag) return;
+  const dx = (e.clientX - drag[0]) / 200, dy = (e.clientY - drag[1]) / 200;
+  if (drag[2]) { cxw[0] -= dx * 2 * Math.cos(yaw); cxw[1] -= dx * 2 * Math.sin(yaw); cxw[2] += dy * 2; }
+  else { yaw += dx; pitch = Math.max(-1.4, Math.min(1.4, pitch + dy)); }
+  drag = [e.clientX, e.clientY, drag[2]]; draw();
+});
+cv.onwheel = e => { dist = Math.max(2, Math.min(40, dist * (e.deltaY > 0 ? 1.1 : 0.9))); e.preventDefault(); draw(); };
+const $ = id => document.getElementById(id);
+function panel() {
+  $("k").textContent = `${st.k + 1}/${st.n}${st.done ? " done" : ""}`;
+  $("rot").textContent = `${st.rot_step}°`;
+  $("pe").textContent = `${(st.pos_err * 100).toFixed(1)} cm`;
+  $("na").textContent = st.n_anchor;
+  $("ba").textContent = `${st.bytes_anchor} B`;
+  $("nv").innerHTML = st.verified ? `<span class="ok">${st.n_verify} ✓</span>` : st.n_verify;
+  $("ms").textContent = `${st.ms} ms`;
+  $("fill").style.width = `${100 * (st.k + 1) / st.n}%`;
+}
+function resel() {
+  fetch(`/select?seq=${$("ssel").value}&nph=${$("rsel").value}`, { method: "POST" });
+}
+$("ssel").onchange = resel; $("rsel").onchange = resel;
+const es = new EventSource("/events");
+es.onmessage = ev => {
+  const d = JSON.parse(ev.data);
+  if (d.init) {
+    est = d.est || []; gt = d.gt || []; pts = []; anchors = [];
+    $("ssel").innerHTML = d.seqs.map(s => `<option${s === d.seq ? " selected" : ""}>${s}</option>`).join("");
+    $("rsel").value = String(d.nph); draw(); return;
+  }
+  if (d.reset) { pts = []; est = []; gt = []; anchors = []; $("rsel").value = String(d.nph); draw(); return; }
+  st = d;
+  if (d.pts) { for (const p of d.pts) pts.push(p); if (pts.length > 90000) pts = pts.slice(-90000); }
+  if (d.est) est.push(d.est);
+  if (d.gt) gt.push(d.gt);
+  if (d.anchors) anchors = d.anchors;
+  panel(); draw();
+};
+</script>
+</body></html>

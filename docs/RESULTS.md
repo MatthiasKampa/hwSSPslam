@@ -11704,3 +11704,22 @@ bottleneck_head.npz is kept as the weight-QAT version (marginally better accurac
 0.303/0.669, int8-native). Honest verdict: 0.85 is intrinsic to a binarized code
 with mass near the threshold, not a fixable PTQ defect. Anti-oracle: ADE GT
 scores seg only.
+
+## 2026-07-17 — webvis6d: the 6-DoF FPGA-sim dataset replay (TUM)
+
+New vis surface hw/ecp5/host/webvis6d.{py,html} (port 8791): TUM RGB-D
+replay through the BANKED deploy6d recipe end-to-end — two-space
+stacked-GN ego-motion (vision ladder + azel3d cloud, one 6x6 solve)
+chained per frame with CV seeding + ball-grid rescue (identity seeding
+is outside the linearization basin on coarse TUM steps: fr1_desk
+7-12 deg/frame), a BOUNDED anchor map at novelty poses (the v8 law in
+6-DoF: >0.5 m / >20 deg), and the QUANTIZED stored-anchor 6x6 verify
+(qvec/qstack nph=4 = the 2b FPGA store model) re-registering near
+revisits. 3D orbit canvas: est-registered depth cloud, est trail vs
+mocap ghost (display/scoring only), anchor markers, bytes/anchor.
+Recipe A/B in the UI: 2b FPGA store (868 B/anchor) vs float (26.9 KB).
+Selftest (fr3_long_office s2 @15 Hz, 80 kf): rot step med 0.25 deg
+both recipes; pos err vs mocap med 0.159 m float / 0.389 m 2b (the
+banked quantized-verify family); verifies fire (60/79); 227 ms/kf
+(~4 Hz replay). Default seq = the s2 15 Hz set (chain regime — the
+deploy rate the chain bench validated).
