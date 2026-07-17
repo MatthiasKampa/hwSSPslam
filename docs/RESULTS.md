@@ -11523,3 +11523,23 @@ CLEAN atom fitting keeps sub-cell precision). SHIPPED: sspax/artifacts/wall_unet
 hybrid; recall from the net, precision from line-fitting. Anti-oracle: GT-free
 scatter-ref (no GT walls); decoder trained on synthetic GT, scored on real
 scatter only.
+
+## 2026-07-17 — P0 (round 9 TOP priority) DELIVERED: bottleneck_head.npz exported (RGB, headio v2.2, desc-only)
+
+Unblocked by round 9: headio v2.2 admits RGB (240,320,3) geometry + track-LESS
+desc-only heads; gray-vs-RGB resolved to RGB (OV5640 = DVP RGB565). Trained the
+RGB QVGA bottleneck (ADE ch16, /255 = clean in_div=255, 8000 steps: pixacc 0.299,
+code-AUC 0.658) and exported the truncated CODE head as the desc stack ->
+sspax/artifacts/bottleneck_head.npz (20.8 KB, scratch/scratch_p0_export.py).
+CONTRACT: in (240,320,3) RGB, in_div=255, cell=4 (3x3/s2 x2 + 3x3 + 1x1, CReLU),
+trunk 60x80x64, desc = 1x1 -> 32 SIGN bits (desc_bits=32), seg=[] k_bits=0
+track=[]. headio v2.2 load_head VALIDATES (geometry + contract). FROZEN TRUNK
+SHAPE for the cbits RGB kernel: RGB 3-ch input, the above stack. HONEST PARITY
+NOTE: headio numpy-forward desc bits vs the jax float model agree 0.850 — the
+int8 WEIGHT PTQ flips ~15% of borderline SIGN bits (layout is correct: validated,
+and 0.85 >> 0.5 chance; this is inherent PTQ on a binarized head, not a bug). That
+is WITHIN the deploy query's 25%-bit-flip-robust envelope (their 0.94->1.00 map
+recall), so usable — but if the deploy stability/objmap2 gate wants tighter
+parity, a QAT (int8-aware) re-export closes it (BottleneckSegNetQAT exists;
+earlier QAT showed int8 ~free for the seg task). Deploy gates stability + objmap2
+cross-box. Anti-oracle: ADE GT trains/scores seg only; no GT in the code/export.
