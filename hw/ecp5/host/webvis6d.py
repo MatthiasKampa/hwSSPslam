@@ -52,8 +52,23 @@ SEQS = {p.stem.split("dataset_")[-1]: p.stem
         for p in sorted(TUM.glob("rgbd_dataset_*.npz"))}
 DEFAULT = "freiburg3_long_office_household_s2"   # 15 Hz: chain regime
 NOV_T, NOV_R = 0.5, 20.0            # anchor novelty (m, deg)
-VER_T, VER_R = 0.35, 10.0           # verify range (est-relative)
-CLAMP_R, CLAMP_T = 8.0, 0.15        # verify correction clamp (deg, m)
+VER_T, VER_R = 0.10, 6.0            # verify range — the BANKED linear
+                                    # basin (small_pairs <=6 cm/6 deg);
+                                    # at 0.35 m the solve is biased and
+                                    # float verify made drift WORSE
+                                    # (0.60 vs 0.27 med, 200 kf probe)
+VER_EVERY = 4                       # verify throttle (frames) — per-
+                                    # frame re-registration GLUES the
+                                    # pose to the anchor (the 6-DoF
+                                    # contraction trap: novelty never
+                                    # fires, trajectory collapses)
+CLAMP_R, CLAMP_T = 6.0, 0.06        # verify correction clamp (deg, m)
+AGREE_R, AGREE_T = 2.0, 0.05        # accept iff the TWO independENT
+                                    # channels' solves AGREE (deg, m) —
+                                    # a residual-gain gate is unusable
+                                    # on 2b stores (quantization noise
+                                    # dominates |v1-v0q|: r1/r0 ~0.99
+                                    # even for a perfect theta)
 GN_W = [1 / 1.82, 1 / 1.34]         # banked fixed-precision weights
 
 
@@ -128,6 +143,10 @@ class Track6D:
         for (W, P0, w0, v0q, Dq), (Wc, P1, w1) in zip(st, chans):
             v1 = V6._enc_raw(W, P1, w1)
             ths.append(D6.solve66(v0q, Dq, v1))
+        d_th = ths[0] - ths[1]
+        if np.degrees(np.linalg.norm(d_th[:3])) > AGREE_R or \
+                np.linalg.norm(d_th[3:6]) > AGREE_T:
+            return False                        # channels disagree
         th = np.mean(ths, 0)
         rot = np.degrees(np.linalg.norm(th[:3]))
         if rot > CLAMP_R or np.linalg.norm(th[3:6]) > CLAMP_T:

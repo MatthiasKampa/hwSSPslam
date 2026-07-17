@@ -11723,3 +11723,29 @@ both recipes; pos err vs mocap med 0.159 m float / 0.389 m 2b (the
 banked quantized-verify family); verifies fire (60/79); 227 ms/kf
 (~4 Hz replay). Default seq = the s2 15 Hz set (chain regime — the
 deploy rate the chain bench validated).
+
+## 2026-07-17 — webvis6d CORRECTION (same session): the 6-DoF
+contraction trap + the quantized-verify acceptance gate
+
+Three fixes over the first cut, each caught by probing past the
+80-kf selftest window:
+(1) CONTRACTION TRAP (the 2D crispness-gaming failure mode, realized
+in 6-DoF): per-frame verify BEFORE the novelty check glued the pose
+to anchor 0 — novelty never fired, the trajectory collapsed while
+mocap walked away (pos err 2.07 m @ kf 255). Fix: novelty on the
+CHAINED pose first, verify throttled (every 4).
+(2) BASIN HONESTY: verify at 0.35 m range sat far outside the banked
+linear model (small_pairs <= 6 cm/6 deg) — float verify ACCEPTED
+biased corrections and made drift WORSE than no verify (0.60 vs 0.27
+med, 200-kf probe). Range tightened to the banked basin (0.10 m/6
+deg, clamps 6 deg/6 cm).
+(3) QUANTIZED ACCEPTANCE: a residual-gain gate is unusable on 2b
+stores — quantization noise dominates |v1 - v0q| (r1/r0 ~0.99 for a
+PERFECT theta). Replaced with CROSS-CHANNEL AGREEMENT (the two
+independent spaces' solves must concur: 2 deg/5 cm) — the project's
+verification principle applied to the store.
+After: 80 kf pos med 0.124 float / 0.192 2b (was 0.159/0.389), rot
+step 0.25 deg, verifies 16/37; 300 kf drift 0.76/1.11 m med — honest
+odometry + local-basin verify (no long-range closure in the 6-DoF
+stack yet; the GPU agent's P2 chip recipe (3676df9) is the next
+rung). Vis serves at :8791, replay ~4.5 Hz.
