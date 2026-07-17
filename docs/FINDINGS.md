@@ -1343,3 +1343,38 @@ CRISPNESS (points per occupied cell of the scatter at the arm's own
 poses) — it is the display-truth the operator sees and it correctly
 ordered odom < stock < novelty arms. Banked as the standard score for
 tracker changes on reference-free captures.
+
+## Addendum (2026-07-17, deploy-side; from the full-corpus mining pass) — two laws that were already in the ledger six times each
+
+**The reference-inflation law.** A self-calibrating admission gate (EMA,
+session-relative threshold, IRLS weight, replay basin) must hold its
+reference FIXED against any recall-boosting change, or the reference
+inflates with the candidate pool and the gate starves. Instances now
+recognized as ONE failure class: coh_ref over-veto starvation
+(2026-07-07 Intel), veto-retry cascade (2026-07-11), aniso edge-flood
+(Intel), ring-key shortlist flood (§5.3), K_TRY=3 hold explosion
+(v7.1), reservoir re-roll (2026-07-13), and the v8 window/retry
+refutation (2026-07-16 — wider rho window ALONE collapsed tracking
+2467->325 through the EMA, not the matcher). Design rule: when adding
+candidates, pin the gate's reference (freeze the EMA, use an absolute
+side-channel, or normalize per-candidate-count) BEFORE benching the
+recall change, or the bench measures the gate, not the feature.
+
+**The common-mode-estimator wall (unifies §5 and §6).** No GT-free
+selector that scores against the system's own map can distinguish
+"closer to truth" from "closer to the map's own bias": frontend
+do-no-harm (§6), reservoir refold acceptance (2026-07-12), replay
+draw selection (2026-07-13), and the tracker commit gate
+(2026-07-11) are the same limit — the loop-closure verification wall
+(§5) projected onto the self-improvement axis. Corollary: every
+escape needs a cue that did NOT pass through the estimator (wheel
+odometry residual, IMU, a second modality) — which the Hunter
+platform now supplies; testing this constructively is filed (E4).
+
+**Discipline note (synthetic calibration direction).** Every synthetic
+POSITIVE about discrimination/geometry/ladders that reached real data
+was refuted or rescaled (phi angles, phi ladders, P1 selfrot,
+learn_scale, sweep oct6 venue-rescale); every synthetic NEGATIVE about
+a hard wall held. Proposed PROTOCOL discipline (user to bless):
+synthetic evidence is admissible for capacity bounds and negative
+walls, never alone for a positive discrimination/geometry claim.

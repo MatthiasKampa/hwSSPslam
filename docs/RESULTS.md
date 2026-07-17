@@ -11543,3 +11543,94 @@ recall), so usable — but if the deploy stability/objmap2 gate wants tighter
 parity, a QAT (int8-aware) re-export closes it (BottleneckSegNetQAT exists;
 earlier QAT showed int8 ~free for the seg task). Deploy gates stability + objmap2
 cross-box. Anti-oracle: ADE GT trains/scores seg only; no GT in the code/export.
+
+## 2026-07-17 — LEDGER MINING (Opus agent, full-corpus sweep; triaged
+by the deploy agent): two FINDINGS-grade laws, one licensed
+re-litigation, two cheap experiments launched, terminology fix
+
+Rule-4 note: the miner was read-only; every load-bearing citation
+spot-checked before banking (aniso section 2026-07-08, v7b GATE_FOLD
+rejection 2026-07-12, phi-ladder refutations, set_polar API).
+
+TRIAGED VERDICTS (miner section -> disposition):
+- A1 TERMINOLOGY: "gated folding REJECTED" (v7b, gates on TRACKER
+  CONFIDENCE -> starvation) vs v8 "novelty-gated folding" (gates
+  segment-OPENING on SPATIAL NOVELTY) are OPPOSITE mechanisms under
+  one name. Disambiguation: confidence-gated folding stays REJECTED;
+  novelty-gated opening is SHIPPED. Do not cite one against the other.
+- A2: the 2b store's win is validated in revisit-rich regimes; today's
+  novelty decomposition PARTIALLY isolates the long-tour failure to
+  FOLD POLICY (store unchanged, crispness 9.29->10.73) — the store-vs-
+  policy attribution is no longer purely asserted.
+- A3 -> E2 LAUNCHED: aniso constraints re-run on deploy-band CARMEN
+  logs (fr101/fhw/fr079) — the "fragile feedback" verdict came from an
+  Intel edge-flood that fr101 (the +22% log) never exhibited.
+- A4: the learned decoder is the counter-reader to the banked
+  "representation-limited raster" ceiling (2b max capacity,
+  2026-07-11) — that verdict was about the READERS TESTED. Reconciled
+  in the hybrid entry below.
+- B1 -> E1 FILED (task): the incommensurate FID ladder as a
+  place/verification descriptor — a THIRD descriptor family never
+  tested at the §5 wall. Honest framing: it removes LATTICE aliasing
+  only; environmental twins (identical content) are encoding-
+  independent, so the sharp question is whether any of §5.7's aliased
+  tail was lattice-born. Harness: set_polar(FID_LAMS) + realbench
+  honest gate + multisession_verify coherence distributions.
+- B3/B4 -> msg round 10 (GPU agent surfaces): silhouette hits as the
+  lidar-saliency training target; viewpoint dual-channel dedup for
+  the semantic map's growth bound.
+- C4/D1/D2/D4 hygiene notes banked as stated (fr101 one-config
+  honesty band ~1.1-1.7 vs shipped 1.88 for the paper; adj-rep is
+  saturated and cannot rank encoders; coarse16-wins-buildings has no
+  honest-revisit confirmation -> E5 filed with the hunter captures as
+  the pair source).
+- D3 crispness guard ADOPTED: report est-path-length / odom-path-
+  length alongside crispness next time it arbitrates (contraction
+  detector; today's decision already double-covered by the audit).
+
+## 2026-07-17 — HYBRID readout (wall_unet proposals -> CLEAN atom
+fitting): adopted as the RECALL mode; near-free on the deploy venue
+
+Consumer built per the round-9 contract (mapdec: unet_load/
+unet_forward/seg_field/seg_lines_hybrid; walls(params=dict(
+hybrid_model=...))). Forward semantics recovered empirically (their
+field-builder lives in unpushed scratch): the net trained on
+MANTISSA-weighted fields (m from the freeze scan, alive on; artifact
+sd 1687 ~= 0.5 x school m-field sd; my earlier mean-normalized fields
+landed as near-constant inputs -> all-negative logits). Recall
+transfers at every field scale tried (0.35-1.0x: rec@30 0.755-0.797)
+— ranking is robust, their exact 0.125 precision point is an eval-
+protocol detail (field-builder + eval snippet requested, round 10).
+Ladder: v1 no amp floor (school p50 0.218), v2 running-max floor
+(0.147), v3 CLEAN-calibrated bar — fit the strongest FIELD peak
+first, hold every proposal to tau x that (adopted):
+                    CLEAN                HYBRID v3
+  school_run2   0.53/0.63 @ p50 .040   0.60/0.70 @ .102
+  spot          0.89/0.95 @ .023       0.94/0.99 @ .094
+  hunter        0.55/0.69 @ .022       0.61/0.75 @ .027  <- ~free
+(recall@15/@30 @ prec p50). VERDICT: hybrid wins recall on ALL THREE
+venues; precision cost is the net's 0.1 m cell floor (school/spot),
+NEAR-ZERO on the hunter capture. Adopted as mapdec's recall mode;
+CLEAN remains the live-lane default until the sub-cell output lands
+(GPU agent next step). k20 helps hunter only (0.77).
+
+## 2026-07-17 — E2 (mining A3): aniso constraints ON THE DEPLOY BAND
+— fr101 +22% reproduced, fhw 0.981 -> 0.238 (PRE-AUDIT), fr079 mixed;
+"fragile feedback" localizes to the Intel regime
+
+scratch_e2_aniso.py, experiments/aniso.run_log cond_floor=0.1, both
+arms same scorer (shipped arm reproduces the acceptance numbers:
+fr101 1.881, fhw 0.981, fr079 5.523):
+  fr101  1.881 -> 1.469  (med 1.551 -> 1.155; edges 53 -> 54 STABLE)
+  fhw    0.981 -> 0.238  (med 0.841 -> 0.217; loops 559 -> 710, all
+                          801 aniso trips engaged, no divergence)
+  fr079  5.523 -> 5.285  (ATE -4% but med 3.53 -> 4.08 and max 14.6
+                          -> 16.9 WORSE; loops 32 -> 51 — the sparse-
+                          revisit regime pushing toward the flood)
+VERDICT: the 2026-07-08 "fragile artifact of the feedback" verdict
+over-generalized an Intel-specific instability (the miner's A3 catch,
+confirmed by measurement). Aniso is a genuine deploy-band lever —
+ADOPT-CANDIDATE, gated on: (1) rule-4 audit of the fhw 4x (loop-count
+semantics changed 559->710 — re-derive before believing 0.238), (2)
+full-suite rule-5 gate (stata/spot need non-CARMEN adapters; belg;
+seed band), (3) cond_floor stability arms. NOT shipped tonight.

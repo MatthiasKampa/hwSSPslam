@@ -493,8 +493,13 @@ def walls(segs, trail=None, params=None, bank=None, image=False,
          if band == "joint" else DEC.build_W(list(FID_LAMS)))
     bank = bank or AtomBank(p, W)
     lines = []
+    model = p.get("hybrid_model")
     for si, seg in enumerate(segs):
-        for c, th, ln, amp in seg_lines_world(seg, bank, p["use_planes"]):
+        if model is not None:
+            ls = seg_lines_hybrid(seg, bank, model)
+        else:
+            ls = seg_lines_world(seg, bank, p["use_planes"])
+        for c, th, ln, amp in ls:
             lines.append((c, th, ln, amp, si))
     anchors = [tuple(s[0]) for s in segs]
     tr = np.asarray(trail, float)[:, :2] if trail is not None \
@@ -645,3 +650,154 @@ def selftest():
 
 if __name__ == "__main__":
     selftest()
+
+
+# ------------------------------------------------- learned-recall hybrid
+# wall_unet.npz (GPU-agent P1, 2026-07-17): (96,96,1) correlation FIELD
+# of a fidelity segment -> (96,96) occupancy logits. Numpy forward.
+# HYBRID (round-9 contract): logits are the pursuit's PROPOSAL DENSITY;
+# CLEAN atom fitting keeps sub-cell line precision.
+UNET = ROOT / "sspax" / "artifacts" / "wall_unet.npz"
+
+
+def unet_load(path=UNET):
+    z = np.load(path, allow_pickle=True)
+    Ls = [(z[f"{n}_kernel"].astype(np.float32),
+           z[f"{n}_bias"].astype(np.float32)) for n in z["layers"]]
+    return dict(layers=Ls, mu=float(z["mu"]), sd=float(z["sd"]),
+                cell=float(z["cell"]))
+
+
+def _c2d(x, k, b, s=1):
+    from numpy.lib.stride_tricks import sliding_window_view
+    kh = k.shape[0]
+    p = kh // 2
+    xp = np.pad(x, ((p, p), (p, p), (0, 0))) if p else x
+    win = sliding_window_view(xp, (kh, kh), axis=(0, 1))[::s, ::s]
+    return np.einsum("hwcab,abco->hwo", win, k) + b
+
+
+def unet_forward(model, field, pool="max", up="nearest"):
+    """6-conv U-Net-small: enc 16/32/64 with 2x pools, dec with 2x
+    upsample + skip concat, 1x1 head. pool/up are the two semantics
+    the export note left open — pinned by reproducing the banked
+    school numbers (see RESULTS)."""
+    Ls = model["layers"]
+    x = ((np.asarray(field, np.float32) - model["mu"])
+         / model["sd"])[:, :, None]
+    a0 = np.maximum(_c2d(x, *Ls[0]), 0)              # 96x96x16
+    d0 = (a0.reshape(48, 2, 48, 2, -1).max((1, 3)) if pool == "max"
+          else a0.reshape(48, 2, 48, 2, -1).mean((1, 3)))
+    a1 = np.maximum(_c2d(d0, *Ls[1]), 0)             # 48x48x32
+    d1 = (a1.reshape(24, 2, 24, 2, -1).max((1, 3)) if pool == "max"
+          else a1.reshape(24, 2, 24, 2, -1).mean((1, 3)))
+    a2 = np.maximum(_c2d(d1, *Ls[2]), 0)             # 24x24x64
+    u1 = np.repeat(np.repeat(a2, 2, 0), 2, 1)        # 48x48x64
+    a3 = np.maximum(_c2d(np.concatenate([u1, a1], -1), *Ls[3]), 0)
+    u0 = np.repeat(np.repeat(a3, 2, 0), 2, 1)        # 96x96x32
+    a4 = np.maximum(_c2d(np.concatenate([u0, a0], -1), *Ls[4]), 0)
+    return _c2d(a4, *Ls[5])[:, :, 0]                 # logits 96x96
+
+
+FIELD_SCALE = 0.5      # wall_unet input calibration: the net trained
+                       # on mantissa-weighted fields (artifact sd 1687
+                       # ~= school m-field sd 3400 x 0.5); recall is
+                       # scale-robust (0.75-0.80 across 0.35-1.0), the
+                       # hybrid consumes RANKING not the threshold
+
+
+def _mantissa(wr):
+    """Recover the freeze-scan mantissa m (<256) from wr = m * 2^e."""
+    out = []
+    for w in np.asarray(wr):
+        m = int(round(float(w)))
+        while m >= 256:
+            m >>= 1
+        out.append(m)
+    return np.array(out, float)
+
+
+def seg_field(seg, W=None, n=96, step=0.10):
+    """The wall_unet input: correlation field of one segment in its
+    own frame (n x n at `step`), MANTISSA-weighted phasors x alive
+    (the training distribution — fingerprinted vs the banked school
+    numbers, RESULTS 2026-07-17 hybrid entry)."""
+    W = DEC.build_W(list(FID_LAMS)) if W is None else W
+    g = (np.arange(n) - (n - 1) / 2) * step
+    gx, gy = np.meshgrid(g, g)
+    cells = np.stack([gx.ravel(), gy.ravel()], 1)
+    _, codes, alive, wr = seg
+    v = np.exp(1j * (np.pi / 2) * codes.astype(np.float64))
+    if alive is not None:
+        v = v * alive
+    if wr is not None:
+        v = v * np.repeat(_mantissa(wr), N_ANG)
+    v = v * FIELD_SCALE
+    return (np.exp(-1j * (cells @ W.T)) @ v).real.reshape(n, n), cells
+
+
+def seg_lines_hybrid(seg, bank, model, thr=0.0, use_planes=True,
+                     pool="max", up="nearest"):  # noqa: D401
+    """HYBRID pursuit: U-Net logits (recall) propose peak cells; each
+    proposal seeds ONE CLEAN atom fit (+-0.2 m window) against the
+    residual (precision); subtraction stays CLEAN's. World-frame lines
+    out, same tuple form as seg_lines_world."""
+    ax, ay, ah = seg[0]
+    field, cells = seg_field(seg, bank.W)
+    logits = unet_forward(model, field, pool=pool, up=up)
+    v = dequant(seg, use_planes).astype(complex)
+    R = np.array([[np.cos(ah), -np.sin(ah)], [np.sin(ah), np.cos(ah)]])
+    n = logits.shape[0]
+    order = np.argsort(-logits.ravel())
+    used = np.zeros(n * n, bool)
+    out = []
+    res = v.copy()
+    p = bank.p
+    # CLEAN's amplitude discipline, calibrated CLEAN's way: fit the
+    # segment's strongest FIELD peak first and hold every proposal to
+    # tau x that bar (v2's running-max let early junk in: school p50
+    # 0.147; v1 no floor: 0.218 vs CLEAN 0.040).
+    f0 = (bank.E @ res).real
+    pk = int(np.argmax(f0))
+    amp_ref = 0.0
+    for off in bank.offs:
+        c = bank.cells[pk] + off
+        ph = np.exp(-1j * (bank.W @ c))
+        amps = (bank.ENV @ (ph * res)).real / (bank.na2 + 1e-12)
+        j = int(np.argmax(amps))
+        if amps[j] > amp_ref:
+            amp_ref = float(amps[j])
+    for idx in order[:400]:
+        if logits.ravel()[idx] <= thr or len(out) >= p["k_max"]:
+            break
+        if used[idx]:
+            continue
+        c0 = cells[idx]
+        best = None
+        for off in bank.offs:
+            c = c0 + off
+            ph = np.exp(-1j * (bank.W @ c))
+            amps = (bank.ENV @ (ph * res)).real / (bank.na2 + 1e-12)
+            en = amps * amps * bank.na2
+            en[amps <= 0] = -1.0
+            j = int(np.argmax(en))
+            if en[j] > 0 and (best is None or en[j] > best[0]):
+                best = (en[j], c, j, amps[j])
+        if best is None:
+            continue
+        _, c, j, amp = best
+        if amp < p["tau"] * amp_ref:
+            continue
+        th, ln = bank.combo[j]
+        a = np.exp(1j * (bank.W @ c)) * bank.ENV[j]
+        res -= p["gamma"] * amp * a
+        # suppress proposals along the fitted line (they are explained)
+        h = 0.5 * ln * np.array([np.cos(th), np.sin(th)])
+        d = cells - c
+        along = d @ [np.cos(th), np.sin(th)]
+        perp = d @ [-np.sin(th), np.cos(th)]
+        used |= (np.abs(along) < 0.5 * ln + 0.15) & (np.abs(perp) < 0.25)
+        cw = R @ c + [ax, ay]
+        out.append((cw, float((th + ah) % np.pi), float(ln),
+                    float(p["gamma"] * amp)))
+    return out
