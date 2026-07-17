@@ -11648,3 +11648,37 @@ artifact — task filed). Real class NAMES additionally need the class
 PROTOTYPE codes (the desc-only export carries no class table) —
 round-11 ask. The demo runs on the validated old head; the swap is
 benched, not blind.
+## 2026-07-17 — P2 (round 9) 6-DoF CHIP RECIPE delivered: B6 + incommensurate readout ladder + 343-cand grid @ 2b QPSK
+
+Re-swept the B6 winner (ring_arc_const_s0.5_r6, 60 dirs, 5 seeds x 16 scenes)
+under chip constraints (2b QPSK store, <=500-candidate rotation grids,
+incommensurate vs octave readout ladder). scratch/scratch_p2.py.
+  ladder   quant     so3_med  so3_p90  disp_med  place-rec
+  oct6     float       3.53     7.43    0.0742     1.000
+  oct6     2b-QPSK     5.56    10.40    0.0742     1.000
+  incomm   float       3.66     9.55    0.0742     1.000
+  incomm   2b-QPSK     4.63     7.39    0.0747     1.000
+Rotation-grid schedule (B6 + incomm + 2b QPSK):
+  grid            cands  so3_med  so3_p90
+  +-15/3 (full)   1331     4.63     7.39
+  +-12/4           343     4.24     9.21
+  +-10/5           125     4.23    10.43
+FINDINGS: (1) INCOMMENSURATE ladder is more QUANT-ROBUST for rotation decode —
+at 2b QPSK it gives so3 4.63 deg vs oct6's 5.56 deg (and tighter p90 7.39 vs
+10.40): the octave comb GHOSTS in 3D under coarse quant, the incommensurate
+ladder does not (confirms the msg hypothesis; the 2D comb physics generalizes).
+(2) place-rec and translation decode are QUANT-INVARIANT (1.000, ~0.075 m
+everywhere) — place-rec is saturated (16 distinct rooms, 0.15 m jitter; not a
+differentiator, but shows 2b QPSK does not hurt place). (3) A 343-cand grid
+(+-12/4 deg) MATCHES the full 1331-cand grid (so3 4.24 vs 4.63 deg) — well inside
+the <=500 chip budget; no coarse-to-fine needed (though 7^3 coarse -> 3^3 fine
+~370 cands is available if tighter). RECOMMENDED 6-DoF CHIP RECIPE:
+  lattice = B6 ring_arc_const_s0.5_r6 (60 dirs);
+  ladder  = INCOMMENSURATE 6-ring [0.31,0.61,1.13,2.17,4.03,7.87] for readout
+            (oct6 optional for a place-only band; place-rec is 1.0 on both);
+  store   = 2b QPSK (4 phase, 1 mag);
+  grid    = single-pass +-12/4 deg (343 cands, <=500);
+  EXPECTED @ 2b: place-rec 1.00, SO(3) decode ~4.2-4.6 deg med, translation
+            ~0.075 m. Multi-seed (5x16); integer-encode golden semantics are the
+  next fidelity step (this sweep is the float/quant-model recipe). Anti-oracle:
+  synthetic rooms, decode-error scored only.
