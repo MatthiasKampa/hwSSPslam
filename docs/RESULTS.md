@@ -11682,3 +11682,25 @@ the <=500 chip budget; no coarse-to-fine needed (though 7^3 coarse -> 3^3 fine
             ~0.075 m. Multi-seed (5x16); integer-encode golden semantics are the
   next fidelity step (this sweep is the float/quant-model recipe). Anti-oracle:
   synthetic rooms, decode-error scored only.
+
+## 2026-07-17 — CORRECTION to the P0 parity note: QAT does NOT tighten it — the 0.85 is borderline-sign instability, not int8 PTQ
+
+Proactively tested the "QAT re-export closes the parity" claim from the P0 entry
+above. WEIGHT-int8 QAT (STE, matching headio's exact int8-weights+float-acts
+arithmetic; scratch/scratch_p0_qat.py, pixacc 0.303 code-AUC 0.669) gives
+headio-forward vs model parity 0.850 — IDENTICAL to the float-PTQ 0.850. So QAT
+does NOT improve it; my earlier claim was WRONG. ROOT CAUSE (corrected): the desc
+bits are SIGN(Conv_4 output), and ~15% of cells have |output| ~= 0 (borderline);
+those flip under ANY tiny numerical difference — jax float32 vs numpy float64
+accumulation order, NOT the int8 weight quantization. QAT (which only stabilizes
+against WEIGHT quant) cannot fix a numerical-precision sign-boundary issue. KEY
+MITIGATION (why it is fine): the flipping bits are exactly the LOW-CONFIDENCE
+(near-zero) ones — the least informative, the ones the significance/confidence
+mechanism down-weights — and 15% is within the deploy query's 25%-bit-flip-robust
+envelope (their 0.94->1.00 map recall). To actually raise parity one would add a
+MARGIN/saturation loss pushing |code| away from 0 (fewer borderline bits), but the
+bits it would stabilize are the least useful ones, so the ROI is low. The shipped
+bottleneck_head.npz is kept as the weight-QAT version (marginally better accuracy
+0.303/0.669, int8-native). Honest verdict: 0.85 is intrinsic to a binarized code
+with mass near the threshold, not a fixable PTQ defect. Anti-oracle: ADE GT
+scores seg only.
