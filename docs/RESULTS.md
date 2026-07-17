@@ -11501,3 +11501,25 @@ The shipped config is regression-free on spot by direct measurement.
 Also fixed from the audit's new-risk list: webvis selftest wall-lane
 band label (said "fidelity", lane is joint); watch ms_py/overruns
 during the demo drive (65 ms at 10 Hz today, 0 overruns).
+## 2026-07-17 — P1 REAL-VENUE validation (round 9): recall gain HOLDS on real school scans + wall_unet.npz shipped for the hybrid
+
+Round-9: the real-venue block was a MISCONCEPTION (est_cache 836 = the STRIDE-4
+keyframe poses, 1:1 aligned to ranges[::4]). Validated the P1 learned decoder on
+REAL school_run2 (80 fidelity segs / 400 keyframes, GT-FREE scatter-ref metric =
+mapdec.score_walls style, SAME metric both decoders):
+  decoder   recall@15  recall@30  prec-med(m)
+  CLEAN       0.357      0.462      0.027
+  LEARNED     0.638      0.736      0.125
+The synthetic-trained decoder TRANSFERS to real scans: recall@30 0.736 vs 0.462
+(+0.27) — CONSISTENT across all three independent tests now (synthetic 0.82/0.37,
+OOD-shapes 0.77/0.50, REAL 0.74/0.46). So the recall gain is real, generalizes,
+AND transfers to the deploy venue — the home-field caveat is FULLY resolved.
+Precision regression confirmed but MILDER on real data (0.125 vs 0.027 m, ~5x) —
+resolved by the deploy-side HYBRID (learned logits = pursuit proposal density ->
+CLEAN atom fitting keeps sub-cell precision). SHIPPED: sspax/artifacts/wall_unet.npz
+(215 KB) per the round-9 hybrid contract — (96,96,1) golden correlation FIELD ->
+(96,96) occupancy logits, numpy conv stack (6-layer U-Net), input normalized
+(x-mu)/sd with mu=-87.52 sd=1687.12, seed 0, deterministic. Deploy integrates the
+hybrid; recall from the net, precision from line-fitting. Anti-oracle: GT-free
+scatter-ref (no GT walls); decoder trained on synthetic GT, scored on real
+scatter only.
