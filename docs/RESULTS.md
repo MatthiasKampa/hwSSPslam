@@ -11634,3 +11634,17 @@ ADOPT-CANDIDATE, gated on: (1) rule-4 audit of the fhw 4x (loop-count
 semantics changed 559->710 — re-derive before believing 0.238), (2)
 full-suite rule-5 gate (stata/spot need non-CARMEN adapters; belg;
 seed band), (3) cond_floor stability arms. NOT shipped tonight.
+
+## 2026-07-17 — P0 bottleneck_head.npz GATE (deploy side): loads +
+forwards through headio v2.2 cleanly; integration filed post-demo
+
+Load-gate PASS: RGB (240,320,3) in_div 255, crelu trunk stride-4 ->
+(60,80,32) desc activations, sign bits deterministic, track/seg
+absent as designed, cell_bits pools to (30,40,32). NOTE the geometry
+shift vs the old vision_head: FULL-res trunk (old: half-res -> 15x20
+objmap grid), so CamMap integration needs pool-4 (or a 30x40 grid)
+and cbits needs the RGB kernel variant (shapes now pinned in the
+artifact — task filed). Real class NAMES additionally need the class
+PROTOTYPE codes (the desc-only export carries no class table) —
+round-11 ask. The demo runs on the validated old head; the swap is
+benched, not blind.
